@@ -43,18 +43,31 @@ def _nonfinite_phrase(rows, points):
         rows, "" if rows == 1 else "s", f"{points:,}", "" if points == 1 else "s")
 
 
-def _panel_heading(ax, head, *subs):
-    """A panel title with lines of counts or notes under it in the annotation size; a
-    line is a string or (string, colour), and an empty one is skipped."""
-    pad = 3
-    for sub in reversed([x for x in subs if x and (x[0] if isinstance(x, tuple)
-                                                     else x)]):
-        text, color = sub if isinstance(sub, tuple) else (sub, "0.25")
-        ax.annotate(text, (0.5, 1.0), xycoords="axes fraction", xytext=(0, pad),
-                    textcoords="offset points", ha="center", va="bottom",
-                    fontsize=style.FS_ANNOT, color=color)
-        pad += 1.3 * style.FS_ANNOT
-    ax.set_title(head, pad=pad + (2 if pad > 3 else 0))
+def _offscale_fact(clip, nonfin=None):
+    """The per-dataset counts the panel titles do not carry, as sentences for
+    HARDWARE.md: `clip` is {law: (count, largest ULP or None)} of maxima at or above
+    CATASTROPHIC, `nonfin` {law: (rows, points)} of rows with non-finite results."""
+    out = []
+    if clip:
+        out.append("At or above $10^6$ ULP, in the hatched band: " + "; ".join(
+            "%s %d%s" % (LAW_LABEL.get(l, l), n,
+                         (", the largest $10^{%d}$ ULP" % round(math.log10(w)))
+                         if w else "")
+            for l, (n, w) in clip.items()) + ".")
+    if nonfin:
+        out.append("Rows with non-finite results: " + "; ".join(
+            "%s %s" % (LAW_LABEL.get(l, l),
+                       _nonfinite_phrase(r, n).split(": ", 1)[1])
+            for l, (r, n) in nonfin.items()) + ".")
+    return " ".join(out)
+
+
+def _label_every_panel(axes):
+    """Tick labels on every panel: shared axes keep one scale, but no panel relies on a
+    neighbour for its numbers or names."""
+    for ax in axes:
+        # minor ticks too: a short log axis labels them (LogFormatter minor_thresholds)
+        ax.tick_params(which="both", labelbottom=True, labelleft=True)
 
 
 def _label_lowest(cells, used, ncol, xlabel):
@@ -403,6 +416,13 @@ def _columns(fams):
             if fams else "")
 
 
+# Caption sentences shared by the cost-accuracy planes (host and device).
+_CAP_NONFINITE = ("Implementations with non-finite results on some points are framed "
+                  "by a square; those points are excluded from the ULP statistics.")
+_CAP_OFFSCALE = ("Maxima at or above the plotting limit of $10^6$ ULP are drawn in "
+                 "the hatched band at the top of each panel.")
+
+
 def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
                             lib_backend="avx512", scope="call", arch=""):
     """Median and maximum ULP against cost per element, one panel per accuracy law."""
@@ -423,10 +443,11 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
                      f"no rows for family {family} in any known law")
 
     # two columns: a row of four panels is too narrow at print width
-    fig, axes = plt.subplots(4, 2, figsize=(style.TEXT_W, 7.9), sharex=True,
+    fig, axes = plt.subplots(4, 2, figsize=(style.TEXT_W, 7.8), sharex=True,
                              sharey=True)
     axes = axes.ravel()
     handles = {}
+    clip, nonfin = {}, {}            # per law, for HARDWARE.md
     for ax, law in zip(axes, laws + [None] * (8 - len(laws))):
         if law is None:
             # removed, not hidden: a hidden shared axis pushes (0, 1) onto the log axes
@@ -456,15 +477,13 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
                 ax.plot([x, x], [min(med, top), min(mx, top)], color=c,
                         lw=1.0, alpha=0.55, solid_capstyle="butt", zorder=z)
             if _ok(mx):
+                # a maximum at or above CATASTROPHIC is the same tick, in the band
+                ax.plot([x], [top if mx >= CATASTROPHIC else mx], marker="_",
+                        ms=6.0, color=c, mew=1.1, ls="none", zorder=z)
                 if mx >= CATASTROPHIC:
-                    ax.plot([x], [top], marker="^", ms=5.0, mfc="none",
-                            mec=c, mew=1.2, ls="none", zorder=z + 1)
                     nfail += 1
                     if _worst_off is None or mx > _worst_off:
                         _worst_off = mx
-                else:
-                    ax.plot([x], [mx], marker="_", ms=6.0, color=c,
-                            mew=1.1, ls="none", zorder=z)
             # ring rows scored over fewer points; same predicate as the title count
             incomplete = _i(r, "nonfinite") > 0
             if incomplete:
@@ -479,27 +498,23 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
             handles.setdefault(name, h)
             if incomplete:
                 nfin.append((x, _i(r, "nonfinite"), c))
-        # non-finite counts go into the panel title, clear of the data
-        _sub = []
+        # the counts go to HARDWARE.md; the title is the dataset only
         if nfin:
-            tot = sum(k for _, k, _ in nfin)
-            _sub.append(_nonfinite_phrase(len(nfin), tot).replace("points", "pts"))
-        # clipped rows share one height; the title gives their count and maximum
+            nonfin[law] = (len(nfin), sum(k for _, k, _ in nfin))
         if _worst_off is not None:
-            _sub.append("%d clipped, max $10^{%d}$"
-                        % (nfail, round(math.log10(_worst_off))))
+            clip[law] = (nfail, _worst_off)
         ax.set_xscale("log")
         ax.set_yscale("log")
         style.refline(ax, style.ULP_ONE, "1 ULP")
-        _panel_heading(ax, LAW_LABEL.get(law, law), " \u00b7 ".join(_sub))
+        ax.set_title(LAW_LABEL.get(law, law), pad=3)
         ax.grid(True, which="major", alpha=0.30)
+    _label_every_panel(axes[:len(laws)])
     _label_lowest(axes, len(laws), 2, "Cost  [ns / element]")
     fig.supylabel("ULP error  (median $\\rightarrow$ maximum)",
                   fontsize=style.FS_LABEL, x=0.015)
 
     order = [style.LIB] + sorted(k for k in handles if k != style.LIB)
-    _gh, _gl = style.glyph_key(plt, [("^", True,  "clipped at $10^6$ ULP"),
-                                     ("_", False, "maximum"),
+    _gh, _gl = style.glyph_key(plt, [("_", False, "maximum"),
                                      ("s", True,  "non-finite on some points")])
     _top = _title(fig,
                   f"Cost against accuracy, {FAMILY_LABEL.get(family, family)}"
@@ -516,20 +531,15 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
              if r.get("family") == family and scope_of(r) == scope]
     _facts(_acc_sentence(_rows, laws, "median (marker) and maximum (tick) of "
                          "the ULP error"),
-           _cost_sentence(_rows, "median", laws))
+           _cost_sentence(_rows, "median", laws),
+           _offscale_fact(clip, nonfin))
     _caption("Overview of runtime and accuracy for the %s datasets."
              % CONV.get(family, family),
              "Each panel compares the implementations by runtime, measured in "
              "nanoseconds per element, and accuracy, measured by the median "
              "(marker) and maximum (tick) ULP error; both axes are "
              "logarithmic.",
-             "For implementations producing non-finite results, the panel title "
-             "reports the number of affected rows and points; these points are "
-             "excluded from the ULP statistics.",
-             "The panel title also reports the number of maxima at or above the "
-             "plotting limit of $10^6$ ULP and the largest ULP error, and "
-             "off-scale maxima are drawn in the hatched band at the top of each "
-             "panel.",
+             _CAP_NONFINITE, _CAP_OFFSCALE,
              "The library is shown with its %s backend." % lib_backend,
              _obtained(arch))
     return _finish(fig, outdir, f"fig-paper-cost-accuracy-{family}-{scope}", stamp)
@@ -660,6 +670,7 @@ def fig_worst_case_map(plt, acc, sup, outdir, stamp, family="z_nu", arch=""):
                     color="0.20", fontweight="bold", annotation_clip=False)
     # `worst_arg` is z for z_nu and h for h_nu_s (s is not stored in the row)
     _argname = "h" if family == "h_nu_s" else "z"
+    _label_every_panel(axes[:len(sups)])
     _label_lowest(axes, len(sups), ncol, "$%s$ at the worst point" % _argname)
     for i in range(0, len(sups), ncol):
         axes[i].set_ylabel(r"$\nu$ at the worst point")
@@ -768,7 +779,7 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
     n = len(laws)
     ncol = 2 if n > 1 else 1
     nrow = math.ceil(n / ncol)
-    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.45 * nrow + 1.0),
+    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.75 * nrow + 0.7),
                              sharey=True, sharex=True, squeeze=False)
     cells = list(grid.flat)
     for spare in cells[n:]:
@@ -776,6 +787,7 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
     axes = cells[:n]
     w = 0.8 / len(asms)
     hatches = {"direct": "", "logtrick": "//", "scaled": ".."}
+    clip = {}                        # per law, for HARDWARE.md
     for ax, law in zip(axes, laws):
         _clamped, _worst_off = [], None
         for j, a in enumerate(asms):
@@ -789,7 +801,7 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
                     continue
                 xs.append(i - 0.4 + w * (j + 0.5))
                 ys.append(min(v, CATASTROPHIC))
-                # clipped bars: marked by a glyph and counted in the panel title
+                # bars at or above CATASTROPHIC end in the band; counted for HARDWARE.md
                 if v >= CATASTROPHIC:
                     _clamped.append(xs[-1])
                     if _worst_off is None or v > _worst_off:
@@ -805,41 +817,35 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
                        label=(lib_supplier or style.LIB) if ax is axes[0] else None)
         _band(ax, 0.5)
         ax.set_yscale("log")
-        if _clamped:
-            ax.plot(_clamped, [CATASTROPHIC] * len(_clamped), marker="^",
-                    ms=4.0, mfc="none", mec="0.15", mew=0.9, ls="none",
-                    zorder=6, clip_on=False)
         ax.set_xticks(range(len(sups)))
         ax.set_xticklabels(sups, rotation=40, ha="right")
-        # suppliers are in the same order everywhere: only the bottom row is named
-        _k = axes.index(ax)
-        ax.tick_params(axis="x", labelbottom=_k + ncol >= n)
-        d = direction.get(law, "")
-        _sub = ("%d clipped; max: $10^{%d}$ ULP"
-                % (len(_clamped), round(math.log10(_worst_off)))) if _clamped else ""
-        # the counts, then the direction of the spread
-        _panel_heading(ax, LAW_LABEL.get(law, law), _sub,
-                       ("%s has lower error" % asm_label(d),
-                        "#b3261e" if d == "direct" else "#1b7f3b"))
+        # the counts and the direction of the spread go to HARDWARE.md
+        if _clamped:
+            clip[law] = (len(_clamped), _worst_off)
+        ax.set_title(LAW_LABEL.get(law, law), pad=3)
+    _label_every_panel(axes)
     for _k, ax in enumerate(axes):
         if _k % ncol == 0:
             ax.set_ylabel("Maximum ULP error")
     h, lb = axes[0].get_legend_handles_labels()
-    _gh, _gl = style.glyph_key(plt, [("^", True, "bar clipped at $10^6$ ULP")])
     _top = _title(fig, "Worst-case error by assembly   "
                   f"[{arch}{where}, {FAMILY_LABEL.get(family, family)}]")
     # the selection rule; recorded for HARDWARE.md in paper mode
-    _foot = style.footer(fig, h + _gh, lb + _gl, ncol=3, width=90, note=
+    _foot = style.footer(fig, h, lb, ncol=3, width=90, note=
              "%d of the %d accuracy datasets, at most two in each direction: those "
              "with the largest error ratio in favour of another assembly over "
              "direct, and those with the largest ratio in favour of direct, "
-             "among datasets whose assemblies differ by more than $10\\times$;  the hatched band is "
-             "above $10^6$ ULP, and a bar entering it is clipped at $10^6$ ULP, not "
-             "measured there" % (len(laws), len(ACC_LAWS)))
+             "among datasets whose assemblies differ by more than $10\\times$;  the hatched band "
+             "lies above $10^6$ ULP: a bar reaching into it is at or above that "
+             "value, and its height there is not to scale" % (len(laws), len(ACC_LAWS)))
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for r in (sup or []) + (acc or [])
              if r.get("family") == family and scope_of(r) == scope]
-    _facts(_acc_sentence(_rows, laws, "the maximum ULP error"))
+    _facts(_acc_sentence(_rows, laws, "the maximum ULP error"),
+           "Lowest maximum per dataset: " + "; ".join(
+               "%s %s" % (LAW_LABEL.get(l, l), asm_label(direction.get(l, "")))
+               for l in laws) + ".",
+           _offscale_fact(clip))
     _caption("Effect of the assembly strategy on the maximum ULP error of the "
              "external %simplementations for the %s datasets."
              % ("GPU " if lib_supplier else "", CONV.get(family, family)),
@@ -847,16 +853,14 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
              "errors of the assemblies of any one implementation is taken, and "
              "among the datasets on which it exceeds 10 the panels show at most "
              "two on which another assembly is more accurate than direct and at "
-             "most two on which direct is the most accurate, as stated above each "
-             "panel.",
+             "most two on which direct is the most accurate.",
              "For each implementation, the bars correspond to the %s %s; the "
              "dashed line shows the error of %s, which uses a single assembly."
              % (_and(asm_label(a) for a in asms),
                 "assemblies" if len(asms) > 1 else "assembly",
                 lib_supplier or style.LIB),
-             "Bars at or above the plotting limit of $10^6$ ULP are clipped and "
-             "marked by triangles; each panel reports the number of clipped bars "
-             "and the largest ULP error.",
+             "Bars reaching into the hatched band are at or above the plotting "
+             "limit of $10^6$ ULP.",
              _obtained(arch, gpu=bool(lib_supplier)))
     return _finish(fig, outdir, f"{stem}-{family}", stamp)
 
@@ -1341,7 +1345,7 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
         + sorted({m for v in sup_modes.values() for m in v} - set(MODE_ORDER))
     ncol = min(3, len(snames))
     nrow = -(-len(snames) // ncol)
-    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.3 * nrow + 0.9),
+    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.6 * nrow + 0.8),
                              sharey=True, sharex=True, squeeze=False)
     flat = [a for row in grid for a in row]
     for a in flat[len(snames):]:
@@ -1405,10 +1409,7 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
                                                    minor_thresholds=(2, 0.5)))
     for r_ in range(nrow):
         grid[r_][0].set_ylabel("Cost of one call\n[ns / element]")
-    # sharex hides the labels of a panel above an unused slot; restore them
-    for k, a in enumerate(axes):
-        if k + ncol >= len(snames):
-            a.xaxis.set_tick_params(labelbottom=True)
+    _label_every_panel(axes)
     if lib_best is not None:
         for ax in axes:
             ax.axhline(lib_best, color=style.supplier_color(style.LIB),
@@ -1656,17 +1657,18 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     # two columns, as fig_cost_accuracy_plane
     ncol = 2
     nrow = (len(laws) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 1.75 * nrow + 0.9),
+    fig, axes = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 1.72 * nrow + 0.9),
                              sharex=True, sharey=True, squeeze=False)
     axes = axes.ravel()
     handles = {}
+    clip, nonfin = {}, {}            # per law, for HARDWARE.md
     for ax, law in zip(axes, laws + [None] * (len(axes) - len(laws))):
         if law is None:
             # removed, not hidden (see fig_cost_accuracy_plane)
             fig.delaxes(ax)
             continue
         top = _band(ax, 0.12)
-        # clipped and incomplete rows marked as in fig_cost_accuracy_plane
+        # off-scale and incomplete rows marked as in fig_cost_accuracy_plane
         _nfin, _worst_off, _nfail = [], None, 0
         for (s, fam, l), r in best.items():
             if l != law:
@@ -1680,10 +1682,8 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
                 ax.plot([x, x], [min(med, top), min(mx, top)], color=c,
                         lw=1.0, alpha=0.55, zorder=3)
             if _ok(mx):
-                ax.plot([x], [top if mx >= CATASTROPHIC else mx],
-                        marker="^" if mx >= CATASTROPHIC else "_",
-                        ms=5.0 if mx >= CATASTROPHIC else 6.0,
-                        mfc="none", mec=c, color=c, mew=1.2, ls="none", zorder=4)
+                ax.plot([x], [top if mx >= CATASTROPHIC else mx], marker="_",
+                        ms=6.0, color=c, mew=1.1, ls="none", zorder=4)
                 if mx >= CATASTROPHIC:
                     _nfail += 1
                     if _worst_off is None or mx > _worst_off:
@@ -1699,23 +1699,21 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
                          ms=6.2 if is_lib else 4.4, mfc=c,
                          mec="white" if is_lib else c, ls="none", zorder=6)
             handles.setdefault(s, h)
-        _sub = []
+        # the counts go to HARDWARE.md; the title is the dataset only
         if _nfin:
-            _sub.append(_nonfinite_phrase(len(_nfin), sum(_nfin))
-                        .replace("points", "pts"))
+            nonfin[law] = (len(_nfin), sum(_nfin))
         if _worst_off is not None:
-            _sub.append("%d clipped, max $10^{%d}$"
-                        % (_nfail, round(math.log10(_worst_off))))
+            clip[law] = (_nfail, _worst_off)
         ax.set_xscale("log")
         ax.set_yscale("log")
         style.refline(ax, style.ULP_ONE, "1 ULP")
-        _panel_heading(ax, LAW_LABEL.get(law, law), " \u00b7 ".join(_sub))
+        ax.set_title(LAW_LABEL.get(law, law), pad=3)
+    _label_every_panel(axes[:len(laws)])
     _label_lowest(axes, len(laws), ncol, "Kernel cost  [ns / element]")
     fig.supylabel("ULP error  (median $\\rightarrow$ maximum)",
                   fontsize=style.FS_LABEL, x=0.015)
     order = sorted(handles, key=lambda s: (not s.startswith(style.LIB), s))
-    _gh, _gl = style.glyph_key(plt, [("^", True,  "clipped at $10^6$ ULP"),
-                                     ("_", False, "maximum"),
+    _gh, _gl = style.glyph_key(plt, [("_", False, "maximum"),
                                      ("s", True,  "non-finite on some points")])
     _top = _title(fig, f"Device cost against accuracy, kernel scope   [{arch}, "
                   f"{FAMILY_LABEL.get(family, family)}]")
@@ -1724,7 +1722,7 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
              "one panel = one dataset = one $N$:  each kernel sits at a fixed cost, "
              "and the bar is its error distribution --- "
              "filled marker = median ULP, tick = max, "
-             "hollow triangle = clipped at $10^6$ ULP (the hatched band), "
+             "tick in the hatched band = max at or above $10^6$ ULP, "
              "square frame = did not return a finite number on every "
              "point "
              "(such a row is scored over fewer points, so its max is not "
@@ -1732,20 +1730,15 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     fig.tight_layout(rect=(0.02, _foot, 1, _top))
     _facts(_acc_sentence(rows, laws, "median (marker) and maximum (tick) of "
                          "the ULP error"),
-           _cost_sentence(rows, "median", laws))
+           _cost_sentence(rows, "median", laws),
+           _offscale_fact(clip, nonfin))
     _caption("Overview of GPU kernel cost and accuracy for the %s datasets."
              % CONV.get(family, family),
              "Each panel compares the implementations by kernel cost, measured in "
              "nanoseconds per element, and accuracy, summarised by the median "
              "(marker) and maximum (tick) ULP error; both axes are "
              "logarithmic.",
-             "For implementations producing non-finite results, the panel title "
-             "reports the number of affected rows and points; these points are "
-             "excluded from the ULP statistics.",
-             "The panel title also reports the number of maxima at or above the "
-             "plotting limit of $10^6$ ULP and the largest ULP error, and "
-             "off-scale maxima are drawn in the hatched band at the top of each "
-             "panel.",
+             _CAP_NONFINITE, _CAP_OFFSCALE,
              _obtained(arch, gpu=True))
     return _finish(fig, outdir, f"fig-paper-gpu-plane-{family}", stamp)
 
@@ -1829,12 +1822,11 @@ def fig_gpu_boost_shortcut(plt, rows, outdir, stamp, arch=""):
         # appended after panel_title, which would capitalise the supplier name
         ax.set_title(style.panel_title(f"{where}, {how}") + "\n" + sel[0]["supplier"],
                      pad=4)
-    # z labels under the lowest panel of each column; the top-right panel has none
-    # under it in the 2 x 2 grid, so it keeps its own tick labels
+    # z labels under the lowest panel of each column
+    _label_every_panel(axes)
     ncol = grid.shape[1]
     for i, ax in enumerate(axes):
         if i + ncol >= len(axes):
-            ax.tick_params(labelbottom=True)
             ax.set_xlabel(r"$z$")
         if i % ncol == 0:
             ax.set_ylabel(r"Relative error of $K_\nu(z)$")
@@ -2006,15 +1998,6 @@ def levin_reaches(on, off):
                                     for k in LEVIN_ACC_KEYS)
 
 
-def _share_row_labels(axes, labels):
-    """Hide the category labels of every column but the first when all columns list the
-    same categories (`labels`: one list per column), so the panels get the width."""
-    if len(labels) > 1 and all(l == labels[0] for l in labels[1:]):
-        for row in axes:
-            for ax in row[1:]:
-                ax.tick_params(labelleft=False)
-
-
 def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
     """Median ULP, maximum ULP and cost with and without the Levin band, per law."""
     rows = [r for r in lev if (r.get("device") or "cpu").strip() == device]
@@ -2045,7 +2028,6 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
     fig, axes = plt.subplots(len(METRICS), len(fams),
                              figsize=(style.TEXT_W, 7.4), squeeze=False)
     dropped = kept = 0
-    collabs = []
     for ci, fam in enumerate(fams):
         col = [axes[mi][ci] for mi in range(len(METRICS))]
         sub = [r for r in rows if r.get("family") == fam
@@ -2086,7 +2068,6 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
                                 xytext=(4, 0), textcoords="offset points",
                                 fontsize=style.FS_ANNOT, va="center", color=cc)
 
-        collabs.append(ylab)
         for ax, (_k, lab) in zip(col, METRICS):
             ax.set_yticks(ypos)
             ax.set_yticklabels(ylab)
@@ -2108,7 +2089,6 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
                         va="center", transform=ax.transAxes,
                         fontsize=style.FS_ANNOT, color="0.45")
         col[0].set_title(FAMILY_PLOT_LABEL.get(fam, fam))
-    _share_row_labels(axes, collabs)
 
     if kept == 0:
         import matplotlib.pyplot as _plt
@@ -2196,13 +2176,11 @@ def fig_fold(plt, fold, outdir, stamp, arch=""):
     fig, axes = plt.subplots(len(METRICS), len(fams),
                              figsize=(style.TEXT_W, 7.8), squeeze=False)
     seen = set()
-    collabs = []
     for ci, fam in enumerate(fams):
         col = [axes[mi][ci] for mi in range(len(METRICS))]
         sub = [r for r in rows if r.get("family") == fam]
         laws = [l for l in ACC_LAWS if any(r.get("law") == l for r in sub)]
         laws += sorted({r.get("law") for r in sub} - set(laws))
-        collabs.append(laws)
         for ax, (key, lab) in zip(col, METRICS):
             pts = []                                 # (y, arm, value, row)
             for y, law in enumerate(laws):
@@ -2247,7 +2225,6 @@ def fig_fold(plt, fold, outdir, stamp, arch=""):
             ax.set_xlabel(lab)
             ax.grid(True, axis="x", alpha=0.25, lw=0.5)
         col[0].set_title(FAMILY_PLOT_LABEL.get(fam, fam))
-    _share_row_labels(axes, collabs)
 
     _top = _title(fig, 
         "The Matérn prefactor folded into the kernels or applied "
@@ -2372,8 +2349,7 @@ def fig_threads_combined(plt, thr, outdir, stamp, arch=""):
     has_vps = any(_ok(_f(r, "values_per_s")) for r in thr)
 
     nrow = 3 if has_vps else 2
-    # one y axis per row: the right column drops its duplicate labels; the efficiency
-    # row, a band near 100 %, gets less height
+    # one y scale per row; the efficiency row, a band near 100 %, gets less height
     fig, axes = plt.subplots(nrow, len(fams),
                              figsize=(style.TEXT_W, 7.6 if has_vps else 5.2),
                              squeeze=False, sharex=True, sharey="row",
@@ -2505,6 +2481,7 @@ def fig_threads_combined(plt, thr, outdir, stamp, arch=""):
         note += "   |   load1 = %.0f, incl. this stage's own threads" % max(loads)
     if reent:
         note += "   |   %d rows failed the re-entrancy check" % len(reent)
+    _label_every_panel(axes.ravel())
     _top = _title(fig,
         "Weak scaling against pinned thread count%s\n%s"
         % ((" --- " + arch) if arch else "", note))
@@ -2666,14 +2643,14 @@ def _dist_laws(bylaw):
     return [l for l in ACC_LAWS if bylaw.get(l)]
 
 
-def _dist_axes(plt, names, laws, height=None, sharex=True, row_extra=0.0):
+def _dist_axes(plt, names, laws, height=None, sharex=True):
     """One panel per law in two columns (a row of four is too narrow at print width).
-    Without `height` the figure grows with the number of implementation rows;
-    `row_extra` (in) is added per panel row, for x tick labels on every row."""
+    Without `height` the figure grows with the number of implementation rows; every
+    panel row has its own x tick labels (_label_every_panel)."""
     nrow = max(1, -(-len(laws) // 2))
     if height is None:
         height = min(style.TEXT_H_MAX - 0.4,
-                     nrow * (0.42 + row_extra + 0.14 * len(names)) + 1.2)
+                     nrow * (0.57 + 0.14 * len(names)) + 1.2)
     fig, axes = plt.subplots(nrow, 2, figsize=(style.TEXT_W, height),
                              sharex=sharex, sharey=True, squeeze=False)
     axes = axes.ravel()
@@ -2740,6 +2717,7 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
     `beyond_fence` included, is read from the columns of wm_metrics.h, none recomputed."""
     laws = _dist_laws(bylaw)
     fig, axes = _dist_axes(plt, names, laws)
+    clip = {}                        # per law, for HARDWARE.md
     for ax, law in zip(axes, laws):
         # the position of off-scale markers depends only on the band; the axis
         # limit is set after the panel's smallest value is known
@@ -2781,13 +2759,11 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
                             mfc=c if filled else "white", mec=c, mew=0.9,
                             ls="none", zorder=z + 1)
             if _ok(mx):
+                # a maximum at or above CATASTROPHIC is the same cross, in the band
+                ax.plot([right if mx >= CATASTROPHIC else mx], [y], marker="x",
+                        ms=4.6, color=c, mew=1.1, ls="none", zorder=z + 1)
                 if mx >= CATASTROPHIC:
-                    ax.plot([right], [y], marker=">", ms=5.0, mfc="none", mec=c,
-                            mew=1.2, ls="none", zorder=z + 1)
                     nfail += 1
-                else:
-                    ax.plot([mx], [y], marker="x", ms=4.6, color=c, mew=1.1,
-                            ls="none", zorder=z + 1)
             # same predicate as fig_cost_accuracy_plane: a row scored over fewer
             # points is ringed
             if _i(r, "nonfinite") > 0:
@@ -2797,9 +2773,11 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
         _band_x(ax, (min(seen) / 2.0) if seen else 1e-2)
         _dist_yaxis(ax, names)
         ax.axvline(style.ULP_ONE, color="0.35", lw=0.8, ls=(0, (4, 3)), zorder=1)
-        _panel_heading(ax, LAW_LABEL.get(law, law),
-                       ("%d clipped" % nfail) if nfail else "")
+        ax.set_title(LAW_LABEL.get(law, law), pad=3)
+        if nfail:
+            clip[law] = (nfail, None)
         ax.grid(True, which="major", axis="x", alpha=0.30)
+    _label_every_panel(axes[:len(laws)])
     _label_lowest(axes, len(laws), 2, "ULP error")
     # glyph key shared with the timing distribution figure
     from matplotlib.lines import Line2D as _L2D
@@ -2812,12 +2790,11 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
            _L2D([], [], ls="none", marker="D", ms=3.4, mfc="white", mec="0.45",
                 mew=0.9),
            _L2D([], [], ls="none", marker="x", color="0.45", ms=5, mew=1.1),
-           _L2D([], [], ls="none", marker=">", mfc="none", mec="0.45", ms=5),
            _L2D([], [], ls="none", marker="s", mfc="none", mec="0.15", ms=6),
            _L2D([], [], color="0.35", lw=0.8, ls=(0, (4, 3)))]
     _gl = ["Interquartile range", "Median", "Whisker", "Outlier reach",
            "99th percentile", "99.9th percentile",
-           "Maximum", "Clipped", "Non-finite on some points", "1 ULP"]
+           "Maximum", "Non-finite on some points", "1 ULP"]
     _top = _title(fig, title)
     _foot = style.footer(fig, _gh, _gl, ncol=4, width=90, note=
              "the outlier reach is drawn only where points fell past the fence; "
@@ -2825,7 +2802,8 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for l in bylaw for r in bylaw[l].values()]
     _facts(_acc_sentence(_rows, laws, "the box is the distribution of the "
-                         "ULP error"))
+                         "ULP error"),
+           _offscale_fact(clip))
     # An optional fifth element names the library backend shown.
     who, fam, arch, gpu, *lib_bk = cap_of or ("tested implementations", "", "",
                                               False)
@@ -2841,8 +2819,7 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
              "are excluded from the statistics, which describe the remaining "
              "finite results.",
              "Values at or above the plotting limit of $10^6$ ULP are indicated in the "
-             "hatched region, and each panel reports the number of "
-             "implementations with off-scale values.",
+             "hatched region.",
              ("The library is shown with its %s backend." % lib_bk[0])
              if lib_bk and lib_bk[0] else "",
              _obtained(arch, gpu))
@@ -2865,7 +2842,7 @@ def _timing_distribution(plt, names, bylaw, reps, outdir, stem, title, stamp,
     names = sorted(names, key=lambda n: med_cost.get(n, float("inf")))
     clusters = _cost_clusters(names, med_cost)
     # one x scale per panel, so an outlier on one law does not compress the others
-    fig, axes = _dist_axes(plt, names, laws, sharex=False, row_extra=0.15)
+    fig, axes = _dist_axes(plt, names, laws, sharex=False)
     n_raw = 0
     # one magnification factor for the whole figure, so spreads compare across panels
     _figK = 10.0 if mode == "magnified" else 1.0
@@ -2981,6 +2958,7 @@ def _timing_distribution(plt, names, bylaw, reps, outdir, stem, title, stamp,
         # the panel title names the law only; the axis label names the mode
         ax.set_title(LAW_LABEL.get(law, law), pad=3)
         ax.grid(True, which="major", axis="x", alpha=0.30)
+    _label_every_panel(axes[:len(laws)])
     # every panel has its own cost axis; the label is the same, so it is set under
     # the lowest panel of each column
     _label_lowest(axes, len(laws), 2,
@@ -3156,7 +3134,7 @@ def _accuracy_ecdf(plt, names, bylaw, outdir, stem, title, stamp,
     from matplotlib.lines import Line2D as _L2D
     laws = _dist_laws(bylaw)
     fig, axes = _dist_axes(plt, names, laws,
-                           height=1.55 * -(-len(laws) // 2) + 1.7)
+                           height=1.6 * -(-len(laws) // 2) + 1.7)
     style_of = {}
     k = 0
     for name in names:
@@ -3215,6 +3193,7 @@ def _accuracy_ecdf(plt, names, bylaw, outdir, stem, title, stamp,
                     color="0.40", ha="left", va="bottom", zorder=2)
         ax.set_title(LAW_LABEL.get(law, law), pad=3)
         ax.grid(True, which="major", alpha=0.30)
+    _label_every_panel(axes[:len(laws)])
     _label_lowest(axes, len(laws), 2, "ULP error $x$")
     # one label for the column: it is longer than a panel is high
     fig.supylabel("Share of points with error $\\geq x$", fontsize=style.FS_LABEL,

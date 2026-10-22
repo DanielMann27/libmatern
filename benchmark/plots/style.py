@@ -74,7 +74,7 @@ ULP_ONE  = 1.0
 # room for a caption under a full-page figure.
 LATEX_LINEWIDTH = 6.38
 TEXT_W          = 6.3
-TEXT_H_MAX      = 8.6
+TEXT_H_MAX      = 8.3
 
 # The type scale, in points on the page; FS_MIN is the smallest size the checker accepts.
 FS_TICK   = 7.5
