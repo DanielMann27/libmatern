@@ -43,15 +43,18 @@ def _nonfinite_phrase(rows, points):
         rows, "" if rows == 1 else "s", f"{points:,}", "" if points == 1 else "s")
 
 
-def _panel_heading(ax, head, sub=""):
-    """A panel title, with an optional line of counts under it in the annotation size."""
+def _panel_heading(ax, head, *subs):
+    """A panel title with lines of counts or notes under it in the annotation size; a
+    line is a string or (string, colour), and an empty one is skipped."""
     pad = 3
-    if sub:
-        ax.annotate(sub, (0.5, 1.0), xycoords="axes fraction", xytext=(0, 3),
+    for sub in reversed([x for x in subs if x and (x[0] if isinstance(x, tuple)
+                                                     else x)]):
+        text, color = sub if isinstance(sub, tuple) else (sub, "0.25")
+        ax.annotate(text, (0.5, 1.0), xycoords="axes fraction", xytext=(0, pad),
                     textcoords="offset points", ha="center", va="bottom",
-                    fontsize=style.FS_ANNOT, color="0.25")
-        pad += 3 + 1.3 * style.FS_ANNOT
-    ax.set_title(head, pad=pad)
+                    fontsize=style.FS_ANNOT, color=color)
+        pad += 1.3 * style.FS_ANNOT
+    ax.set_title(head, pad=pad + (2 if pad > 3 else 0))
 
 
 def _label_lowest(cells, used, ncol, xlabel):
@@ -184,17 +187,20 @@ def _stamp(fig, text):
              fontsize=5.2, color="0.45")
 
 
-def _title(fig, text, width=80):
+def _title(fig, text, width=80, reserve=False):
     """The figure title (development mode; in paper mode it goes to HARDWARE.md); return
-    the figure-fraction top for tight_layout, which leaves room for the title itself.
-    The figure grows by the title's height, so the panels keep their paper-mode size;
-    call it before style.footer, which works in fractions of the height."""
+    the figure-fraction top for the panels.  tight_layout leaves room for the title
+    itself; `reserve` returns a top under it, for constrained layout, which does not
+    with the title placed explicitly.  The figure grows by the title's height, so the
+    panels keep their paper-mode size; call it before style.footer, which works in
+    fractions of the height."""
     t = style.fig_title(text, width=width)
-    if t:
-        fig.suptitle(t, y=0.998, fontsize=style.FS_TITLE)
-        fig.set_figheight(fig.get_figheight()
-                          + ((t.count("\n") + 1) * style.FS_TITLE * 1.35 + 6.0) / 72.0)
-    return 0.995
+    if not t:
+        return 0.995
+    fig.suptitle(t, y=0.998, fontsize=style.FS_TITLE)
+    dh = ((t.count("\n") + 1) * style.FS_TITLE * 1.35 + 6.0) / 72.0
+    fig.set_figheight(fig.get_figheight() + dh)
+    return (0.995 - dh / fig.get_figheight()) if reserve else 0.995
 
 
 def _finish(fig, outdir, stem, stamp):
@@ -545,7 +551,7 @@ def fig_attribution(plt, acc, outdir, stamp, family="z_nu", arch=""):
                      f"no rows for family {family}")
     by = {(r["backend"], r["law"]): r for r in acc}
 
-    fig, (axa, axs) = plt.subplots(1, 2, figsize=(9.4, 3.95))
+    fig, (axa, axs) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.3))
     x = list(range(len(laws)))
     for b in backs:
         c = style.BACKEND_COLOR.get(b, "0.4")
@@ -567,12 +573,11 @@ def fig_attribution(plt, acc, outdir, stamp, family="z_nu", arch=""):
     style.refline(axa, style.ULP_ONE, "1 ULP")
     axa.set_title(style.panel_title("Accuracy"), pad=4)
     axs.set_title(style.panel_title("Cost"), pad=4)
-    style.legend_figure(fig, axa)
-    fig.suptitle(style.fig_title(
-                 "Worst-case error and cost by backend"
-                 f"   [{arch}, {FAMILY_LABEL.get(family, family)}]"),
-                 y=0.995, fontsize=9.5)
-    fig.tight_layout(rect=(0, 0.085, 1, 0.94))
+    _top = _title(fig, "Worst-case error and cost by backend"
+                  f"   [{arch}, {FAMILY_LABEL.get(family, family)}]")
+    # the backend labels are long: two columns
+    _foot = style.footer(fig, *axa.get_legend_handles_labels(), ncol=2)
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for r in (acc or []) if r.get("family") == family]
     _facts(_acc_sentence(_rows, laws, "the maximum ULP error"),
            _cost_sentence(_rows, "median", laws))
@@ -606,13 +611,16 @@ def fig_worst_case_map(plt, acc, sup, outdir, stamp, family="z_nu", arch=""):
 
     import matplotlib.colors as mcolors
     norm = mcolors.LogNorm(vmin=1.0, vmax=CATASTROPHIC)
-    # three columns when they fill the last row, otherwise four
-    ncol = 3 if len(sups) % 3 == 0 else 4
+    # three columns: four are too narrow at print width.  Constrained layout places
+    # the shared colour bar.
+    ncol = 3
     nrow = (len(sups) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(9.6, 2.5 * nrow),
-                             sharex=True, sharey=True)
-    axes = axes.ravel() if hasattr(axes, "ravel") else [axes]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 1.95 * nrow + 0.5),
+                             sharex=True, sharey=True, squeeze=False,
+                             layout="constrained")
+    axes = axes.ravel()
     sc = None
+    worst = []                       # (axes, its worst point), labelled below
     for ax, s in zip(axes, sups + [None] * (len(axes) - len(sups))):
         if s is None:
             fig.delaxes(ax)          # see the note in fig_cost_accuracy_plane
@@ -624,53 +632,57 @@ def fig_worst_case_map(plt, acc, sup, outdir, stamp, family="z_nu", arch=""):
                             norm=norm, cmap="YlOrRd", s=38,
                             edgecolors="0.25", linewidths=0.5, zorder=3)
             # only the panel's worst point is labelled, so labels cover no data
-            w = max(mine, key=lambda p: p[3])
-            # near the right edge the label goes left of the point, inside the canvas
-            _xa = ax.transLimits.transform(
-                      ax.transScale.transform((w[1], w[2])))[0]
-            _right = _xa > 0.62
-            ax.annotate(LAW_LABEL.get(w[0]["law"], w[0]["law"])
-                        .replace("$", "").replace("\\nu", r"$\nu$"),
-                        (w[1], w[2]), textcoords="offset points",
-                        xytext=(-5 if _right else 5, 4), fontsize=5.4,
-                        ha="right" if _right else "left",
-                        color="0.20", fontweight="bold",
-                        annotation_clip=False)
+            worst.append((ax, max(mine, key=lambda p: p[3])))
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_title(s + (" (this library)" if s == style.LIB else ""), pad=3,
                      fontweight="bold" if s == style.LIB else "normal",
                      color=style.supplier_color(s) if s == style.LIB else "black")
-    # every panel with nothing under it keeps its own x tick labels
-    for _pi, _pa in enumerate(axes[:len(sups)]):
-        if _pi + ncol >= len(sups):
-            _pa.tick_params(labelbottom=True)
+    # fewer decades labelled: one label per decade or two is too dense at print
+    # width (the axes are shared, so their tickers are too)
+    from matplotlib.ticker import LogLocator
+    axes[0].xaxis.set_major_locator(LogLocator(numticks=4))
+    axes[0].yaxis.set_major_locator(LogLocator(numticks=4))
+    # Placed once the log scales and limits are final: right of centre the label goes
+    # left of the point, near the top under it, so it stays inside the panel.
+    _x0, _x1 = (math.log10(v) for v in axes[0].get_xlim())
+    _y0, _y1 = (math.log10(v) for v in axes[0].get_ylim())
+    for ax, w in worst:
+        _right = (math.log10(w[1]) - _x0) / (_x1 - _x0) > 0.5
+        _high = (math.log10(w[2]) - _y0) / (_y1 - _y0) > 0.85
+        ax.annotate(LAW_LABEL.get(w[0]["law"], w[0]["law"])
+                    .replace("$", "").replace("\\nu", r"$\nu$"),
+                    (w[1], w[2]), textcoords="offset points",
+                    xytext=(-5 if _right else 5, -4 if _high else 4),
+                    fontsize=style.FS_ANNOT,
+                    ha="right" if _right else "left",
+                    va="top" if _high else "baseline",
+                    color="0.20", fontweight="bold", annotation_clip=False)
     # `worst_arg` is z for z_nu and h for h_nu_s (s is not stored in the row)
     _argname = "h" if family == "h_nu_s" else "z"
-    for ax in axes[-ncol:]:
-        ax.set_xlabel("$%s$ at the worst point" % _argname)
-    for i in range(0, len(axes), ncol):
+    _label_lowest(axes, len(sups), ncol, "$%s$ at the worst point" % _argname)
+    for i in range(0, len(sups), ncol):
         axes[i].set_ylabel(r"$\nu$ at the worst point")
     if sc is not None:
-        cb = fig.colorbar(sc, ax=axes.tolist() if hasattr(axes, "tolist")
-                          else list(axes), fraction=0.020, pad=0.012,
+        cb = fig.colorbar(sc, ax=list(axes[:len(sups)]), aspect=40, pad=0.02,
                           extend="max")
-        cb.set_label(r"ULP error at that point   (clamped at $10^6$)",
-                     fontsize=7)
-        cb.ax.tick_params(labelsize=6)
+        cb.set_label(r"ULP error at that point   (clamped at $10^6$)")
+    _top = _title(fig,
+                  "Location of each implementation's worst case in the " +
+                  (r"$(h,\nu)$ plane" if family == "h_nu_s" else r"$(z,\nu)$ plane")
+                  + f"   [{arch}, {FAMILY_LABEL.get(family, family)}]",
+                  reserve=True)
     _cl = [p[3] for p in pts if _ok(p[3]) and p[3] >= CATASTROPHIC]
-    if _cl:
-        style.note_below(fig,
+    _foot = style.footer(fig, width=90, note=(
             "%d of the %d worst points are past the top of the colour scale and "
             "are drawn in the cap colour, the largest at $10^{%d}$ ULP; the "
             "remaining %d are coloured by their true value"
             % (len(_cl), len(pts), round(math.log10(max(_cl))),
-               len(pts) - len(_cl)), y=0.012)
-    fig.suptitle(style.fig_title(
-                 "Location of each implementation's worst case in the " +
-                 (r"$(h,\nu)$ plane" if family == "h_nu_s" else r"$(z,\nu)$ plane")
-                 + f"   [{arch}, "
-                 f"{FAMILY_LABEL.get(family, family)}]"), y=0.998, fontsize=9.5)
+               len(pts) - len(_cl))) if _cl else None)
+    # constrained layout leaves figure text alone: the note's strip is kept clear.
+    # Its default margin is small, and the saved page adds savefig's pad on each
+    # side; a wider margin keeps the page within \linewidth.
+    fig.get_layout_engine().set(rect=(0, _foot, 1, _top - _foot), w_pad=0.1)
     _rows = [r for r in (acc or []) + (sup or []) if r.get("family") == family]
     _facts(_acc_sentence(_rows, ACC_LAWS, "each marker is the point of maximum "
                          "ULP error"))
@@ -756,8 +768,7 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
     n = len(laws)
     ncol = 2 if n > 1 else 1
     nrow = math.ceil(n / ncol)
-    fig, grid = plt.subplots(nrow, ncol, figsize=(2.7 * ncol + 0.6,
-                                                  2.45 * nrow + 1.25),
+    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.45 * nrow + 1.0),
                              sharey=True, sharex=True, squeeze=False)
     cells = list(grid.flat)
     for spare in cells[n:]:
@@ -799,40 +810,33 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
                     ms=4.0, mfc="none", mec="0.15", mew=0.9, ls="none",
                     zorder=6, clip_on=False)
         ax.set_xticks(range(len(sups)))
-        ax.set_xticklabels(sups, rotation=40, ha="right", fontsize=6.2)
+        ax.set_xticklabels(sups, rotation=40, ha="right")
         # suppliers are in the same order everywhere: only the bottom row is named
         _k = axes.index(ax)
         ax.tick_params(axis="x", labelbottom=_k + ncol >= n)
         d = direction.get(law, "")
-        _sub = ("\n%d clipped; max: $10^{%d}$ ULP"
+        _sub = ("%d clipped; max: $10^{%d}$ ULP"
                 % (len(_clamped), round(math.log10(_worst_off)))) if _clamped else ""
-        ax.set_title(LAW_LABEL.get(law, law) + _sub, pad=10, fontsize=7.6)
-        # direction of the spread
-        ax.text(0.5, 1.012, "%s has lower error" % asm_label(d),
-                transform=ax.transAxes, ha="center", va="bottom",
-                fontsize=style.NOTE_FONTSIZE,
-                color="#b3261e" if d == "direct" else "#1b7f3b")
+        # the counts, then the direction of the spread
+        _panel_heading(ax, LAW_LABEL.get(law, law), _sub,
+                       ("%s has lower error" % asm_label(d),
+                        "#b3261e" if d == "direct" else "#1b7f3b"))
     for _k, ax in enumerate(axes):
         if _k % ncol == 0:
             ax.set_ylabel("Maximum ULP error")
     h, lb = axes[0].get_legend_handles_labels()
     _gh, _gl = style.glyph_key(plt, [("^", True, "bar clipped at $10^6$ ULP")])
-    style.legend_figure(fig, handles=h + _gh, labels=lb + _gl, ncol=3,
-                        y=0.008)
+    _top = _title(fig, "Worst-case error by assembly   "
+                  f"[{arch}{where}, {FAMILY_LABEL.get(family, family)}]")
     # the selection rule; recorded for HARDWARE.md in paper mode
-    style.note_below(fig,
+    _foot = style.footer(fig, h + _gh, lb + _gl, ncol=3, width=90, note=
              "%d of the %d accuracy datasets, at most two in each direction: those "
              "with the largest error ratio in favour of another assembly over "
              "direct, and those with the largest ratio in favour of direct, "
              "among datasets whose assemblies differ by more than $10\\times$;  the hatched band is "
              "above $10^6$ ULP, and a bar entering it is clipped at $10^6$ ULP, not "
              "measured there" % (len(laws), len(ACC_LAWS)))
-    fig.suptitle(style.fig_title(
-                 "Worst-case error by assembly   "
-                 f"[{arch}{where}, {FAMILY_LABEL.get(family, family)}]"),
-                 y=0.995, fontsize=9.5)
-    # room for the note in development mode only
-    fig.tight_layout(rect=(0, 0.075 if style.PAPER else 0.135, 1, 0.95))
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for r in (sup or []) + (acc or [])
              if r.get("family") == family and scope_of(r) == scope]
     _facts(_acc_sentence(_rows, laws, "the maximum ULP error"))
@@ -1165,7 +1169,7 @@ def fig_family_delta(plt, acc, outdir, stamp, backend=None, arch="",
         return _skip("convention",
                      "no law carries both argument conventions (z_nu and "
                      "h_nu_s), which the figure compares")
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(9.0, 3.95))
+    fig, (axa, axb) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.3))
     x = list(range(len(laws)))
     for fam, col in (("z_nu", "#0353a4"), ("h_nu_s", "#c1121f")):
         axa.plot(x, [_f(by[(fam, l)], "u_max") for l in laws],
@@ -1178,9 +1182,11 @@ def fig_family_delta(plt, acc, outdir, stamp, backend=None, arch="",
              if _f(by[("z_nu", l)], "u_max") else float("nan") for l in laws]
     for i, rr in enumerate(ratio):
         if _ok(rr):
-            axa.annotate(f"{rr:.1f}x", (i, _f(by[("h_nu_s", laws[i])], "u_max")),
+            # above the higher of the two markers, clear of both lines
+            axa.annotate(f"{rr:.1f}x", (i, max(_f(by[("h_nu_s", laws[i])], "u_max"),
+                                               _f(by[("z_nu", laws[i])], "u_max"))),
                          textcoords="offset points", xytext=(0, 6),
-                         fontsize=5.6, ha="center", color="0.35")
+                         fontsize=style.FS_ANNOT, ha="center", color="0.35")
     for ax, lab in ((axa, "Maximum ULP error"), (axb, "Cost  [ns / element]")):
         ax.set_yscale("log")
         ax.set_xticks(x)
@@ -1188,12 +1194,17 @@ def fig_family_delta(plt, acc, outdir, stamp, backend=None, arch="",
                            rotation=35, ha="right")
         ax.set_ylabel(lab)
     style.refline(axa, style.ULP_ONE, "1 ULP")
+    # the cost spans about one decade: plain numbers (6, 10, 20), not 2x10^1
+    from matplotlib.ticker import LogFormatter
+    axb.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+    axb.yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False,
+                                               minor_thresholds=(2, 0.5)))
     axa.set_title(style.panel_title("Accuracy"), pad=4)
     axb.set_title(style.panel_title("Cost"), pad=4)
-    style.legend_figure(fig, axa)
-    fig.suptitle(style.fig_title("The two argument conventions, same backend   "
-                 f"[{arch}, {backend}]"), y=0.995, fontsize=9.5)
-    fig.tight_layout(rect=(0, 0.09, 1, 0.93))
+    _top = _title(fig, "The two argument conventions, same backend   "
+                  f"[{arch}, {backend}]")
+    _foot = style.footer(fig, *axa.get_legend_handles_labels())
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for r in (acc or []) if r.get("law") in laws]
     _facts(_acc_sentence(_rows, laws, "the maximum ULP error"),
            _cost_sentence(_rows, "median", laws))
@@ -1330,8 +1341,7 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
         + sorted({m for v in sup_modes.values() for m in v} - set(MODE_ORDER))
     ncol = min(3, len(snames))
     nrow = -(-len(snames) // ncol)
-    fig, grid = plt.subplots(nrow, ncol, figsize=(2.45 * ncol + 0.35,
-                                                  2.35 * nrow + 1.25),
+    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.3 * nrow + 0.9),
                              sharey=True, sharex=True, squeeze=False)
     flat = [a for row in grid for a in row]
     for a in flat[len(snames):]:
@@ -1371,20 +1381,28 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
                         mec=c if out else "0.15", mew=0.8,
                         alpha=1.0 if out else 0.55, zorder=6)
                 if out:
+                    # a high outlier is named above, a low one beside it: under it
+                    # the name would reach into the tick labels
                     hi_ = x > f_hi
                     ax.annotate(LAW_LABEL.get(l, l), (mi + dx, x),
                                 textcoords="offset points",
-                                xytext=(0, 4 if hi_ else -4), ha="center",
-                                va="bottom" if hi_ else "top", fontsize=5.4,
-                                color="0.25")
+                                xytext=(0, 4) if hi_ else (5, 0),
+                                ha="center" if hi_ else "left",
+                                va="bottom" if hi_ else "center",
+                                fontsize=style.FS_ANNOT, color="0.25")
             if style.LIB in sname:
                 lib_best = med if lib_best is None else min(lib_best, med)
         ax.set_xticks(range(len(allm)))
-        ax.set_xticklabels(allm, rotation=35, ha="right", fontsize=6.6)
+        ax.set_xticklabels(allm, rotation=35, ha="right")
         ax.set_xlim(-0.6, len(allm) - 0.4)
-        ax.set_title(sname, fontsize=7.2, pad=3)
+        ax.set_title(sname, pad=3)
         ax.grid(True, axis="y", alpha=0.25, lw=0.5, which="both")
     axes[0].set_yscale("log")
+    # about one decade: plain numbers (4, 6, 10, 20), not 4x10^0
+    from matplotlib.ticker import LogFormatter
+    axes[0].yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+    axes[0].yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False,
+                                                   minor_thresholds=(2, 0.5)))
     for r_ in range(nrow):
         grid[r_][0].set_ylabel("Cost of one call\n[ns / element]")
     # sharex hides the labels of a panel above an unused slot; restore them
@@ -1412,16 +1430,14 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     _l = ["interquartile range over the %d datasets" % len(nl), "median",
           "whisker (1.5 IQR, log scale)", "one dataset", "outlier dataset (named)",
           f"{style.LIB_CUDA}, best strategy median"]
-    fig.suptitle(style.fig_title(
-        "Transfer strategy per device implementation, whole call   "
-        f"[{arch}, {FAMILY_LABEL.get(family, family)}]", width=96),
-        y=0.998, fontsize=8.8)
-    _foot = style.footer(fig, _h, _l, ncol=3, note=(
+    _top = _title(fig, "Transfer strategy per device implementation, whole call   "
+                  f"[{arch}, {FAMILY_LABEL.get(family, family)}]")
+    _foot = style.footer(fig, _h, _l, ncol=2, width=90, note=(
         "per supplier and strategy: one box over the per-dataset medians of the "
         "accuracy datasets at one $N$ each (" + ntxt.replace("$N$ = ", "") + "), "
         "transfers included; not the ladder, whose top rung not every external "
         "reaches"))
-    fig.tight_layout(rect=(0, _foot, 1, 0.955))
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _rows = [r for r in (gsup or []) if r.get("family") == family
              and scope_of(r) == "call"]
     _facts("Per dataset, cost is the median over %s of one call on all $N$ "
@@ -1637,11 +1653,12 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     laws = [l for l in ACC_LAWS if any(k[2] == l for k in best)]
     if not laws:
         return _skip(f"gpu-plane-{family}", "no GPU supplier row in a known law")
-    ncol = 4
+    # two columns, as fig_cost_accuracy_plane
+    ncol = 2
     nrow = (len(laws) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(9.6, 2.6 * nrow),
-                             sharex=True, sharey=True)
-    axes = axes.ravel() if hasattr(axes, "ravel") else [axes]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 1.75 * nrow + 0.9),
+                             sharex=True, sharey=True, squeeze=False)
+    axes = axes.ravel()
     handles = {}
     for ax, law in zip(axes, laws + [None] * (len(axes) - len(laws))):
         if law is None:
@@ -1682,35 +1699,28 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
                          ms=6.2 if is_lib else 4.4, mfc=c,
                          mec="white" if is_lib else c, ls="none", zorder=6)
             handles.setdefault(s, h)
-        _sub = ""
+        _sub = []
         if _nfin:
-            _sub += "\n" + _nonfinite_phrase(len(_nfin), sum(_nfin))
+            _sub.append(_nonfinite_phrase(len(_nfin), sum(_nfin))
+                        .replace("points", "pts"))
         if _worst_off is not None:
-            _sub += ("\n%d clipped; max $10^{%d}$ ULP"
-                     % (_nfail, round(math.log10(_worst_off))))
+            _sub.append("%d clipped, max $10^{%d}$"
+                        % (_nfail, round(math.log10(_worst_off))))
         ax.set_xscale("log")
         ax.set_yscale("log")
         style.refline(ax, style.ULP_ONE, "1 ULP")
-        ax.set_title(LAW_LABEL.get(law, law) + _sub, pad=3, fontsize=7.4)
-    # every panel with nothing under it keeps its own x tick labels
-    for _pi, _pa in enumerate(axes[:len(laws)]):
-        if _pi + ncol >= len(laws):
-            _pa.tick_params(labelbottom=True)
-    for ax in axes[-ncol:]:
-        ax.set_xlabel("Kernel cost  [ns / element]")
-    fig.supylabel("ULP error  (median $\\rightarrow$ maximum)", fontsize=9,
-                  x=0.015)
+        _panel_heading(ax, LAW_LABEL.get(law, law), " \u00b7 ".join(_sub))
+    _label_lowest(axes, len(laws), ncol, "Kernel cost  [ns / element]")
+    fig.supylabel("ULP error  (median $\\rightarrow$ maximum)",
+                  fontsize=style.FS_LABEL, x=0.015)
     order = sorted(handles, key=lambda s: (not s.startswith(style.LIB), s))
     _gh, _gl = style.glyph_key(plt, [("^", True,  "clipped at $10^6$ ULP"),
                                      ("_", False, "maximum"),
                                      ("s", True,  "non-finite on some points")])
-    style.legend_figure(fig, handles=[handles[k] for k in order] + _gh,
-                        labels=list(order) + _gl,
-                        ncol=min(6, len(order) + 2))
-    fig.suptitle(style.fig_title(
-                 f"Device cost against accuracy, kernel scope   [{arch}, "
-                 f"{FAMILY_LABEL.get(family, family)}]"), y=0.998, fontsize=9.5)
-    style.note_below(fig,
+    _top = _title(fig, f"Device cost against accuracy, kernel scope   [{arch}, "
+                  f"{FAMILY_LABEL.get(family, family)}]")
+    _foot = style.footer(fig, [handles[k] for k in order] + _gh,
+                         list(order) + _gl, ncol=3, width=90, note=
              "one panel = one dataset = one $N$:  each kernel sits at a fixed cost, "
              "and the bar is its error distribution --- "
              "filled marker = median ULP, tick = max, "
@@ -1719,7 +1729,7 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
              "point "
              "(such a row is scored over fewer points, so its max is not "
              "comparable with the others)")
-    fig.tight_layout(rect=(0, 0.08, 1, 0.995))
+    fig.tight_layout(rect=(0.02, _foot, 1, _top))
     _facts(_acc_sentence(rows, laws, "median (marker) and maximum (tick) of "
                          "the ULP error"),
            _cost_sentence(rows, "median", laws))
@@ -1914,7 +1924,7 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
     ident = {k: _identical(k) for k in keys}
     same = sum(1 for k in keys if ident[k])
     differing = sorted({(k[2], k[1]) for k in keys if not ident[k]})
-    fig, (axl, axr) = plt.subplots(1, 2, figsize=(9.0, 4.3))
+    fig, (axl, axr) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.5))
     for k in keys:
         c = style.BACKEND_COLOR.get(k[2], "0.4")
         m = style.FAMILY_MARK.get(k[0], "o")
@@ -1939,17 +1949,15 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
     _same = (f"accuracy: {same} of {len(keys)} rows identical in every "
              f"accuracy column")
     _facts(_same)
-    axl.set_title(style.panel_title("accuracy" if style.PAPER else _same),
-                  pad=4, fontsize=8.6)
+    axl.set_title(style.panel_title("accuracy" if style.PAPER else _same), pad=4)
+    _note = None
     if differing:
         movers = sorted({c for k in keys if not ident[k]
                          for c in ACC_COLS if ka[k].get(c) != kb[k].get(c)})
         which = ", ".join(f"{b} on {LAW_LABEL.get(l, l)}"
                           for b, l in differing[:4])
-        style.note_below(fig,
-                 f"hollow markers are the {len(differing)} rows that differ "
-                 f"({which}); they differ only in {', '.join(movers)}",
-                 color="0.25")
+        _note = (f"hollow markers are the {len(differing)} rows that differ "
+                 f"({which}); they differ only in {', '.join(movers)}")
     axr.set_title(style.panel_title("cost on each machine"), pad=4)
     hs = [plt.Line2D([], [], ls="none", marker="o", ms=4.6,
                      mfc=style.BACKEND_COLOR.get(b, "0.4"), mec="0.3",
@@ -1958,11 +1966,10 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
         plt, [(style.FAMILY_MARK[f], False, FAMILY_PLOT_LABEL[f])
               for f in ("z_nu", "h_nu_s") if any(k[0] == f for k in keys)]
         + [("o", True, "differs between the machines")])
-    style.legend_figure(fig, handles=hs + _gh,
-                        labels=[h.get_label() for h in hs] + _gl, y=0.062)
-    fig.suptitle(style.fig_title("Worst-case error and cost on two CPU architectures"),
-                 y=0.995, fontsize=9.5)
-    fig.tight_layout(rect=(0, 0.135, 1, 0.93))
+    _top = _title(fig, "Worst-case error and cost on two CPU architectures")
+    _foot = style.footer(fig, hs + _gh, [h.get_label() for h in hs] + _gl,
+                         ncol=4, width=90, note=_note, note_color="0.25")
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _facts(r"Circles are the $(z,\nu)$ supplied convention, squares the "
            r"$(h,\nu,s)$ convention with $z$ computed; the colour is the "
            r"backend.",
@@ -2555,10 +2562,10 @@ def fig_gpu_knobs(plt, gthr, outdir, stamp, arch=""):
 
     fams = [f for f in ("z_nu", "h_nu_s")
             if any(r.get("family") == f for r in gthr)]
-    fig, axes = plt.subplots(2, max(1, len(fams)),
-                             figsize=(3.5 * max(1, len(fams)), 5.9),
+    fig, axes = plt.subplots(2, max(1, len(fams)), figsize=(style.TEXT_W, 5.0),
                              squeeze=False)
 
+    from matplotlib.ticker import LogFormatter
     modes = ["sync", "direct", "ring", "mapped"]
     mcol = {"sync": "#7f8c8d", "direct": "#2980b9",
             "ring": "#27ae60", "mapped": "#8e44ad"}
@@ -2576,11 +2583,14 @@ def fig_gpu_knobs(plt, gthr, outdir, stamp, arch=""):
                      "o-", color=mcol[m], ms=3.4, lw=1.2, label=m)
         top.set_xscale("log", base=2)
         top.set_yscale("log")
-        top.set_xlabel("Threads per block", fontsize=7)
-        top.set_ylabel("Cost  [ns / element]", fontsize=7)
-        top.set_title(FAMILY_PLOT_LABEL.get(fam, fam), fontsize=7.5)
+        # well under a decade: plain numbers (3, 4), not 3x10^0
+        top.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+        top.yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False,
+                                                   minor_thresholds=(2, 0.5)))
+        top.set_xlabel("Threads per block")
+        top.set_ylabel("Cost  [ns / element]")
+        top.set_title(FAMILY_PLOT_LABEL.get(fam, fam))
         top.grid(True, alpha=0.25, lw=0.5)
-        top.tick_params(labelsize=6.2)
 
         sub = sorted([r for r in mt if r.get("family") == fam],
                      key=lambda r: _i(r, "knob_value"))
@@ -2589,21 +2599,19 @@ def fig_gpu_knobs(plt, gthr, outdir, stamp, arch=""):
                      [_f(r, "ns_med") for r in sub],
                      "s-", color=mcol["ring"], ms=3.8, lw=1.3)
         bot.set_xscale("log", base=2)
-        bot.set_xlabel("Host staging threads", fontsize=7)
-        bot.set_ylabel("Cost  [ns / element]", fontsize=7)
-        bot.set_title(style.panel_title("Ring transfer strategy"), fontsize=6.8)
+        bot.set_xlabel("Host staging threads")
+        bot.set_ylabel("Cost  [ns / element]")
+        bot.set_title(style.panel_title("Ring transfer strategy"))
         bot.grid(True, alpha=0.25, lw=0.5)
-        bot.tick_params(labelsize=6.2)
-
-    # one key under the whole grid
-    style.legend_figure(fig, axes[0][0], y=0.012)
 
     bad = [r for r in gthr if (r.get("identical") or "yes") != "yes"]
     note = ("all knobs bit-identical to the default call"
             if not bad else "%d rows differ from the default call" % len(bad))
-    fig.suptitle(style.fig_title("Device parallelism knobs%s\n%s"
-                 % ((" --- " + arch) if arch else "", note)), fontsize=8.2)
-    fig.tight_layout(rect=(0, 0.08, 1, 0.90))
+    _top = _title(fig, "Device parallelism knobs%s\n%s"
+                  % ((" --- " + arch) if arch else "", note))
+    # one key under the whole grid
+    _foot = style.footer(fig, *axes[0][0].get_legend_handles_labels(), ncol=4)
+    fig.tight_layout(rect=(0, _foot, 1, _top))
     _facts("Cost: the median over %s of one call on $N$ = %s points."
            % (_reps_phrase(gthr), _n_phrase(gthr, "n") or "?"))
     _caption("Effect of GPU tuning parameters on runtime.",
