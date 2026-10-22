@@ -719,6 +719,12 @@ def main():
     for w in written:
         print("   ", w)
 
+    if style.SIZES:
+        print(f"\nprinted size at \\linewidth = {style.LATEX_LINEWIDTH:g} in "
+              f"(limits: height {style.TEXT_H_MAX:g} in, text {style.FS_MIN:g} pt):")
+        for line in style.size_report(OUT):
+            print(line)
+
     if pf.SKIPPED:
         print(f"\n{len(pf.SKIPPED)} figure(s) NOT drawn, with the input that was "
               f"missing:")

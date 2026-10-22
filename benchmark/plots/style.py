@@ -68,11 +68,29 @@ FAMILY_MARK = {"z_nu": "o", "h_nu_s": "s"}
 
 ULP_ONE  = 1.0
 
+# Figures are drawn at the width they are printed at, so a type size here is the size on
+# the page.  LATEX_LINEWIDTH is the paper's \linewidth (A4, 2.4 cm margins: 16.2 cm);
+# TEXT_W stays under it so a tight bounding box is never scaled down.  TEXT_H_MAX leaves
+# room for a caption under a full-page figure.
+LATEX_LINEWIDTH = 6.38
+TEXT_W          = 6.3
+TEXT_H_MAX      = 8.6
+
+# The type scale, in points on the page; FS_MIN is the smallest size the checker accepts.
+FS_TICK   = 7.5
+FS_LABEL  = 8.5
+FS_TITLE  = 8.5
+FS_LEGEND = 8.0
+FS_ANNOT  = 7.0
+FS_MIN    = 7.0
+
 
 def apply(plt):
     plt.rcParams.update({
-        "font.size": 9, "axes.labelsize": 9, "axes.titlesize": 9.5,
-        "legend.fontsize": 7.0, "xtick.labelsize": 8, "ytick.labelsize": 8,
+        "font.size": FS_LABEL, "axes.labelsize": FS_LABEL,
+        "axes.titlesize": FS_TITLE, "figure.titlesize": FS_TITLE,
+        "legend.fontsize": FS_LEGEND,
+        "xtick.labelsize": FS_TICK, "ytick.labelsize": FS_TICK,
         "axes.grid": True, "grid.alpha": 0.30, "grid.linewidth": 0.5,
         "figure.dpi": 150, "savefig.bbox": "tight", "pdf.fonttype": 42,
         "axes.spines.top": False, "axes.spines.right": False,
@@ -121,22 +139,86 @@ def apply_display_caps(fig):
 
 
 def save(fig, outdir, stem):
-    """Write `fig` as `<stem>.pdf` and `<stem>.png` in `outdir`."""
+    """Write `fig` as `<stem>.pdf` and `<stem>.png` in `outdir`; in paper mode record its
+    printed size (check_size)."""
     import os
     apply_display_caps(fig)
     for ext in ("pdf", "png"):
         path = os.path.join(outdir, f"{stem}.{ext}")
         fig.savefig(path)
         SAVED.append(path)
+    if PAPER:
+        check_size(fig, os.path.join(outdir, f"{stem}.pdf"))
     return 1
 
 
-def refline(ax, y, text, side="left"):
-    """A horizontal reference line at `y`, labelled in the axes rather than the legend."""
+# [(pdf path, printed width in, printed height in, smallest printed pt, its text, scale)] of
+# every figure saved in paper mode, filled by check_size, reported by make_paper_figures.py.
+SIZES = []
+
+
+def check_size(fig, pdf):
+    """Record the size `pdf` prints at when included at \\linewidth, and its smallest text.
+
+    The saved page, not `figsize`, is measured: a tight bounding box crops or grows it.
+    LaTeX scales the page to LATEX_LINEWIDTH, so every type size is scaled by the same
+    factor."""
+    import re
+    from matplotlib.text import Text
+    with open(pdf, "rb") as fh:
+        m = re.search(rb"/MediaBox\s*\[\s*([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)",
+                      fh.read())
+    if not m:
+        return
+    w = (float(m.group(3)) - float(m.group(1))) / 72.0
+    h = (float(m.group(4)) - float(m.group(2))) / 72.0
+    scale = LATEX_LINEWIDTH / w
+    r = fig.canvas.get_renderer()
+    box = fig.bbox
+    small, what = float("inf"), ""
+    for t in fig.findobj(Text):
+        s = t.get_text()
+        if not (s and s.strip() and t.get_visible()):
+            continue
+        try:
+            e = t.get_window_extent(r)
+        except Exception:
+            continue
+        # Text outside the canvas (unused tick objects) is not printed.
+        if e.x1 < box.x0 or e.x0 > box.x1 or e.y1 < box.y0 or e.y0 > box.y1:
+            continue
+        if t.get_fontsize() < small:
+            small, what = t.get_fontsize(), s
+    SIZES.append((pdf, w * scale, h * scale, small * scale, what, scale))
+
+
+def size_report(root):
+    """Lines describing SIZES, paths relative to `root`; a line starts with `!!` when the
+    figure is taller than TEXT_H_MAX or prints text under FS_MIN."""
+    import os
+    out = []
+    for pdf, w, h, pt, what, scale in SIZES:
+        bad = []
+        if h > TEXT_H_MAX:
+            bad.append(f"taller than {TEXT_H_MAX:g} in")
+        if pt < FS_MIN:
+            bad.append(f"text under {FS_MIN:g} pt: {what[:40]!r}")
+        out.append("%s %-62s %4.2f x %4.2f in  x%.2f  smallest %4.1f pt%s"
+                   % ("!!" if bad else "  ", os.path.relpath(pdf, root), w, h, scale,
+                      pt, ("  (" + "; ".join(bad) + ")") if bad else ""))
+    return out
+
+
+def refline(ax, y, text, side="left", backdrop=False):
+    """A horizontal reference line at `y`, labelled in the axes rather than the legend;
+    `backdrop` lifts the label over the data on a white ground (for a line inside the
+    data)."""
     ax.axhline(y, color="0.35", lw=0.8, ls=(0, (4, 3)), zorder=1)
     x, ha = (0.015, "left") if side == "left" else (0.985, "right")
+    kw = (dict(zorder=8, bbox=dict(fc="white", ec="none", alpha=0.85, pad=0.6))
+          if backdrop else {})
     ax.text(x, y, f" {text} ", transform=ax.get_yaxis_transform(),
-            ha=ha, va="bottom", fontsize=6.6, color="0.35")
+            ha=ha, va="bottom", fontsize=FS_ANNOT, color="0.35", **kw)
 
 
 class Raw(str):
@@ -219,7 +301,7 @@ def booktabs(path, caption, label, header, rows, align=None, note=None,
 
 # Keys and notes sit outside the axes, since the curves move between machines; the type
 # sizes are fixed and a wide key gets more columns.
-LEGEND_FONTSIZE = 7.0
+LEGEND_FONTSIZE = FS_LEGEND
 NOTE_FONTSIZE   = 6.6
 
 # Must equal the fontsize of the run stamp in paper_figures._stamp.
