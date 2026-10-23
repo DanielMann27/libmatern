@@ -1998,6 +1998,11 @@ def levin_reaches(on, off):
                                     for k in LEVIN_ACC_KEYS)
 
 
+# The two arms of the Levin A/B: band routed (circles) and not routed (squares).
+LEVIN_ON_COLOR = "#2c3e50"
+LEVIN_OFF_COLOR = "#e67e22"
+
+
 def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
     """Median ULP, maximum ULP and cost with and without the Levin band, per law."""
     rows = [r for r in lev if (r.get("device") or "cpu").strip() == device]
@@ -2053,13 +2058,14 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
                 a, b = _f(on, key), _f(off, key)
                 if not (_ok(a) and _ok(b) and a > 0 and b > 0):
                     continue
-                # red: larger without the band; green: smaller
-                cc ="#c0392b" if b > a else "#27ae60"
+                # segment and factor in the colour of the larger arm, whose
+                # marker the factor sits beside
+                cc = LEVIN_OFF_COLOR if b > a else LEVIN_ON_COLOR
                 ax.plot([a, b], [y, y], "-", color=cc, lw=1.6, zorder=1,
                         solid_capstyle="round")
-                ax.plot([a], [y], "o", color="#2c3e50", ms=5.0, zorder=3,
+                ax.plot([a], [y], "o", color=LEVIN_ON_COLOR, ms=5.0, zorder=3,
                         label="routes Levin" if (y == 0 and ci == 0) else None)
-                ax.plot([b], [y], "s", color="#e67e22", ms=4.6, zorder=3,
+                ax.plot([b], [y], "s", color=LEVIN_OFF_COLOR, ms=4.6, zorder=3,
                         label="does not route Levin" if (y == 0 and ci == 0) else None)
                 span[ax].extend([a, b])
                 # label the ratio only where it differs from 1 by at least 0.005
@@ -2107,7 +2113,7 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
         "The Levin band, included and excluded --- %s, %s%s\n"
         "the default build %s the band; %d datasets reach it and %d do not "
         "(omitted)\n"
-        "red = larger without the band,  green = smaller without the band, "
+        "orange = larger without the band,  blue = larger with it, "
         "on all three panels"
         % (dev, backend, ("   [%s]" % arch) if arch else "",
            "routes" if ship == "levin_on" else "does not route", kept, dropped))
@@ -2132,8 +2138,9 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
                      if r.get("backend") == backend) else ""),
              "Circles denote results with Levin routing and squares results "
              "without it; the annotated factors give the ratio of the value "
-             "without Levin routing to that with it, in red where it is larger "
-             "without and in green where it is smaller.",
+             "without Levin routing to that with it, in orange where the value "
+             "is larger without Levin routing and in blue where it is larger "
+             "with it.",
              ("The default build %s the Levin band."
               % ("routes" if ship == "levin_on" else "does not route"))
              if ship != "?" else "",
