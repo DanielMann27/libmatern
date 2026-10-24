@@ -419,22 +419,22 @@ def is_cpu_machine(rs):
 # picks for the CPU data the result is drawn from, "gpu" a machine with GPU data, "every"
 # each machine, "shared" the tree root (tables) or cross-machine/ (figures).
 # levin-cpu-vector is the vector router's Levin figure, whichever backend carries it.
+# Both argument conventions, (z,nu) beside the paper's (h,nu,s); fold, Levin and threads
+# carry both in one figure, the ladder is drawn for (z,nu) only.
 PAPER_FIGURES = {
-    "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-h_nu_s", "fold",
-            "ladder-*", "workspace-*-h_nu_s", "levin-cpu-vector"),
-    "gpu": ("gpu-plane-*", "gpu-accuracy-distribution-h_nu_s", "gpu-assembly-h_nu_s",
-            "gpu-modes-size_random*-h_nu_s", "gpu-boost-shortcut", "gpu-knobs",
+    "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-*", "fold",
+            "ladder-*", "workspace-*", "levin-cpu-vector"),
+    "gpu": ("gpu-plane-*", "gpu-accuracy-distribution-*", "gpu-assembly-*",
+            "gpu-modes-size_random*", "gpu-boost-shortcut", "gpu-knobs",
             "levin-cuda"),
     "every": ("threads",),
     "shared": ("machine-independence",),
 }
-# The tables the paper's own tables are taken from.
+# The tables the paper's own tables are taken from, with their (z,nu) twins.
 PAPER_TABLES = {
-    "cpu": ("throughput-h_nu_s",),
-    "gpu": ("gpu-medmax-h_nu_s", "gpu-cost-*", "gpu-call-h_nu_s",
-            "gpu-exclusions-h_nu_s"),
-    "shared": ("medmax-h_nu_s", "exclusions-h_nu_s", "references", "environment",
-               "datasets"),
+    "cpu": ("throughput-*",),
+    "gpu": ("gpu-medmax-*", "gpu-cost-*", "gpu-call-*", "gpu-exclusions-*"),
+    "shared": ("medmax-*", "exclusions-*", "references", "environment", "datasets"),
 }
 
 

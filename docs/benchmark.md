@@ -532,9 +532,10 @@ clock. Progress lines go to descriptor 3 (`WM_PROGRESS_FD`), not into the record
 ### Figures and tables
 
 By default the figure and table targets, `make benchmark` and `make pipeline` write the
-**paper set**: the figures the paper includes and the tables its own tables are taken from
-(`PAPER_FIGURES` and `PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 22 figures
-and 11 tables with the published runs. Each CPU result, the machine-independent tables
+**paper set**: the figures the paper includes and the tables its own tables are taken from,
+each in both argument conventions, `(z,ν)` beside `(h,ν,s)` (`PAPER_FIGURES` and
+`PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 28 figures and 17 tables with
+the published runs. Each CPU result, the machine-independent tables
 included, comes from one machine: the first that has the stage it is drawn from, machines
 without GPU data first (`ARGS=--cpu-machine NAME` puts one machine first), and a GPU run's
 one-backend CPU stage only when no CPU run has the stage. So runs of a single machine, of a
