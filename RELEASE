@@ -1,0 +1,7 @@
+# The commit this tree was archived from.  git archive (make dist, and the
+# archives a git hosting service makes) fills in the two lines below through the
+# export-subst attribute in .gitattributes; in a git checkout or a copy of one
+# they keep their placeholders and name no commit.  benchmark/run_benchmark.sh
+# records the commit as source_commit in a run's PROVENANCE.txt.
+commit   $Format:%H$
+describe $Format:%(describe:tags,match=v[0-9]*)$

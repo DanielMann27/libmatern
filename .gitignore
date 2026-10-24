@@ -1,0 +1,30 @@
+build/
+build-ab/
+__pycache__/
+*.pyc
+benchmark/runs/
+benchmark/plots/*/
+benchmark/tables/paper/
+references/build/
+references/bessels_jl/upstream/
+references/kaust_logbesselk/upstream/
+benchmark/_loadlog/
+references/boost/
+references/gsl/*/
+references/gsl/build-*.log
+.venv/
+data/*/*_large_[0-9]*.txt
+data/*/*_large_[0-9]*.bin
+data/*_large_[0-9]*.bin
+
+# Partial downloads of make corpus DOWNLOAD=yes, and damaged files it set aside.
+data/*.part
+data/*.bad
+data/*/*.bad
+
+# Not in the release: the paper PDF, the corpus files (make corpus) and site-specific launchers.
+docs/Paper*.pdf
+benchmark/slurm/
+data/*.bin
+data/*/*.bin
+data/*/*.txt

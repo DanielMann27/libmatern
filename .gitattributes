@@ -1,0 +1,2 @@
+# git archive (make dist, make clean-clone) fills in the commit in RELEASE.
+RELEASE export-subst

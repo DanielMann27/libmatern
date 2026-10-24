@@ -1,0 +1,85 @@
+/* broadcast_pools_scalar.h -- the broadcast pools at width 1: every fourth literal (AVX2's
+ * INDEX_FACTOR) of broadcast_pools_avx2.h, the same bits once each; keep in step with it. */
+#ifndef MATERN_BROADCAST_POOLS_SCALAR_H
+#define MATERN_BROADCAST_POOLS_SCALAR_H
+
+/* Self-contained: `make headers` compiles every header on its own. */
+#include <float.h>
+
+#include "simd_scalar.h"
+
+#ifndef M_LN2
+#define M_LN2 0x1.62e42fefa39efp-1
+#endif
+#ifndef M_PI
+#define M_PI  0x1.921fb54442d18p+1
+#endif
+
+/* the integers 0, 1, ..., 50; 50 keeps the continued fraction's last series step, which
+ * reads i + 1, inside the table. */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_POOL[] = {
+    0.000000000e+0, 1.000000000e+0, 2.000000000e+0, 3.000000000e+0,
+    4.000000000e+0, 5.000000000e+0, 6.000000000e+0, 7.000000000e+0,
+    8.000000000e+0, 9.000000000e+0, 10.000000000e+0, 11.000000000e+0,
+    12.000000000e+0, 13.000000000e+0, 14.000000000e+0, 15.000000000e+0,
+    16.000000000e+0, 17.000000000e+0, 18.000000000e+0, 19.000000000e+0,
+    20.000000000e+0, 21.000000000e+0, 22.000000000e+0, 23.000000000e+0,
+    24.000000000e+0, 25.000000000e+0, 26.000000000e+0, 27.000000000e+0,
+    28.000000000e+0, 29.000000000e+0, 30.000000000e+0, 31.000000000e+0,
+    32.000000000e+0, 33.000000000e+0, 34.000000000e+0, 35.000000000e+0,
+    36.000000000e+0, 37.000000000e+0, 38.000000000e+0, 39.000000000e+0,
+    40.000000000e+0, 41.000000000e+0, 42.000000000e+0, 43.000000000e+0,
+    44.000000000e+0, 45.000000000e+0, 46.000000000e+0, 47.000000000e+0,
+    48.000000000e+0, 49.000000000e+0, 50.000000000e+0,
+};
+
+/* 0.5 */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_HALF[] = {
+    5.00000000000000000000e-01,
+};
+
+/* ln 2 */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_LOG2[] = {
+    M_LN2,
+};
+
+/* the convergence tolerance */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_TOL[] = {
+    DBL_EPSILON,
+};
+
+/* pi */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_PI[] = {
+    M_PI,
+};
+
+/* odd squares (2k-1)^2, k = 1..15, indexed; read by the Levin transform */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_FACTORS[] = {
+    1.000000,
+    9.000000,
+    25.000000,
+    49.000000,
+    81.000000,
+    121.000000,
+    169.000000,
+    225.000000,
+    289.000000,
+    361.000000,
+    441.000000,
+    529.000000,
+    625.000000,
+    729.000000,
+    841.000000,
+};
+
+/* 0.25 */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_QUARTER[] = {
+    0.25,
+};
+
+/* small nonzero starting value (1e-50) for the continued-fraction recurrences */
+static const DATA_TYPE_FLOAT MATERN_BROADCAST_LOW[] = {
+    1e-50,
+};
+
+#endif /* MATERN_BROADCAST_POOLS_SCALAR_H */

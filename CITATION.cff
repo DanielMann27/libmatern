@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "libmatern: the normalised Matérn covariance function in double precision"
+type: software
+authors:
+  - family-names: "Mann"
+    given-names: "Daniel"
+    affiliation: "Chair of Applied Stochastics, University of Mannheim"
+  - family-names: "Ehrhardt"
+    given-names: "Matthis"
+    affiliation: "Chair of Applied Stochastics, University of Mannheim"
+  - family-names: "Schlather"
+    given-names: "Martin"
+    affiliation: "Chair of Applied Stochastics, University of Mannheim"
+version: "0.9.0"
+date-released: 2026-10-10
+license: MIT
+repository-code: "https://github.com/DanielMann27/libmatern"
+abstract: >-
+  The normalised Matérn covariance function in double precision, with vectorised
+  backends for AVX-512 and AVX2, a width-1 build of the same kernels for CPUs
+  without AVX2, an independent scalar implementation to test against, and a
+  CUDA backend. The (nu, z) plane is partitioned into regions, each evaluated by
+  an approximation of the modified Bessel function K_nu, in most regions with the
+  covariance prefactor folded in.
+keywords:
+  - Matérn covariance
+  - Whittle-Matérn
+  - modified Bessel function
+  - SIMD
+  - CUDA
+references:
+  - type: dataset
+    title: "Reference high precision datasets for the Matérn covariance function"
+    authors:
+      - family-names: "Mann"
+        given-names: "Daniel"
+        affiliation: "University of Mannheim"
+      - family-names: "Schlather"
+        given-names: "Martin"
+        affiliation: "University of Mannheim"
+    doi: "10.5281/zenodo.23393956"
+    license: CC-BY-4.0
+    version: "v1"

@@ -1,0 +1,24 @@
+/* matern.map -- the exported symbols of libmatern; every other symbol stays local,
+ * in the shared library through this version script and in the static library
+ * through the Makefile (build/matern.syms, checked by `make exports`). */
+{
+  global:
+    matern_covariance;
+    matern_covariance_z;
+    matern_workspace_create;
+    matern_workspace_destroy;
+    matern_release_thread_workspace;
+    matern_backend_name;
+    matern_version;
+    matern_cuda_available;
+    matern_cuda_device_name;
+    matern_covariance_cuda;
+    matern_covariance_cuda_z;
+    matern_covariance_cuda_tuned;
+    matern_covariance_cuda_z_tuned;
+    matern_covariance_cuda_device;
+    matern_covariance_cuda_device_z;
+    matern_cuda_release;
+  local:
+    *;
+};
