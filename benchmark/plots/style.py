@@ -63,6 +63,9 @@ FOLD_COLOR = {"scalar": "#c1121f", "scalar-control": "#c1121f",
               "scalar-unfolded-explog": "#8a8a8a"}
 FOLD_MARK = {"scalar": "o", "scalar-control": "o",
              "scalar-unfolded-direct": "^", "scalar-unfolded-explog": "s"}
+# Marker sizes (pt): the triangle reads small at one size with the circle and the square.
+FOLD_MS = {"scalar": 4.0, "scalar-control": 4.0,
+           "scalar-unfolded-direct": 6.0, "scalar-unfolded-explog": 5.0}
 FAMILY_LS   = {"z_nu": "-", "h_nu_s": "--"}
 FAMILY_MARK = {"z_nu": "o", "h_nu_s": "s"}
 

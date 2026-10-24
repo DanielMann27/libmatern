@@ -2221,7 +2221,7 @@ def fig_fold(plt, fold, outdir, stamp, arch=""):
                             lw=1.1, zorder=1, solid_capstyle="round")
             for y, a, v, _r in pts:
                 x = xfail if (band and v >= CATASTROPHIC) else v
-                ax.plot([x], [y], style.FOLD_MARK[a], ms=5.0,
+                ax.plot([x], [y], style.FOLD_MARK[a], ms=style.FOLD_MS[a],
                         mfc=style.FOLD_COLOR[a], mec=style.FOLD_COLOR[a], mew=1.0,
                         zorder=4 if a == "scalar" else 3,
                         ls="none", label=style.FOLD_LABEL[a] if a not in seen else None)
