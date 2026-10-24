@@ -25,7 +25,8 @@
  * With `work = NULL` a workspace is created on first use and cached per thread; a
  * thread that does so calls matern_release_thread_workspace() before it ends.  The
  * workspace holds the routing scratch across calls, so an evaluation does not
- * allocate.  scalar and scalar_portable use no workspace and allocate nothing.
+ * allocate.  scalar, scalar_portable, matched and matched_fma use no workspace and
+ * allocate nothing.
  *
  * DOMAIN AND VALIDITY
  * Valid input is h >= 0 (+infinity included) and finite nu > 0 and s > 0.  Anything
@@ -67,8 +68,9 @@
  *                   arithmetic or argument corrections; never selected
  *                   automatically.  `scalar` runs the best build the CPU supports,
  *                   `scalar_portable` the x86-64 baseline build.
- *      matched      the vector source at width 1 for the x86-64 baseline, with
- *                   libm's elementary functions.
+ *      matched      the vector kernels at width 1 for the x86-64 baseline, with
+ *                   libm's elementary functions, evaluated point by point except
+ *                   the continued fraction (four points at a time).
  *      matched_fma  the same source compiled with -mfma.
  *      avx2         the vectorised kernels and elementary functions, 4 lanes.
  *      avx512       the same at 8 lanes.
@@ -87,10 +89,11 @@
  * two threads at the same time (concurrent use is undefined behaviour): give each
  * thread its own, or pass NULL so that each thread caches its own.
  * Each call is deterministic, but the composition of a batch can change the last
- * bits: on avx512, avx2, matched_fma and matched the same point evaluated alone and
- * inside a batch can differ, because the router tiles and sorts and some kernels
- * stop on a test across a whole vector.  scalar routes each point on its own and is
- * exactly batch-invariant.  Consequently a covariance matrix is not exactly
+ * bits: on avx512 and avx2 the same point evaluated alone and inside a batch can
+ * differ, because the router tiles and sorts and some kernels stop on a test across a
+ * whole vector; on matched_fma and matched only a continued-fraction point can, since
+ * those run four at a time.  scalar routes each point on its own and is exactly
+ * batch-invariant.  Consequently a covariance matrix is not exactly
  * symmetric on those backends: compare the two triangles with a tolerance, or
  * compute one and mirror it.
  *

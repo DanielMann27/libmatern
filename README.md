@@ -118,7 +118,7 @@ value, or a backend the CPU cannot run, leaves the automatic choice.
 |---|---|
 | `avx512` | the vectorised kernels, 8 doubles per vector; needs AVX-512 (F and DQ) and FMA |
 | `avx2` | the vectorised kernels, 4 doubles per vector; needs AVX2 and FMA |
-| `matched_fma` | the vector algorithm at width 1 with the FMA instruction and the C library's `exp`, `log`, `pow` and `tgamma`; selected on a CPU with FMA and AVX but without AVX2 |
+| `matched_fma` | the vector kernels at width 1 with the FMA instruction and the C library's `exp`, `log`, `pow` and `tgamma`, evaluated point by point without a workspace, except continued-fraction points, which run four at a time; selected on a CPU with FMA and AVX but without AVX2 |
 | `matched` | the same with only baseline x86-64 instructions (default build, `FMA=no`); the fallback |
 | `scalar` | an independent direct implementation in plain double arithmetic that shares no region kernel with the others, for cross-checking; never selected automatically; `scalar_portable` selects its baseline x86-64 build |
 
@@ -137,8 +137,8 @@ system's library path. The interface and its contract are in `include/matern.h`.
 * `nu` and `scale` are arrays of length `n`; a constant order is passed as a filled array.
 * With `workspace = NULL` the library creates a workspace at a thread's first call and keeps
   it for that thread, which releases it with `matern_release_thread_workspace()` before it
-  ends (the main thread may leave this to process exit); `scalar` and `scalar_portable` use
-  no workspace. A workspace from
+  ends (the main thread may leave this to process exit); `scalar`, `scalar_portable`,
+  `matched` and `matched_fma` use no workspace. A workspace from
   `matern_workspace_create()` lives until `matern_workspace_destroy()` and serves one thread
   at a time. Neither form allocates on every call.
 * On the CPU backends other than `scalar`, the same point can differ in the last bits

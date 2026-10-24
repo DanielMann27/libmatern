@@ -1,5 +1,5 @@
-/* test_workspace_need.c -- scalar succeeds with a NULL workspace and matched (the vector
- * pipeline at width 1) refuses it, as the harness exemption in benchmark_cpu.c assumes.
+/* test_workspace_need.c -- scalar and matched (the width-1 entry, point by point) succeed
+ * with a NULL workspace, as the harness exemption in benchmark_cpu.c assumes.
  * Run by benchmark/tests/run_tests.sh; exit status 1 on any failure. */
 #include <stdio.h>
 #include "matern.h"
@@ -19,11 +19,10 @@ int main(void)
         printf("scalar REQUIRES a workspace -- the harness exemption is now wrong\n");
         bad = 1;
     }
-    if (matern_evaluate_matched(out, h, nu, scale, 4, NULL) == MATERN_OK) {
-        printf("matched runs WITHOUT a workspace -- it must not be exempted, but\n"
-               "the reason it is not has gone away; re-check pipeline_vector.h\n");
+    if (matern_evaluate_matched(out, h, nu, scale, 4, NULL) != MATERN_OK) {
+        printf("matched REQUIRES a workspace -- the harness exemption is now wrong\n");
         bad = 1;
     }
-    if (!bad) printf("scalar needs no workspace, matched does\n");
+    if (!bad) printf("scalar and matched need no workspace\n");
     return bad;
 }

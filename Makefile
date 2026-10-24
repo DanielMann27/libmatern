@@ -505,13 +505,16 @@ direct-argument: $(LIBRARY) build/backend_name
 	@$(call per_backend,./build/direct_argument)
 
 # The positive control (one workspace shared by all threads) must fail, by differing
-# results or a crash.  It runs on the automatic backend: scalar uses no workspace.
+# results or a crash.  It runs on the automatic backend, and is skipped where that is
+# matched or matched_fma, which use no workspace (as scalar does not).
 threads: $(LIBRARY) build/backend_name
 	@mkdir -p build
 	@$(CC) $(ALL_CFLAGS) -MT build/thread_safety -MF build/thread_safety.d \
 	    $(INCLUDES) -pthread -o build/thread_safety test/thread_safety.c $(LIBRARY) -lm
 	@$(call per_backend,./build/thread_safety)
-	@if MATERN_BACKEND= MATERN_THREAD_CONTROL=1 ./build/thread_safety > build/thread_control.log 2>&1; \
+	@live=$$(MATERN_BACKEND= ./build/backend_name); \
+	 case "$$live" in matched*) echo "control: skipped, the automatic backend ($$live) uses no workspace"; exit 0;; esac; \
+	 if MATERN_BACKEND= MATERN_THREAD_CONTROL=1 ./build/thread_safety > build/thread_control.log 2>&1; \
 	 then echo "control: with one workspace shared by all threads, which matern.h forbids, the test passed;"; \
 	      echo "  it cannot detect a shared workspace (build/thread_control.log)"; exit 1; \
 	 else rc=$$?; say="control: with one workspace shared by all threads, which matern.h forbids, the test"; \

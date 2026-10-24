@@ -15,8 +15,8 @@ int matern_evaluate_matched(double*, const double*, const double*, const double*
                             size_t, matern_workspace*);
 const char *matern_scalar_isa(void);
 
-/* Called directly, `matern_evaluate_matched` returns -1 and writes nothing without
- * a workspace, so return codes are checked. */
+/* Called directly, the entries return a status and write nothing on an invalid argument,
+ * so return codes are checked. */
 
 /* splitmix64: deterministic inputs without a data file. */
 static uint64_t S = 0x9E3779B97F4A7C15ULL;

@@ -1,6 +1,8 @@
 /* vector.c -- entry point of the vector backends: runs of half-integer order go to the
  * closed form, everything else to the routing pipeline (see the accompanying paper, CPU
- * implementation and SIMD strategy). */
+ * implementation and SIMD strategy).  At width 1 (matched, matched_fma) the points are
+ * evaluated one by one instead, without a workspace, except that continued-fraction points
+ * still run four at a time. */
 #include <stddef.h>
 
 #include "internal.h"
@@ -47,6 +49,172 @@
   #define MATERN_ORDER_CEILING HALF_INTEGER_VECTOR_CAP
 #endif
 
+#ifdef MATERN_TARGET_SCALAR
+/* Width 1.  The routing pipeline exists to give a vector's lanes the same work; with one
+ * lane its tiling, region sort and scatter are overhead, so every point is evaluated on its
+ * own: a half-integer order within the ceiling takes the closed form, any other point is
+ * classified by the pipeline's classifier, evaluated by its region's one-vector cell and
+ * clamped as in phase D.  The exception is the continued fraction, whose four-vector block
+ * runs four independent points side by side and is worth more than the pipeline costs: its
+ * points wait in four-slot queues on the stack, one per value of the driver's sort key
+ * (continued_fraction_bucket_of, so that the four points sharing the block's exits have
+ * similar z), and run four at a time through continued_fraction_cell_x4.  A queue left with
+ * fewer than four points at the end takes continued_fraction_cell_x1 per point, as the
+ * driver's remainder does.  Which points share a block depends on the batch, so the last
+ * bits of a continued-fraction point can too; every other point gets what it gets alone. */
+#define CONTINUED_FRACTION_QUEUES 32                 /* the range of continued_fraction_bucket_of */
+
+/* The closed form's per-run setup (matern_half_integer_run), kept for the last order seen. */
+typedef struct {
+    int             degree;                          /* -1: nothing kept */
+    double          c[HALF_INTEGER_MAX_DEGREE + 1];
+    SIMD_TYPE_FLOAT S, SL;                           /* sqrt(2nu) as a double-double */
+} half_integer_setup;
+
+static inline __attribute__((always_inline))
+double one_point_half_integer(double h, double nu, double s, int p, half_integer_setup *m)
+{
+    if (m->degree != p) {
+        half_integer_coefficients(p, m->c);
+        const double two_nu = nu + nu;                   /* exact */
+        const double shd = sqrt(two_nu);
+        const double sqh = shd * shd;                    /* rounded square; the fma recovers its error */
+        const double sld = ((two_nu - sqh) - fma_cancel(shd, shd, -sqh)) / (shd + shd);
+        m->S = VEC_VSET(shd);
+        m->SL = VEC_VSET(sld);
+        m->degree = p;
+    }
+    return vec_first_lane(half_integer_cell(VEC_VSET(h), VEC_VSET(s), m->S, m->SL, m->c, p));
+}
+
+/* Phase A for one point. */
+static inline __attribute__((always_inline))
+unsigned char one_point_region(double h, double nu, double s)
+{
+    unsigned char r;
+    size_t cnt[REGION_TOTAL] = {0};
+    matern_classify(&h, &nu, &s, &r, 1, cnt);
+    return r;
+}
+
+/* The phase D clamp. */
+static inline __attribute__((always_inline))
+double one_point_clamp(double v)
+{
+    if (!(v > 0.0)) v = 0.0; else if (v > 1.0) v = 1.0;
+    return v;
+}
+
+/* Region r's cell for one point, clamped (the trivial bucket is exempt, as in phase D). */
+static inline __attribute__((always_inline))
+double one_point_cell(unsigned char r, double h, double nu, double s)
+{
+    if (r == REGION_TRIVIAL) {
+        double o;
+        matern_trivial_run(&o, &h, &nu, &s, 1);
+        return o;
+    }
+    const SIMD_TYPE_FLOAT H = VEC_VSET(h), NU = VEC_VSET(nu), R = VEC_VSET(s);
+    SIMD_TYPE_FLOAT zh, zl;
+    double v;
+    switch (r) {
+    case REGION_LARGE_ARGUMENT_LOW_ORDER:
+    case REGION_LARGE_ARGUMENT: {
+        SIMD_TYPE_FLOAT o;
+        large_argument_cell(&H, &NU, &R, &o);
+        v = vec_first_lane(o);
+        break; }
+    case REGION_LEVIN:
+        bessel_derive_argument(H, NU, R, &zh, &zl);
+        v = vec_first_lane(levin_cell(zh, zl, NU));
+        break;
+    case REGION_CONTINUED_FRACTION: {
+        double z;
+        continued_fraction_derive_arguments(&z, &h, &nu, &s, 1);
+        continued_fraction_cell_x1(&z, &nu, &v);
+        break; }
+    case REGION_DEBYE:
+        bessel_derive_argument(H, NU, R, &zh, &zl);
+        v = vec_first_lane(debye_cell(zh, zl, NU));
+        break;
+    default:                                         /* REGION_SMALL_ARGUMENT */
+        v = vec_first_lane(small_argument_cell(small_argument_derive(H, NU, R), NU, H, R));
+        break;
+    }
+    return one_point_clamp(v);
+}
+
+typedef struct {
+    double z[4], nu[4];
+    size_t at[4];                                    /* caller positions */
+    int    count;
+} continued_fraction_queue;
+
+static inline __attribute__((always_inline))
+void continued_fraction_queue_run(continued_fraction_queue *q, double *out)
+{
+    double o[4];
+    continued_fraction_cell_x4(q->z, q->nu, o);
+    for (int j = 0; j < 4; j++)
+        out[q->at[j]] = one_point_clamp(o[j]);
+    q->count = 0;
+}
+
+static inline __attribute__((always_inline))
+void continued_fraction_queue_flush(continued_fraction_queue *q, double *out)
+{
+    for (int j = 0; j < q->count; j++) {
+        double o;
+        continued_fraction_cell_x1(&q->z[j], &q->nu[j], &o);
+        out[q->at[j]] = one_point_clamp(o);
+    }
+    q->count = 0;
+}
+
+/* The workspace is accepted and ignored. */
+int MATERN_VECTOR_ENTRY(double *out, const double *h, const double *nu,
+                        const double *scale, size_t n,
+                        matern_workspace *workspace)
+{
+    (void)workspace;
+    (void)matern_half_integer_run;                   /* replaced per point by one_point_half_integer */
+    if (n == 0)
+        return MATERN_OK;
+    if (!out || !h || !nu || !scale)
+        return MATERN_INVALID_ARGUMENT;
+
+    half_integer_setup setup;
+    setup.degree = -1;
+    continued_fraction_queue queue[CONTINUED_FRACTION_QUEUES];
+    for (int k = 0; k < CONTINUED_FRACTION_QUEUES; k++)
+        queue[k].count = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        const int p = half_integer_degree(nu[i], MATERN_ORDER_CEILING);
+        if (p >= 0) {
+            out[i] = one_point_half_integer(h[i], nu[i], scale[i], p, &setup);
+            continue;
+        }
+        const unsigned char r = one_point_region(h[i], nu[i], scale[i]);
+        if (r != REGION_CONTINUED_FRACTION) {
+            out[i] = one_point_cell(r, h[i], nu[i], scale[i]);
+            continue;
+        }
+        double z;
+        continued_fraction_derive_arguments(&z, h + i, nu + i, scale + i, 1);
+        continued_fraction_queue *q = &queue[continued_fraction_bucket_of(z)];
+        q->z[q->count] = z;
+        q->nu[q->count] = nu[i];
+        q->at[q->count] = i;
+        if (++q->count == 4)
+            continued_fraction_queue_run(q, out);
+    }
+    for (int k = 0; k < CONTINUED_FRACTION_QUEUES; k++)
+        continued_fraction_queue_flush(&queue[k], out);
+    return MATERN_OK;
+}
+
+#else
 /* Length of the leading segment of half-integer orders within the ceiling. */
 static size_t half_integer_segment(const double *nu, size_t n)
 {
@@ -150,3 +318,5 @@ int MATERN_VECTOR_ENTRY(double *out, const double *h, const double *nu,
 
     return MATERN_OK;
 }
+
+#endif /* MATERN_TARGET_SCALAR */

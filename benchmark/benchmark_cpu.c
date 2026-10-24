@@ -101,12 +101,12 @@ static int evaluate_range(const corpus_dataset *cs, double *out, size_t lo, size
     return matern_covariance_z(out + lo, cs->set.argument + lo, cs->set.order + lo, n, ws);
 }
 
-/* Whether the library uses a workspace on this backend: the scalar builds need none
- * (dispatch.c), while `matched` is the vector pipeline at width 1 and dereferences it
- * (pipeline_vector.h).  tests/test_workspace_need.c checks both. */
+/* Whether the library uses a workspace on this backend: only the routing pipeline of
+ * avx512 and avx2 does; the scalar builds and the width-1 entries (matched, matched_fma)
+ * evaluate point by point (dispatch.c, vector.c).  tests/test_workspace_need.c checks it. */
 static int backend_builds_workspace(const char *backend)
 {
-    return strncmp(backend, "scalar", 6) != 0;   /* scalar and scalar_portable */
+    return strncmp(backend, "avx", 3) == 0;      /* avx512 and avx2 */
 }
 
 /* Timing: every repetition creates and destroys its own workspace inside the timer.

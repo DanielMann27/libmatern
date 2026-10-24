@@ -54,8 +54,8 @@ typedef struct {
 
 /* Positive control, MATERN_THREAD_CONTROL=1: all threads share one workspace, which
  * matern.h forbids.  It fires when the program reports differences (exit non-zero) or
- * crashes, and make threads fails on any other outcome; it cannot fire on the scalar
- * backends, which use no workspace. */
+ * crashes, and make threads fails on any other outcome; it cannot fire on the scalar,
+ * matched and matched_fma backends, which use no workspace. */
 static matern_workspace *control_workspace = NULL;
 
 static void *run_worker(void *argument)

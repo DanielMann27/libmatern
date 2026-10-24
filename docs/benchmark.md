@@ -629,13 +629,14 @@ front. The columns, in the order of `accuracy.csv`:
 | `worst_nu`, `worst_arg` | ν and the argument (`z` or `h`) of the point of `u_max` |
 | `ns_min`, `ns_q1`, `ns_med`, `ns_q3`, `ns_p95`, `ns_max`, `ns_mean`, `ns_iqr`, `ns_spread`, `reps` | the time over the repetitions: minimum, quartiles, 95th percentile, maximum, mean, `ns_q3 - ns_q1`, `100 (ns_max - ns_min) / ns_min` (percent); the repetitions |
 | `ns_points` | points timed: `n`, or the first `TIME_MAX_POINTS` |
-| `timing_scope` | `call`: the whole call (on the CPU with a workspace built in each repetition, on the GPU with the transfers); `kernel`: the device kernel alone |
+| `timing_scope` | `call`: the whole call (on the CPU with a workspace built in each repetition on `avx512` and `avx2`, the backends that use one; on the GPU with the transfers); `kernel`: the device kernel alone |
 | `n_file` | points of the dataset on disk |
 
 **Ladders**: `ladder.csv` has one row per family, dataset, backend and rung `n`, timed with a
 workspace built in every call (`ns_ws_per_call_*`, the library's timing) and with one
-reused workspace (`ns_ws_reused_*`), each with the `ns_*` statistics; `ns_setup_per_elem` is
-the difference of their minima; `ns_workspace` and `ns_workspace_med` time one workspace
+reused workspace (`ns_ws_reused_*`), each with the `ns_*` statistics (on the backends that use
+no workspace both series time the same call); `ns_setup_per_elem` is the difference of their
+minima; `ns_workspace` and `ns_workspace_med` time one workspace
 create and destroy; `nu_med`, `arg_med` are medians of the rung's inputs; `llc_bytes`,
 `llc_shared_cpus` the last-level cache of CPU 0 and its sharing; `ws_bytes` the rung's
 arrays; `ladder_mode` is `rung` (timed alone) or `pass` (from the cumulative pass) and
