@@ -138,12 +138,16 @@ def apply_display_caps(fig):
             t.set_text(display_caps(s))
 
 
+# The file formats save() writes; make_paper_figures.py drops the PNG for the paper set.
+FORMATS = ("pdf", "png")
+
+
 def save(fig, outdir, stem):
-    """Write `fig` as `<stem>.pdf` and `<stem>.png` in `outdir`; in paper mode record its
-    printed size (check_size)."""
+    """Write `fig` in each of FORMATS (`<stem>.pdf`, `<stem>.png`) in `outdir`; in paper
+    mode record its printed size (check_size)."""
     import os
     apply_display_caps(fig)
-    for ext in ("pdf", "png"):
+    for ext in FORMATS:
         path = os.path.join(outdir, f"{stem}.{ext}")
         fig.savefig(path)
         SAVED.append(path)

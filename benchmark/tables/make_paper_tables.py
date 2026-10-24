@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """make_paper_tables.py -- builds the paper table set into benchmark/tables/paper/; needs
-pdflatex unless --no-preview.  Runs are loaded and grouped by make_paper_figures; the
+pdflatex unless --no-preview.  By default only the tables the paper's own tables are taken
+from are built (make_paper_figures.PAPER_TABLES); --full builds every table.  Runs are loaded and grouped by make_paper_figures; the
 tables come from paper_tables.  Exit status: 1 for no runs, a refused input or a LaTeX
 error in a preview; 2 for no pdflatex, or under --strict an incomplete run or a refused
 input."""
@@ -34,6 +35,13 @@ def main():
     ap.add_argument("--no-preview", action="store_true",
                     help="write preview.tex but do not run pdflatex, and do "
                          "not fit tables to the column")
+    ap.add_argument("--full", action="store_true",
+                    help="build every table, not only the paper set "
+                         "(make_paper_figures.PAPER_TABLES)")
+    ap.add_argument("--cpu-machine", default="",
+                    help="the machine the paper set takes its CPU tables from, the "
+                         "machine-independent ones included (default: the first CPU "
+                         "machine without a GPU run)")
     args = ap.parse_args()
 
     if not args.list and not args.no_preview and not shutil.which("pdflatex"):
@@ -76,8 +84,24 @@ def main():
             return 2
         print("!!", msg, "-- the README.md of the tables will say so")
 
-    def want(stem):
-        return (not args.only) or (args.only in stem)
+    cpu_mach = mpf.cpu_machine(bymach, args.cpu_machine)
+    if args.full:
+        print("table set: every table (--full)")
+    else:
+        print(f"table set: the sources of the paper's tables (--full for every table); "
+              f"CPU tables from {cpu_mach or 'no CPU machine'}")
+    roles = {"shared"}      # the tree root; each machine's roles in its loop below
+
+    def want(stem, any_role=False):
+        """Whether table `stem` is built here: --only, then the paper set for the current
+        roles (any role for the skipped-stage notes, whose stems are joined lists)."""
+        if args.only and args.only not in stem:
+            return False
+        if args.full:
+            return True
+        names = [x.strip().replace("tab-", "", 1) for x in stem.split(" / ")]
+        return any(mpf.in_paper_set(mpf.PAPER_TABLES, x, None if any_role else roles)
+                   for x in names)
 
     n = 0
 
@@ -90,6 +114,9 @@ def main():
     # The accuracy tables are written once at the root, from the first CPU machine
     # (mpf.machine_order); machine_agreement checks every field across machines.
     cpu = [(m, rs) for m, rs in bymach.items() if mpf.is_cpu_machine(rs)]
+    # The paper set's root tables describe the machine of its CPU tables.
+    if not args.full:
+        cpu.sort(key=lambda mr: mr[0] != cpu_mach)
     cpu_acc = [(m, mpf.merge(rs, "accuracy")) for m, rs in cpu]
     cpu_sup = [(m, mpf.merge(rs, "suppliers")) for m, rs in cpu]
     cpu_arch = [mp.cpu_arch_key(rs[0].get("arch_short")) or m for m, rs in cpu]
@@ -225,6 +252,7 @@ def main():
         thr = mpf.merge(rs, "threads")
         fold = mpf.merge(rs, "fold")
         print(f"== {mach}  {mpf.machine_pretty(rs)}")
+        roles = mpf.machine_roles(mach, rs, cpu_mach)
         # Labels carry the machine until cleared, so two machines' tables do not collide.
         pt.LABEL_SUFFIX = mach
 
@@ -354,7 +382,8 @@ def main():
         ("gpu_levin", "tab-levin-cuda",
          "no run carries the device Levin A/B, which is opt-in at run time"),
     ):
-        if not any(r[key] for rs in bymach.values() for r in rs) and want(stems):
+        if (not any(r[key] for rs in bymach.values() for r in rs)
+                and want(stems, any_role=True)):
             pt.SKIPPED.append((stems, why))
 
     # Output files this run did not write are listed, not deleted.

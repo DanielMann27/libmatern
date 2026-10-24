@@ -15,6 +15,7 @@ make benchmark           # a CPU run with the drivers built, then the figures an
 make paper-figures       # figures with titles and notes -> benchmark/plots/paper/
 make paper-figures-final # publication figures and captions.tex -> benchmark/plots/paper-final/
 make paper-tables        # publication tables -> benchmark/tables/paper/
+                         # (all three: the paper set; FULL=yes for every figure and table)
 make paper-tables-check  # compiles every generated table with pdflatex
 ```
 
@@ -176,6 +177,7 @@ prints the targets and a summary of this section.
 | `CHECK` | `no` | `make check` after the builds, before the runs; a failure stops the pipeline |
 | `FIGURES` | `yes` | `make paper-figures-final` and `make paper-tables` at the end |
 | `TABLES_CHECK` | `no` | `make paper-tables-check` after the tables (needs `FIGURES=yes`) |
+| `FULL` | `no` | `yes` writes every figure and table, not only the paper set (Figures and tables) |
 | `DRY` | `no` | `yes` prints the plan and the questions a terminal would be asked, and runs nothing |
 
 **Corpus, externals, Python**
@@ -529,6 +531,16 @@ clock. Progress lines go to descriptor 3 (`WM_PROGRESS_FD`), not into the record
 
 ### Figures and tables
 
+By default the figure and table targets, `make benchmark` and `make pipeline` write the
+**paper set**: the figures the paper includes and the tables its own tables are taken from
+(`PAPER_FIGURES` and `PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 22 figures
+and 11 tables with the published runs. The CPU figures and tables, the machine-independent
+tables included, come from one machine, the first CPU machine without a GPU-pipeline run
+(`ARGS=--cpu-machine NAME` names another); the GPU figures and tables from the GPU host;
+the thread figure from every machine. `paper-final/` then holds `.pdf` only. `FULL=yes`
+(`--full` to the generators) writes every figure and table described below, `.pdf` and
+`.png`, from every machine.
+
 `make paper-figures-final` writes `.pdf` and `.png` figures and `captions.tex` to
 `benchmark/plots/paper-final/`, and `make paper-figures` the figures with titles and notes to
 `benchmark/plots/paper/`; in both, `HARDWARE.md` names the Python, NumPy and Matplotlib and
@@ -575,8 +587,9 @@ supplier stages:
 | `<g>/fig-paper-gpu-knobs` | CUDA block size and host staging threads | `GPU=yes THREADS=yes` |
 | `tab-environment` | machines and software of the runs | any run |
 
-The generators also write supplementary figures and tables from the same runs (attribution
-and worst-case maps, ECDF and timing distributions, quantile, median and cost tables).
+With `FULL=yes` the generators also write supplementary figures and tables from the same
+runs (attribution and worst-case maps, ECDF and timing distributions, quantile, median and
+cost tables).
 
 ### Columns of the CSV files
 

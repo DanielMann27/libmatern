@@ -423,6 +423,15 @@ run "figures: a complete run draws" bash -c '
     "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
     n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
+# The default is the paper set (PAPER_FIGURES): no attribution figure; --full draws it.
+run "figures: paper set by default, --full all" bash -c '
+    m=$(bash -c "$FIGMIRROR"); cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
+    "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
+    n=$(find "$m/plots/paper" -name "*.png" | wc -l)
+    a=$(find "$m/plots/paper" -name "fig-paper-attribution-*.png" | wc -l)
+    "'"$PY"'" "$m/plots/make_paper_figures.py" --full >/dev/null 2>&1; rc2=$?
+    f=$(find "$m/plots/paper" -name "fig-paper-attribution-*.png" | wc -l); rm -rf "$m"
+    [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$n" -gt 0 ] && [ "$a" -eq 0 ] && [ "$f" -gt 0 ]'
 run "figures: --paper writes captions.tex" bash -c '
     m=$(bash -c "$FIGMIRROR"); cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
     "'"$PY"'" "$m/plots/make_paper_figures.py" --paper >/dev/null 2>&1; rc=$?
@@ -444,7 +453,8 @@ run "figures: partial run, --strict REFUSES" bash -c '
     out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc2=$?; rm -rf "$m"
     [ "$rc" -eq 2 ] && [ "$rc2" -eq 0 ] && echo "$out" | grep -q "runs not marked complete"'
 
-# Partial runs plot: every figure is drawn or listed as not drawn, with exit status 0.
+# Partial runs plot: every figure (--full) is drawn or listed as not drawn, with exit
+# status 0.
 # The fixtures are inline because `bash -c` does not inherit shell functions.
 run "subset: one backend only"     bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
@@ -453,7 +463,7 @@ run "subset: one backend only"     bash -c '
         head -1 "'"$LAST"'/$f" > "$d/$f"
         tail -n +2 "'"$LAST"'/$f" | grep ",scalar," >> "$d/$f"
     done
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
     n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && { [ "$n" -gt 0 ] || echo "$out" | grep -q "NOT drawn"; }'
 run "subset: no AVX-512 (laptop)"  bash -c '
@@ -463,13 +473,13 @@ run "subset: no AVX-512 (laptop)"  bash -c '
         head -1 "'"$LAST"'/$f" > "$d/$f"
         tail -n +2 "'"$LAST"'/$f" | grep -v ",avx512," >> "$d/$f"
     done
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
     n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && { [ "$n" -gt 0 ] || echo "$out" | grep -q "NOT drawn"; }'
 run "subset: accuracy, no timing"  bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
     n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
 run "subset: short ladder (3 rungs)" bash -c '
@@ -477,7 +487,7 @@ run "subset: short ladder (3 rungs)" bash -c '
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
     head -1 "'"$LAST"'/ladder.csv" > "$d/ladder.csv"
     awk -F, "NR>1 && (\$7==256||\$7==512||\$7==1024)" "'"$LAST"'/ladder.csv" >> "$d/ladder.csv"
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
     n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
 # Runs are grouped into machines by CPU model, so a same-model pair is one machine.
@@ -921,7 +931,7 @@ if make build/fold_cpu >/dev/null 2>&1; then
       grep -q "^suppliers .*SKIPPED" "$d/STAGES.txt"'
   run "figures: the fold run draws" bash -c '
       m=$(bash -c "$FIGMIRROR"); cp -r "'"$FOLDRUN"'" "$m/runs/2026-01-01T00-00Z_hosta_cpu-fold"
-      "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
+      "'"$PY"'" "$m/plots/make_paper_figures.py" --full >/dev/null 2>&1; rc=$?
       f=$(find "$m/plots/paper" -name "fig-paper-fold.png" | wc -l)
       e=$(find "$m/plots/paper" -name "fig-paper-fold-ecdf-z_nu.png" | wc -l); rm -rf "$m"
       [ "$rc" -eq 0 ] && [ "$f" -eq 1 ] && [ "$e" -eq 1 ]'
@@ -934,7 +944,7 @@ if make build/fold_cpu >/dev/null 2>&1; then
           \$c[\"law\"]==\"grid\" && \$c[\"backend\"]==\"scalar\" { \$c[\"u_max\"]=1e15; \$c[\"nonfinite\"]=5 }
           { print }" "$f" > "$f.new" && mv "$f.new" "$f"
       "'"$PY"'" benchmark/tables/make_paper_tables.py --runs "$m/runs" --out "$m/t" \
-          --no-preview --only tab-fold >/dev/null 2>&1; rc=$?
+          --no-preview --full --only tab-fold >/dev/null 2>&1; rc=$?
       q=$(ls "$m/t"/tab-fold-quantiles-z_nu.tex 2>/dev/null | wc -l)
       c=$(ls "$m/t"/*/tab-fold-cpu.md 2>/dev/null | head -1)
       ok=0; [ -n "$c" ] && grep "z_nu / grid" "$c" | grep -q "Cap (dag)" && ok=1

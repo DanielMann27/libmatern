@@ -44,6 +44,9 @@
 #   make benchmark-test   the benchmark's test suite: unit tests and reduced runs of
 #                         run_benchmark.sh (20+ min; needs the whole corpus)
 #   make paper-figures | paper-figures-final | paper-tables | paper-tables-check
+#                         the paper set: the figures the paper includes and the tables
+#                         its own tables are taken from; FULL=yes writes every figure
+#                         and table
 #   make python-info      the Python the generators use
 #   make build/threads_cpu                     the thread-scaling driver (STAGES=threads)
 #   make build/fold_cpu                        the prefactor-fold driver (STAGES=fold)
@@ -63,7 +66,7 @@
 #   make corpus-tools     build/corpus_convert, the corpus converter (docs/benchmark.md, The corpus)
 #   parameters (switches take yes or no; also 1/0, on/off, true/false, y/n):
 #     drivers    CXX, V=yes (prints every build command)
-#     pipeline   EXTERNALS LEVIN FOLD THREADS CHECK FIGURES TABLES_CHECK=yes|no,
+#     pipeline   EXTERNALS LEVIN FOLD THREADS CHECK FIGURES TABLES_CHECK FULL=yes|no,
 #                GPU=auto|yes|no, GPU_STAGES=core,levin,threads|all (+ call-large,
 #                never in all), DRY=yes (prints the plan and its questions, runs nothing)
 #     runs       REPS FAMILIES BACKENDS STAGES LADDER_SET LADDER_PASS_FROM SUPPLIERS
@@ -72,9 +75,11 @@
 #                directory>
 #     externals  BOOST_CPU_ROOT, BOOST_ROOT (=none disables a Boost row), BOOST_VERSIONS
 #     python     PYTHON (the interpreter), PYTHON_CANDIDATES (the ones searched for it)
-#     figures    ARGS=--list | --strict | --runs DIR (the paper-figures/paper-tables
-#                targets); paper-tables also --only=<text> and --no-preview (without
-#                pdflatex: the tables unfitted, no previews)
+#     figures    FULL=yes (every figure and table, not only the paper set; also for
+#                make benchmark and make pipeline); ARGS=--list | --strict | --runs DIR
+#                | --cpu-machine NAME (the paper-figures/paper-tables targets);
+#                paper-tables also --only=<text> and --no-preview (without pdflatex:
+#                the tables unfitted, no previews)
 #
 # For the maintainers, from a git checkout of libmatern (a release tarball has no git)
 #   make dist             the code release: build/dist/libmatern-<version>.tar.gz at a
@@ -1100,17 +1105,20 @@ PY_GEN_CHECK = $(PY_FOUND_CHECK); $(PYTHON) -c 'import matplotlib' >/dev/null 2>
 
 # Figures and tables are drawn from the recorded runs only.  paper-figures writes
 # benchmark/plots/paper/ (text on the canvas), paper-figures-final
-# benchmark/plots/paper-final/ (captions in captions.tex).
+# benchmark/plots/paper-final/ (captions in captions.tex).  Both, and paper-tables, write
+# the paper set unless FULL=yes.
+FULL_SET = $(if $(filter yes,$(call yes_no,FULL)),--full)
+
 paper-figures:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py $(ARGS)
+	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py $(FULL_SET) $(ARGS)
 
 paper-figures-final:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py --paper $(ARGS)
+	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py --paper $(FULL_SET) $(ARGS)
 
 # Tables into benchmark/tables/paper/; pdflatex fits them to the column, unless
 # ARGS=--no-preview.
 paper-tables:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/tables/make_paper_tables.py $(ARGS)
+	@$(PY_GEN_CHECK); $(PYTHON) benchmark/tables/make_paper_tables.py $(FULL_SET) $(ARGS)
 
 # Compiles every generated table in one document (needs pdflatex).
 paper-tables-check:

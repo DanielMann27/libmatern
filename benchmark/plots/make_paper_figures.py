@@ -2,7 +2,8 @@
 """make_paper_figures.py -- builds the paper figure set from the recorded runs in
 benchmark/runs/ and measures nothing.  Runs from hosts of one CPU model are pooled into one
 machine, and each kind of result comes from that machine's newest run that has it;
---paper writes into plots/paper-final/ with captions.tex."""
+--paper writes into plots/paper-final/ with captions.tex.  By default only the figures
+the paper uses are drawn (PAPER_FIGURES); --full draws every figure."""
 import argparse, csv, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -412,6 +413,64 @@ def is_cpu_machine(rs):
     return any(r["accuracy"] and not r.get("gpu_pipeline") for r in rs)
 
 
+# The paper set: the figures and tables the paper uses (docs/Paper_norm.tex), drawn by
+# default; --full draws every one.  Names are stems without the fig-paper- / tab- prefix,
+# as fnmatch patterns, by the machine they come from: "cpu" the machine of the CPU results
+# (cpu_machine), "gpu" a machine with a GPU-pipeline run, "every" each machine, "shared" the
+# tree root (tables) or cross-machine/ (figures).  levin-cpu-vector is the vector router's
+# Levin figure, whichever backend carries it.
+PAPER_FIGURES = {
+    "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-h_nu_s", "fold",
+            "ladder-*", "workspace-*-h_nu_s", "levin-cpu-vector"),
+    "gpu": ("gpu-plane-*", "gpu-accuracy-distribution-h_nu_s", "gpu-assembly-h_nu_s",
+            "gpu-modes-size_random*-h_nu_s", "gpu-boost-shortcut", "gpu-knobs",
+            "levin-cuda"),
+    "every": ("threads",),
+    "shared": ("machine-independence",),
+}
+# The tables the paper's own tables are taken from.
+PAPER_TABLES = {
+    "cpu": ("throughput-h_nu_s",),
+    "gpu": ("gpu-medmax-h_nu_s", "gpu-cost-*", "gpu-call-h_nu_s",
+            "gpu-exclusions-h_nu_s"),
+    "shared": ("medmax-h_nu_s", "exclusions-h_nu_s", "references", "environment",
+               "datasets"),
+}
+
+
+def in_paper_set(spec, name, roles=None):
+    """True if `name` (a stem without its prefix) is in the paper set `spec` for a machine
+    with `roles`; roles=None asks whether any role has it.  A name may itself be a pattern
+    ("throughput-*"), which matches a listed stem it covers."""
+    from fnmatch import fnmatchcase
+    pats = [p for role, ps in spec.items() if roles is None or role in roles for p in ps]
+    return any(fnmatchcase(name, p) or fnmatchcase(p, name) for p in pats)
+
+
+def machine_roles(mach, rs, cpu_mach):
+    """The paper-set roles of machine `mach` with runs `rs`."""
+    roles = {"every"}
+    if mach == cpu_mach:
+        roles.add("cpu")
+    if any(r.get("gpu_pipeline") for r in rs):
+        roles.add("gpu")
+    return roles
+
+
+def cpu_machine(bymach, name=""):
+    """The machine the paper set takes its CPU results from: `name` if given; else the
+    first CPU machine without a GPU-pipeline run (the paper's CPU host is a CPU node, the
+    GPU host only runs the GPU stages); else the first CPU machine."""
+    if name:
+        if name not in bymach:
+            raise SystemExit(f"--cpu-machine {name}: no such machine (have: "
+                             f"{', '.join(bymach) or 'none'})")
+        return name
+    cpu = [m for m, rs in bymach.items() if is_cpu_machine(rs)]
+    plain = [m for m in cpu if not any(r.get("gpu_pipeline") for r in bymach[m])]
+    return (plain or cpu or [None])[0]
+
+
 def register_conditions(bymach):
     """Hand each run's PROVENANCE and machine label to style, for the stamps."""
     for m, rs in bymach.items():
@@ -432,6 +491,12 @@ def main():
     ap.add_argument("--runs", default="",
                     help="read runs from this directory instead of "
                          "benchmark/runs")
+    ap.add_argument("--full", action="store_true",
+                    help="draw every figure, not only the paper set (PAPER_FIGURES), "
+                         "and PNG beside PDF in paper mode")
+    ap.add_argument("--cpu-machine", default="",
+                    help="the machine the paper set takes its CPU figures from "
+                         "(default: the first CPU machine without a GPU run)")
     args = ap.parse_args()
 
     global OUT, RUNS
@@ -441,6 +506,9 @@ def main():
     if args.paper:
         style.PAPER = True
         OUT = os.path.join(BENCH, "plots", "paper-final")
+        # the manuscript includes the PDF; the full set keeps a PNG beside it
+        if not args.full:
+            style.FORMATS = ("pdf",)
     # captions.tex is appended to, so every existing one in the tree is removed first.
     if style.PAPER and os.path.isdir(OUT):
         for _root, _d, _f in os.walk(OUT):
@@ -488,8 +556,21 @@ def main():
         if count:
             written.append(stem)
 
+    cpu_mach = cpu_machine(bymach, args.cpu_machine)
+    if args.full:
+        print("figure set: every figure (--full)")
+    else:
+        print(f"figure set: the paper's (--full for every figure); CPU figures from "
+              f"{cpu_mach or 'no CPU machine'}")
+    roles = {"shared"}
+
+    def want(name):
+        """Whether figure `name` (its stem without fig-paper-) is drawn on this machine."""
+        return args.full or in_paper_set(PAPER_FIGURES, name, roles)
+
     for mach, rs in bymach.items():
         arch = rs[0]["arch_pretty"].split("[")[0].split(" + ")[0].strip()
+        roles = machine_roles(mach, rs, cpu_mach)
 
         def stamp_of(*kinds):
             return run_stamp(source_runs(rs, *kinds))
@@ -511,38 +592,45 @@ def main():
         if acc or sup:
             stamp = stamp_of("accuracy", "suppliers")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_cost_accuracy_plane(plt, acc, sup, sub, stamp,
-                                                family=fam, arch=arch),
-                     f"{mach}/cost-accuracy-{fam}")
+                if want(f"cost-accuracy-{fam}"):
+                    note(pf.fig_cost_accuracy_plane(plt, acc, sup, sub, stamp,
+                                                    family=fam, arch=arch),
+                         f"{mach}/cost-accuracy-{fam}")
         if acc or sup:
             stamp = stamp_of("accuracy", "suppliers")
             raw = merge(rs, "raw")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_accuracy_distribution(plt, acc, sup, sub, stamp,
-                                                  family=fam, arch=arch),
-                     f"{mach}/accuracy-distribution-{fam}")
-                note(pf.fig_accuracy_ecdf(plt, acc, sup, sub, stamp,
-                                          family=fam, arch=arch),
-                     f"{mach}/accuracy-ecdf-{fam}")
-                note(pf.fig_timing_distribution(plt, acc, sup, raw, sub, stamp,
-                                                family=fam, arch=arch),
-                     f"{mach}/timing-distribution-{fam}")
+                if want(f"accuracy-distribution-{fam}"):
+                    note(pf.fig_accuracy_distribution(plt, acc, sup, sub, stamp,
+                                                      family=fam, arch=arch),
+                         f"{mach}/accuracy-distribution-{fam}")
+                if want(f"accuracy-ecdf-{fam}"):
+                    note(pf.fig_accuracy_ecdf(plt, acc, sup, sub, stamp,
+                                              family=fam, arch=arch),
+                         f"{mach}/accuracy-ecdf-{fam}")
+                if want(f"timing-distribution-{fam}"):
+                    note(pf.fig_timing_distribution(plt, acc, sup, raw, sub, stamp,
+                                                    family=fam, arch=arch),
+                         f"{mach}/timing-distribution-{fam}")
         if acc:
             stamp = stamp_of("accuracy")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_attribution(plt, acc, sub, stamp, family=fam,
-                                        arch=arch),
-                     f"{mach}/attribution-{fam}")
+                if want(f"attribution-{fam}"):
+                    note(pf.fig_attribution(plt, acc, sub, stamp, family=fam,
+                                            arch=arch),
+                         f"{mach}/attribution-{fam}")
         if acc and sup:
             stamp = stamp_of("accuracy", "suppliers")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_worst_case_map(plt, acc, sup, sub, stamp,
-                                           family=fam, arch=arch),
-                     f"{mach}/worst-case-map-{fam}")
-                note(pf.fig_assembly(plt, sup, acc, sub, stamp, family=fam,
-                                     arch=arch),
-                     f"{mach}/assembly-{fam}")
-        if acc:
+                if want(f"worst-case-map-{fam}"):
+                    note(pf.fig_worst_case_map(plt, acc, sup, sub, stamp,
+                                               family=fam, arch=arch),
+                         f"{mach}/worst-case-map-{fam}")
+                if want(f"assembly-{fam}"):
+                    note(pf.fig_assembly(plt, sup, acc, sub, stamp, family=fam,
+                                         arch=arch),
+                         f"{mach}/assembly-{fam}")
+        if acc and want("convention"):
             # Only a GPU-pipeline run's single-backend rows require several backends.
             note(pf.fig_family_delta(plt, acc, sub, stamp_of("accuracy"), arch=arch,
                                      require_multi_backend=any(
@@ -555,16 +643,18 @@ def main():
             stamp = stamp_of("ladder", "sup_ladder",
                              *(("suppliers",) if slad and sup else ()))
             for law in pf.ladder_laws_present(lad) or pf.ladder_laws_present(slad):
-                note(pf.fig_ladder(plt, lad, slad, sub, stamp, law=law,
-                                   arch=arch, asm_of=asm),
-                     f"{mach}/ladder-{law}")
+                if want(f"ladder-{law}"):
+                    note(pf.fig_ladder(plt, lad, slad, sub, stamp, law=law,
+                                       arch=arch, asm_of=asm),
+                         f"{mach}/ladder-{law}")
         if lad:
             stamp = stamp_of("ladder")
             for law in pf.ladder_laws_present(lad):
                 for fam in ("z_nu", "h_nu_s"):
-                    note(pf.fig_workspace(plt, lad, sub, stamp, law=law,
-                                          family=fam, arch=arch),
-                         f"{mach}/workspace-{law}-{fam}")
+                    if want(f"workspace-{law}-{fam}"):
+                        note(pf.fig_workspace(plt, lad, sub, stamp, law=law,
+                                              family=fam, arch=arch),
+                             f"{mach}/workspace-{law}-{fam}")
         # Device figures name the CPU and GPU of their own run; the scraped device name is
         # added only when PROVENANCE lacks it.
         _gruns = [own[k] for k in ("gpu_ladder", "gpu_sup", "gpu", "gpu_klad",
@@ -581,32 +671,39 @@ def main():
             cpu_ref = own["gpu_ladder"].get("gpu_cpu_ladder") or []
             for law in pf.ladder_laws_present(glad):
                 for fam in ("z_nu", "h_nu_s"):
-                    note(pf.fig_gpu_modes(plt, glad, cpu_ref, sub, stamp, law=law,
-                                          raw=raw, family=fam, arch=garch),
-                         f"{mach}/gpu-modes-{law}-{fam}")
+                    if want(f"gpu-modes-{law}-{fam}"):
+                        note(pf.fig_gpu_modes(plt, glad, cpu_ref, sub, stamp, law=law,
+                                              raw=raw, family=fam, arch=garch),
+                             f"{mach}/gpu-modes-{law}-{fam}")
         if gsup:
             stamp = stamp_of("gpu_sup")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_gpu_modes_suppliers(plt, gsup, sub, stamp,
-                                                family=fam, arch=garch),
-                     f"{mach}/gpu-modes-suppliers-{fam}")
-            for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_gpu_plane(plt, gsup, sub, stamp, family=fam,
-                                      arch=garch), f"{mach}/gpu-plane-{fam}")
-                note(pf.fig_gpu_accuracy_distribution(plt, gsup, sub, stamp,
-                                                      family=fam, arch=garch),
-                     f"{mach}/gpu-accuracy-distribution-{fam}")
-                note(pf.fig_gpu_accuracy_ecdf(plt, gsup, sub, stamp,
-                                              family=fam, arch=garch),
-                     f"{mach}/gpu-accuracy-ecdf-{fam}")
-                note(pf.fig_gpu_timing_distribution(plt, gsup, raw, sub, stamp,
+                if want(f"gpu-modes-suppliers-{fam}"):
+                    note(pf.fig_gpu_modes_suppliers(plt, gsup, sub, stamp,
                                                     family=fam, arch=garch),
-                     f"{mach}/gpu-timing-distribution-{fam}")
-                note(pf.fig_gpu_assembly(plt, gsup, sub, stamp, family=fam,
-                                         arch=garch),
-                     f"{mach}/gpu-assembly-{fam}")
+                         f"{mach}/gpu-modes-suppliers-{fam}")
+            for fam in ("z_nu", "h_nu_s"):
+                if want(f"gpu-plane-{fam}"):
+                    note(pf.fig_gpu_plane(plt, gsup, sub, stamp, family=fam,
+                                          arch=garch), f"{mach}/gpu-plane-{fam}")
+                if want(f"gpu-accuracy-distribution-{fam}"):
+                    note(pf.fig_gpu_accuracy_distribution(plt, gsup, sub, stamp,
+                                                          family=fam, arch=garch),
+                         f"{mach}/gpu-accuracy-distribution-{fam}")
+                if want(f"gpu-accuracy-ecdf-{fam}"):
+                    note(pf.fig_gpu_accuracy_ecdf(plt, gsup, sub, stamp,
+                                                  family=fam, arch=garch),
+                         f"{mach}/gpu-accuracy-ecdf-{fam}")
+                if want(f"gpu-timing-distribution-{fam}"):
+                    note(pf.fig_gpu_timing_distribution(plt, gsup, raw, sub, stamp,
+                                                        family=fam, arch=garch),
+                         f"{mach}/gpu-timing-distribution-{fam}")
+                if want(f"gpu-assembly-{fam}"):
+                    note(pf.fig_gpu_assembly(plt, gsup, sub, stamp, family=fam,
+                                             arch=garch),
+                         f"{mach}/gpu-assembly-{fam}")
 
-        if gbsc:
+        if gbsc and want("gpu-boost-shortcut"):
             note(pf.fig_gpu_boost_shortcut(plt, gbsc, sub, stamp_of("gpu_boost"),
                                            arch=garch),
                  f"{mach}/gpu-boost-shortcut")
@@ -618,10 +715,11 @@ def main():
             _vec = pf.lib_backend_for([r for r in lev if (r.get("device") or "cpu").strip() == "cpu"
                                        and r.get("backend") != "scalar"]) or "avx512"
             for bk in (_vec, "scalar"):
-                note(pf.fig_levin(plt, lev, sub, stamp_of("levin"), device="cpu",
-                                  backend=bk, arch=arch),
-                     f"{mach}/levin-cpu-{bk}")
-        if glev:
+                if want("levin-cpu-vector" if bk == _vec else f"levin-cpu-{bk}"):
+                    note(pf.fig_levin(plt, lev, sub, stamp_of("levin"), device="cpu",
+                                      backend=bk, arch=arch),
+                         f"{mach}/levin-cpu-{bk}")
+        if glev and want("levin-cuda"):
             # On the device `backend` is the transfer mode; the band does not depend on it, so
             # one mode is shown, the default async-direct when present.
             gbk = "async-direct"
@@ -632,22 +730,26 @@ def main():
                               backend=gbk, arch=garch),
                  f"{mach}/levin-cuda")
         if fold:
-            note(pf.fig_fold(plt, fold, sub, stamp_of("fold"), arch=arch),
-                 f"{mach}/fold")
+            if want("fold"):
+                note(pf.fig_fold(plt, fold, sub, stamp_of("fold"), arch=arch),
+                     f"{mach}/fold")
             for fam in ("z_nu", "h_nu_s"):
-                note(pf.fig_fold_ecdf(plt, fold, sub, stamp_of("fold"),
-                                      family=fam, arch=arch),
-                     f"{mach}/fold-ecdf-{fam}")
-        if thr:
+                if want(f"fold-ecdf-{fam}"):
+                    note(pf.fig_fold_ecdf(plt, fold, sub, stamp_of("fold"),
+                                          family=fam, arch=arch),
+                         f"{mach}/fold-ecdf-{fam}")
+        if thr and want("threads"):
             note(pf.fig_threads_combined(plt, thr, sub, stamp_of("threads"),
                                          arch=arch),
                  f"{mach}/threads")
-        if gthr:
+        if gthr and want("gpu-knobs"):
             note(pf.fig_gpu_knobs(plt, gthr, sub, stamp_of("gpu_threads"),
                                   arch=garch),
                  f"{mach}/gpu-knobs")
 
     pf.SKIP_PREFIX = ""
+    roles = {"shared"}
+
     def _disp(mach, rs):
         short = mp.cpu_arch_key(rs[0].get("arch_short")) or mach
         return short if style.PAPER else f"{short} ({mach})"
@@ -664,7 +766,7 @@ def main():
             f"{' (' + ', '.join(_arch) + ')' if _arch else ''}"
             f" across {len(cpu_acc)} machine(s); runs with the same CPU "
             "model are one machine and are not compared"))
-    if len(_arch) >= 2:
+    if len(_arch) >= 2 and want("machine-independence"):
         # Keep one machine per architecture.
         _seen, _pair, _pair_rs = set(), [], []
         for (m, rs), k, (_m, mrs) in zip(cpu_acc, _keys, _cpu_m):
