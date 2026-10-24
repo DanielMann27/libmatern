@@ -3235,6 +3235,17 @@ def _build_preview(outdir):
     return log, os.path.exists(os.path.join(outdir, "preview.pdf"))
 
 
+# TeX breaks log lines at max_print_line, 79 characters, so a fragment's name can be split
+# over two lines ("(./tab-" / "environment.tex"); the box after it would then go to the
+# fragment before.  The breaks are undone before the log is read.
+_LOG_WIDTH = 79
+
+
+def _unwrap(log):
+    """`log` with TeX's line breaks at _LOG_WIDTH characters undone."""
+    return re.sub(r"(?m)^(.{%d})\n" % _LOG_WIDTH, r"\1", log)
+
+
 _OPENS = re.compile(r"\((\./)?([-\w.]+\.tex)")
 _OVER = re.compile(r"Overfull \\hbox \(([\d.]+)pt too wide\)")
 # A float taller than the page; write_preview ships each page before the next
@@ -3246,7 +3257,7 @@ def overtall_by_file(log, outdir):
     """{abs path of fragment: worst excess height in pt}: `overfull_by_file`
     for tables that are too tall."""
     cur, worst = None, {}
-    for line in log.splitlines():
+    for line in _unwrap(log).splitlines():
         for m in _OPENS.finditer(line):
             if m.group(2) != "preview.tex":
                 cur = os.path.abspath(os.path.join(outdir, m.group(2)))
@@ -3261,7 +3272,7 @@ def overfull_by_file(log, outdir):
     so each box goes to the most recently opened `.tex`."""
     cur = None
     worst = {}
-    for line in log.splitlines():
+    for line in _unwrap(log).splitlines():
         for m in _OPENS.finditer(line):
             fn = m.group(2)
             if fn != "preview.tex":

@@ -534,12 +534,15 @@ clock. Progress lines go to descriptor 3 (`WM_PROGRESS_FD`), not into the record
 By default the figure and table targets, `make benchmark` and `make pipeline` write the
 **paper set**: the figures the paper includes and the tables its own tables are taken from
 (`PAPER_FIGURES` and `PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 22 figures
-and 11 tables with the published runs. The CPU figures and tables, the machine-independent
-tables included, come from one machine, the first CPU machine without a GPU-pipeline run
-(`ARGS=--cpu-machine NAME` names another); the GPU figures and tables from the GPU host;
-the thread figure from every machine. `paper-final/` then holds `.pdf` only. `FULL=yes`
-(`--full` to the generators) writes every figure and table described below, `.pdf` and
-`.png`, from every machine.
+and 11 tables with the published runs. Each CPU result, the machine-independent tables
+included, comes from one machine: the first that has the stage it is drawn from, machines
+without GPU data first (`ARGS=--cpu-machine NAME` puts one machine first), and a GPU run's
+one-backend CPU stage only when no CPU run has the stage. So runs of a single machine, of a
+GPU host only, or with stages on different machines, give every result their stages allow.
+The GPU figures and tables come from the GPU host, the thread figure from every machine;
+the generators print where each stage was taken from. `paper-final/` then holds `.pdf`
+only. `FULL=yes` (`--full` to the generators) writes every figure and table described
+below, `.pdf` and `.png`, from every machine.
 
 `make paper-figures-final` writes `.pdf` and `.png` figures and `captions.tex` to
 `benchmark/plots/paper-final/`, and `make paper-figures` the figures with titles and notes to

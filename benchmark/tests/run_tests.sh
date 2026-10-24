@@ -511,6 +511,21 @@ run "different-CPU pair: machine figure IS drawn" bash -c '
     rm -rf "$m"
     [ "$n" -eq 1 ]'
 
+# The paper set takes each CPU stage from the first machine that has it: with no ladder
+# on the preferred machine (machine order, no GPU), the ladder comes from the other one.
+run "paper set: a stage from the machine with it" bash -c '
+    m=$(bash -c "$FIGMIRROR")
+    a="$m/runs/2026-01-01T00-00Z_hosta_test"; b="$m/runs/2026-01-01T00-00Z_hostb_test"
+    cp -r "'"$LAST"'" "$a"; cp -r "'"$LAST"'" "$b"
+    sed -i "s/^cpu .*/cpu               AMD EPYC 9454/" "$a/PROVENANCE.txt"
+    sed -i "s/^cpu .*/cpu               Intel(R) Xeon 8358/" "$b/PROVENANCE.txt"
+    rm -f "$a/ladder.csv" "$a/suppliers_ladder.csv"
+    "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
+    na=$(find "$m/plots/paper" -path "*epyc*" -name "fig-paper-ladder-*.png" | wc -l)
+    nb=$(find "$m/plots/paper" -path "*xeon*" -name "fig-paper-ladder-*.png" | wc -l)
+    rm -rf "$m"
+    [ "$rc" -eq 0 ] && [ "$na" -eq 0 ] && [ "$nb" -gt 0 ]'
+
 # A format string short of specifiers compiles and misaligns the columns.
 run "accuracy: header == row width" bash -c '
     o=$("'"$TMP/bcpu"'" --family z_nu --law grid --backend $BK \
@@ -1055,6 +1070,17 @@ style.PAPER = True
 t = style.fig_title(\"Worst-case error and cost on two CPU architectures\")
 raise SystemExit(0 if t == \"\" and style.CAPTION[\"title\"] ==
                  \"Worst-case error and cost on two CPU architectures.\" else 1)"'
+# TeX breaks its log at 79 characters, splitting a fragment name; the box after it belongs
+# to the split name, not to the fragment before (overfull_by_file).
+run "tables: overfull box to a split name" bash -c '
+    cd benchmark/tables && python3 -c "
+import sys; sys.path.insert(0, \"../plots\")
+import paper_tables as pt
+head = \"(./tab-a.tex) [1] \" + \"x\" * 54 + \"(./tab-\"
+assert len(head) == 79
+log = head + \"\\nb.tex\\nOverfull \\\\hbox (6.7pt too wide) in paragraph\\n\"
+w = pt.overfull_by_file(log, \".\")
+raise SystemExit(0 if [k.rsplit(\"/\", 1)[1] for k in w] == [\"tab-b.tex\"] else 1)"'
 run "captions escape text, not math" bash -c '
     cd benchmark/plots && python3 -c "
 import style

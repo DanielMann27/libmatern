@@ -39,9 +39,10 @@ def main():
                     help="build every table, not only the paper set "
                          "(make_paper_figures.PAPER_TABLES)")
     ap.add_argument("--cpu-machine", default="",
-                    help="the machine the paper set takes its CPU tables from, the "
-                         "machine-independent ones included (default: the first CPU "
-                         "machine without a GPU run)")
+                    help="the machine the paper set takes its CPU tables from first, "
+                         "the machine-independent ones included (default: machines "
+                         "without GPU data first; a stage this machine lacks comes "
+                         "from the next machine that has it)")
     args = ap.parse_args()
 
     if not args.list and not args.no_preview and not shutil.which("pdflatex"):
@@ -84,24 +85,27 @@ def main():
             return 2
         print("!!", msg, "-- the README.md of the tables will say so")
 
-    cpu_mach = mpf.cpu_machine(bymach, args.cpu_machine)
+    order = mpf.cpu_order(bymach, args.cpu_machine)
     if args.full:
         print("table set: every table (--full)")
     else:
         print(f"table set: the sources of the paper's tables (--full for every table); "
-              f"CPU tables from {cpu_mach or 'no CPU machine'}")
-    roles = {"shared"}      # the tree root; each machine's roles in its loop below
+              f"CPU tables from {mpf.cpu_sources_line(bymach, order)}")
+    cur = None              # the machine being built; None for the tree root
 
-    def want(stem, any_role=False):
+    def want(stem, *kinds, any_role=False):
         """Whether table `stem` is built here: --only, then the paper set for the current
-        roles (any role for the skipped-stage notes, whose stems are joined lists)."""
+        machine; `kinds`, the CPU run kinds it is built from, place a CPU table (any role
+        for the skipped-stage notes, whose stems are joined lists)."""
         if args.only and args.only not in stem:
             return False
         if args.full:
             return True
+        roles = None if any_role else mpf.machine_roles(cur, bymach, order, kinds)
         names = [x.strip().replace("tab-", "", 1) for x in stem.split(" / ")]
-        return any(mpf.in_paper_set(mpf.PAPER_TABLES, x, None if any_role else roles)
-                   for x in names)
+        return any(mpf.in_paper_set(mpf.PAPER_TABLES, x, roles) for x in names)
+
+    ACC, LAD = ("accuracy", "suppliers"), ("ladder", "sup_ladder")
 
     n = 0
 
@@ -114,9 +118,9 @@ def main():
     # The accuracy tables are written once at the root, from the first CPU machine
     # (mpf.machine_order); machine_agreement checks every field across machines.
     cpu = [(m, rs) for m, rs in bymach.items() if mpf.is_cpu_machine(rs)]
-    # The paper set's root tables describe the machine of its CPU tables.
+    # The paper set's root tables come from the first CPU machine in its order.
     if not args.full:
-        cpu.sort(key=lambda mr: mr[0] != cpu_mach)
+        cpu.sort(key=lambda mr: order.index(mr[0]))
     cpu_acc = [(m, mpf.merge(rs, "accuracy")) for m, rs in cpu]
     cpu_sup = [(m, mpf.merge(rs, "suppliers")) for m, rs in cpu]
     cpu_arch = [mp.cpu_arch_key(rs[0].get("arch_short")) or m for m, rs in cpu]
@@ -252,7 +256,7 @@ def main():
         thr = mpf.merge(rs, "threads")
         fold = mpf.merge(rs, "fold")
         print(f"== {mach}  {mpf.machine_pretty(rs)}")
-        roles = mpf.machine_roles(mach, rs, cpu_mach)
+        cur = mach
         # Labels carry the machine until cleared, so two machines' tables do not collide.
         pt.LABEL_SUFFIX = mach
 
@@ -266,20 +270,20 @@ def main():
         garch = garch0 if (not dev or dev in garch0) else f"{dev} on {garch0}"
 
         for fam in ("z_nu", "h_nu_s"):
-            if acc and want(f"tab-cost-{fam}"):
+            if acc and want(f"tab-cost-{fam}", *ACC):
                 emit(pt.tab_cost(acc, sup, sub, note_of("accuracy", "suppliers"),
                                  arch_of("accuracy", "suppliers"), family=fam),
                      f"{mach}/tab-cost-{fam}")
-            if acc and want(f"tab-attribution-{fam}"):
+            if acc and want(f"tab-attribution-{fam}", *ACC):
                 emit(pt.tab_attribution(acc, sub, note_of("accuracy"),
                                         arch_of("accuracy"), family=fam),
                      f"{mach}/tab-attribution-{fam}")
-        if acc and want("tab-convention"):
+        if acc and want("tab-convention", *ACC):
             emit(pt.tab_convention(acc, sub, note_of("accuracy"),
                                    arch_of("accuracy")),
                  f"{mach}/tab-convention")
         for fam in ("z_nu", "h_nu_s"):
-            if lad and want(f"tab-throughput-{fam}"):
+            if lad and want(f"tab-throughput-{fam}", *LAD):
                 # Assemblies from the family's supplier accuracy rows (for z_nu,
                 # those of the ladder figure).
                 emit(pt.tab_throughput(lad, slad, sub,
@@ -336,7 +340,7 @@ def main():
         if lev:
             for bk in [b for b in ("avx512", "avx2", "matched_fma", "matched", "scalar")
                        if any(r.get("backend") == b for r in lev)]:
-                if want(f"tab-levin-cpu-{bk}"):
+                if want(f"tab-levin-cpu-{bk}", "levin"):
                     emit(pt.tab_levin(lev, sub, note_of("levin"),
                                       arch_of("levin"), device="cpu", backend=bk),
                          f"{mach}/tab-levin-cpu-{bk}")
@@ -349,13 +353,13 @@ def main():
             emit(pt.tab_levin(glev, sub, note_of("gpu_levin"), garch,
                               device="cuda", backend=gbk),
                  f"{mach}/tab-levin-cuda")
-        if fold and want("tab-fold-cpu"):
+        if fold and want("tab-fold-cpu", "fold"):
             emit(pt.tab_fold_cpu(fold, sub, note_of("fold"), arch_of("fold")),
                  f"{mach}/tab-fold-cpu")
-        if thr and want("tab-threads"):
+        if thr and want("tab-threads", "threads"):
             emit(pt.tab_threads(thr, sub, note_of("threads"), arch_of("threads")),
                  f"{mach}/tab-threads")
-        if thr and want("tab-threads-throughput"):
+        if thr and want("tab-threads-throughput", "threads"):
             emit(pt.tab_threads_throughput(thr, sub, note_of("threads"),
                                            arch_of("threads")),
                  f"{mach}/tab-threads-throughput")
