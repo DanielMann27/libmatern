@@ -2003,105 +2003,114 @@ LEVIN_ON_COLOR = "#2c3e50"
 LEVIN_OFF_COLOR = "#e67e22"
 
 
-def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
-    """Median ULP, maximum ULP and cost with and without the Levin band, per law."""
+def _three_and_key(plt, height, sharex=False):
+    """A figure of three panels and the key: two panels on top, the third bottom left and
+    the key in the cell bottom right (an empty axes, returned last)."""
+    fig = plt.figure(figsize=(style.TEXT_W, height))
+    gs = fig.add_gridspec(2, 2)
+    a = fig.add_subplot(gs[0, 0])
+    b = fig.add_subplot(gs[0, 1], sharex=a if sharex else None)
+    c = fig.add_subplot(gs[1, 0], sharex=a if sharex else None)
+    key = fig.add_subplot(gs[1, 1])
+    key.axis("off")
+    return fig, [a, b, c], key
+
+
+def _key_cell(key, handles, labels, ncol=1):
+    """The figure's key, centred in its cell."""
+    key.legend(handles, labels, loc="center", frameon=False,
+               fontsize=style.FS_LEGEND, ncol=ncol)
+
+
+def _law_panels_height(n):
+    """Height of a three-panels-and-key figure whose panels list `n` datasets."""
+    return min(style.TEXT_H_MAX - 0.4, 2 * (0.8 + 0.2 * max(n, 3)) + 0.2)
+
+
+def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch="",
+              family="z_nu"):
+    """Median ULP, maximum ULP and cost with and without the Levin band, per law, for one
+    argument convention."""
+    name = f"levin-{device}-{backend}-{family}"
     rows = [r for r in lev if (r.get("device") or "cpu").strip() == device]
     if not rows:
-        return _skip(f"levin-{device}-{backend}",
-                     "no Levin A/B rows (the stage is opt-in at run time)")
-    fams = [f for f in ("z_nu", "h_nu_s")
-            if any(r.get("family") == f for r in rows)]
-    if not fams:
-        return _skip(f"levin-{device}-{backend}", "no family in the Levin rows")
+        return _skip(name, "no Levin A/B rows (the stage is opt-in at run time)")
+    if not any(r.get("backend") == backend for r in rows):
+        return _skip(name,
+                     f"the Levin stage carries no `{backend}` rows (present: "
+                     f"{', '.join(sorted({(r.get('backend') or '?') for r in rows})) or 'none'})")
+    sub = [r for r in rows if r.get("family") == family
+           and r.get("backend") == backend]
+    if not sub:
+        return _skip(name, f"no {family} rows in the Levin stage")
 
-    def arms(sub, law):
+    def arms(law):
         on = [r for r in sub if r.get("law") == law
               and r.get("variant") == "levin_on"]
         off = [r for r in sub if r.get("law") == law
                and r.get("variant") == "levin_off"]
         return (on[0] if on else None, off[0] if off else None)
 
-    if not any(r.get("backend") == backend for r in rows):
-        return _skip(f"levin-{device}-{backend}",
-                     f"the Levin stage carries no `{backend}` rows (present: "
-                     f"{', '.join(sorted({(r.get('backend') or '?') for r in rows})) or 'none'})")
+    order = [l for l in ACC_LAWS if any(r.get("law") == l for r in sub)]
+    order += sorted({r.get("law") for r in sub} - set(order))
+    laws, dropped = [], 0
+    for law in order:
+        on, off = arms(law)
+        if levin_reaches(on, off):
+            laws.append((law, on, off))
+        elif on and off:
+            dropped += 1
+    if not laws:
+        return _skip(name, "no law of this convention has points in the Levin "
+                           "band (both arms of the A/B agree everywhere), or none "
+                           "has both arms")
 
     METRICS = (("u_med", "Median error (ULP)"),
                ("u_max", "Worst-case error (ULP)"),
                ("ns_med", "Cost  [ns / element]"))
-
-    fig, axes = plt.subplots(len(METRICS), len(fams),
-                             figsize=(style.TEXT_W, 7.4), squeeze=False)
-    dropped = kept = 0
-    for ci, fam in enumerate(fams):
-        col = [axes[mi][ci] for mi in range(len(METRICS))]
-        sub = [r for r in rows if r.get("family") == fam
-               and r.get("backend") == backend]
-        order = [l for l in ACC_LAWS if any(r.get("law") == l for r in sub)]
-        order += sorted({r.get("law") for r in sub} - set(order))
-
-        laws = []
-        for law in order:
-            on, off = arms(sub, law)
-            if levin_reaches(on, off):
-                laws.append((law, on, off))
-            elif on and off:
-                dropped += 1
-        kept += len(laws)
-
-        ypos, ylab = [], []
-        span = {ax: [] for ax in col}
+    fig, axes, key = _three_and_key(plt, _law_panels_height(len(laws)))
+    ypos = list(range(len(laws)))
+    ylab = [LAW_LABEL.get(law, law) for law, _on, _off in laws]
+    for ax, (k, lab) in zip(axes, METRICS):
+        span = []
         for y, (law, on, off) in enumerate(laws):
-            ypos.append(y)
-            ylab.append(LAW_LABEL.get(law, law))
-            for ax, (key, _lbl) in zip(col, METRICS):
-                a, b = _f(on, key), _f(off, key)
-                if not (_ok(a) and _ok(b) and a > 0 and b > 0):
-                    continue
-                # segment and factor in the colour of the larger arm, whose
-                # marker the factor sits beside
-                cc = LEVIN_OFF_COLOR if b > a else LEVIN_ON_COLOR
-                ax.plot([a, b], [y, y], "-", color=cc, lw=1.6, zorder=1,
-                        solid_capstyle="round")
-                ax.plot([a], [y], "o", color=LEVIN_ON_COLOR, ms=5.0, zorder=3,
-                        label="routes Levin" if (y == 0 and ci == 0) else None)
-                ax.plot([b], [y], "s", color=LEVIN_OFF_COLOR, ms=4.6, zorder=3,
-                        label="does not route Levin" if (y == 0 and ci == 0) else None)
-                span[ax].extend([a, b])
-                # label the ratio only where it differs from 1 by at least 0.005
-                if abs(b / a - 1.0) >= 0.005:
-                    ax.annotate(r"$\times$%.2f" % (b / a), xy=(max(a, b), y),
-                                xytext=(4, 0), textcoords="offset points",
-                                fontsize=style.FS_ANNOT, va="center", color=cc)
-
-        for ax, (_k, lab) in zip(col, METRICS):
-            ax.set_yticks(ypos)
-            ax.set_yticklabels(ylab)
-            ax.invert_yaxis()
-            v = [x for x in span[ax] if x > 0]
-            if v and max(v) / min(v) >= 10.0:
-                ax.set_xscale("log")
-                # suppress minor tick labels, which overlap at this width
-                import matplotlib.ticker as _tk
-                ax.xaxis.set_minor_formatter(_tk.NullFormatter())
-            elif v:
-                lo, hi = min(v), max(v)
-                pad = 0.18 * (hi - lo) if hi > lo else max(0.1 * hi, 1e-9)
-                ax.set_xlim(lo - pad, hi + 2.2 * pad)
-            ax.set_xlabel(lab)
-            ax.grid(True, axis="x", alpha=0.25, lw=0.5)
-            if not ypos:
-                ax.text(0.5, 0.5, "no law reaches the band", ha="center",
-                        va="center", transform=ax.transAxes,
-                        fontsize=style.FS_ANNOT, color="0.45")
-        col[0].set_title(FAMILY_PLOT_LABEL.get(fam, fam))
-
-    if kept == 0:
-        import matplotlib.pyplot as _plt
-        _plt.close(fig)
-        return _skip(f"levin-{device}-{backend}",
-                     "no law in the Levin rows has both arms of the A/B "
-                     "(band included and excluded)")
+            a, b = _f(on, k), _f(off, k)
+            if not (_ok(a) and _ok(b) and a > 0 and b > 0):
+                continue
+            # segment and factor in the colour of the larger arm, whose
+            # marker the factor sits beside
+            cc = LEVIN_OFF_COLOR if b > a else LEVIN_ON_COLOR
+            ax.plot([a, b], [y, y], "-", color=cc, lw=1.6, zorder=1,
+                    solid_capstyle="round")
+            ax.plot([a], [y], "o", color=LEVIN_ON_COLOR, ms=5.0, zorder=3)
+            ax.plot([b], [y], "s", color=LEVIN_OFF_COLOR, ms=4.6, zorder=3)
+            span.extend([a, b])
+            # label the ratio only where it differs from 1 by at least 0.005
+            if abs(b / a - 1.0) >= 0.005:
+                ax.annotate(r"$\times$%.2f" % (b / a), xy=(max(a, b), y),
+                            xytext=(4, 0), textcoords="offset points",
+                            fontsize=style.FS_ANNOT, va="center", color=cc)
+        ax.set_yticks(ypos)
+        ax.set_yticklabels(ylab)
+        ax.set_ylim(len(laws) - 0.4, -0.6)
+        v = [x for x in span if x > 0]
+        if v and max(v) / min(v) >= 10.0:
+            ax.set_xscale("log")
+            # suppress minor tick labels, which overlap at this width
+            import matplotlib.ticker as _tk
+            ax.xaxis.set_minor_formatter(_tk.NullFormatter())
+        elif v:
+            lo, hi = min(v), max(v)
+            pad = 0.18 * (hi - lo) if hi > lo else max(0.1 * hi, 1e-9)
+            ax.set_xlim(lo - pad, hi + 2.2 * pad)
+        ax.set_xlabel(lab)
+        ax.grid(True, axis="x", alpha=0.25, lw=0.5)
+    from matplotlib.lines import Line2D
+    _key_cell(key, [Line2D([], [], ls="none", marker="o", ms=5.0,
+                           color=LEVIN_ON_COLOR),
+                    Line2D([], [], ls="none", marker="s", ms=4.6,
+                           color=LEVIN_OFF_COLOR)],
+              ["routes Levin", "does not route Levin"])
 
     # what the default build routes, from the `variant` and `shipped` columns
     # (it differs by backend and by device)
@@ -2110,32 +2119,32 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
     ship = (list(ship)[0] if len(ship) == 1 else "?")
     dev = "CPU" if device == "cpu" else "CUDA"
     _top = _title(fig,
-        "The Levin band, included and excluded --- %s, %s%s\n"
+        "The Levin band, included and excluded --- %s, %s, %s%s\n"
         "the default build %s the band; %d datasets reach it and %d do not "
         "(omitted)\n"
         "orange = larger without the band,  blue = larger with it, "
         "on all three panels"
-        % (dev, backend, ("   [%s]" % arch) if arch else "",
-           "routes" if ship == "levin_on" else "does not route", kept, dropped))
-    h, l = axes[0][0].get_legend_handles_labels()
-    _foot = style.footer(fig, h or None, l or None, ncol=4)
+        % (dev, backend, FAMILY_LABEL.get(family, family),
+           ("   [%s]" % arch) if arch else "",
+           "routes" if ship == "levin_on" else "does not route", len(laws),
+           dropped))
+    _foot = style.footer(fig)
     fig.tight_layout(rect=(0, _foot, 1, _top))
-    _facts(_acc_sentence(rows, None, "median and maximum of the ULP error"),
-           _cost_sentence(rows, "median"))
+    _facts(_acc_sentence(sub, None, "median and maximum of the ULP error"),
+           _cost_sentence(sub, "median"))
     _caption("Effect of Levin routing on the accuracy and runtime of the %s "
-             "implementation%s." % (
+             "implementation%s for the %s datasets." % (
                  "CUDA" if device == "cuda" else backend,
                  (" with the %s transfer strategy" % backend)
-                 if device == "cuda" else ""),
-             _columns(fams),
-             "From top to bottom, the rows show the median ULP error, the "
-             "worst-case ULP error and the median runtime cost per element%s "
-             "for the datasets with points in the Levin band, those on which the "
-             "two builds differ in an accuracy statistic; on the other datasets "
-             "both builds evaluate the same code." % (
+                 if device == "cuda" else "", CONV.get(family, family)),
+             _columns([family]),
+             "The panels show the median ULP error (top left), the worst-case "
+             "ULP error (top right) and the median runtime cost per element%s "
+             "(bottom left) for the datasets with points in the Levin band, "
+             "those on which the two builds differ in an accuracy statistic; on "
+             "the other datasets both builds evaluate the same code." % (
                  ", host-device transfers included," if device == "cuda" and all(
-                     scope_of(r) == "call" for r in rows
-                     if r.get("backend") == backend) else ""),
+                     scope_of(r) == "call" for r in sub) else ""),
              "Circles denote results with Levin routing and squares results "
              "without it; the annotated factors give the ratio of the value "
              "without Levin routing to that with it, in orange where the value "
@@ -2145,7 +2154,7 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch=""):
               % ("routes" if ship == "levin_on" else "does not route"))
              if ship != "?" else "",
              _obtained(arch, gpu=device == "cuda"))
-    return _finish(fig, outdir, f"fig-paper-levin-{device}-{backend}", stamp)
+    return _finish(fig, outdir, f"fig-paper-levin-{device}-{backend}-{family}", stamp)
 
 
 # The twin's definition, shared with the fold tables (paper_tables.py).
@@ -2165,104 +2174,100 @@ _FOLD_TWIN_DETAIL = (
     "overflow stays non-finite.")
 
 
-def fig_fold(plt, fold, outdir, stamp, arch=""):
-    """Median ULP, maximum ULP and cost per law: scalar backend and unfolded twins."""
+def fig_fold(plt, fold, outdir, stamp, arch="", family="z_nu"):
+    """Median ULP, maximum ULP and cost per law: scalar backend and unfolded twins, for one
+    argument convention."""
+    name = f"fold-{family}"
     rows = [r for r in fold if (r.get("device") or "cpu").strip() == "cpu"]
     if not rows or not any(r.get("backend") == "scalar" for r in rows):
-        return _skip("fold", "no prefactor-fold rows with the scalar backend "
-                             "(the stage is opt-in at run time)")
-    fams = [f for f in ("z_nu", "h_nu_s")
-            if any(r.get("family") == f for r in rows)]
+        return _skip(name, "no prefactor-fold rows with the scalar backend "
+                           "(the stage is opt-in at run time)")
+    sub = [r for r in rows if r.get("family") == family]
+    if not sub:
+        return _skip(name, f"no {family} rows in the prefactor-fold stage")
     # the control (folded source built as the twin) is not drawn; see tab-fold-cpu
     arms =[a for a in style.FOLD_ARMS if a != "scalar-control"
-            and any(r.get("backend") == a for r in rows)]
+            and any(r.get("backend") == a for r in sub)]
     METRICS = (("u_med", "Median error (ULP)"),
                ("u_max", "Worst-case error (ULP)"),
                ("ns_med", "Cost  [ns / element]"))
+    laws = [l for l in ACC_LAWS if any(r.get("law") == l for r in sub)]
+    laws += sorted({r.get("law") for r in sub} - set(laws))
 
-    fig, axes = plt.subplots(len(METRICS), len(fams),
-                             figsize=(style.TEXT_W, 7.8), squeeze=False)
-    seen = set()
-    for ci, fam in enumerate(fams):
-        col = [axes[mi][ci] for mi in range(len(METRICS))]
-        sub = [r for r in rows if r.get("family") == fam]
-        laws = [l for l in ACC_LAWS if any(r.get("law") == l for r in sub)]
-        laws += sorted({r.get("law") for r in sub} - set(laws))
-        for ax, (key, lab) in zip(col, METRICS):
-            pts = []                                 # (y, arm, value, row)
-            for y, law in enumerate(laws):
-                for a in arms:
-                    r = next((x for x in sub if x.get("law") == law
-                              and x.get("backend") == a), None)
-                    v = _f(r, key) if r else float("nan")
-                    if _ok(v) and v > 0:
-                        pts.append((y, a, v, r))
-            fin = [v for _y, _a, v, _r in pts if v < CATASTROPHIC]
-            if not fin:
-                continue
-            band = any(v >= CATASTROPHIC for _y, _a, v, _r in pts)
-            lo, hi = min(fin), max(fin)
-            if band:
-                ax.set_xscale("log")
-                xfail = _band_x(ax, lo / 2.0)
-            elif hi / lo >= 10.0:
-                ax.set_xscale("log")
-            else:
-                pad = 0.18 * (hi - lo) if hi > lo else max(0.1 * hi, 1e-9)
-                ax.set_xlim(lo - pad, hi + 2.6 * pad)
-            if ax.get_xscale() == "log":
-                import matplotlib.ticker as _tk
-                ax.xaxis.set_minor_formatter(_tk.NullFormatter())
-            for y, _law in enumerate(laws):
-                xs = [(xfail if (band and v >= CATASTROPHIC) else v)
-                      for yy, _a, v, _r in pts if yy == y]
-                if len(xs) > 1:
-                    ax.plot([min(xs), max(xs)], [y, y], "-", color="0.75",
-                            lw=1.1, zorder=1, solid_capstyle="round")
-            for y, a, v, _r in pts:
-                x = xfail if (band and v >= CATASTROPHIC) else v
-                ax.plot([x], [y], style.FOLD_MARK[a], ms=style.FOLD_MS[a],
-                        mfc=style.FOLD_COLOR[a], mec=style.FOLD_COLOR[a], mew=1.0,
-                        zorder=4 if a == "scalar" else 3,
-                        ls="none", label=style.FOLD_LABEL[a] if a not in seen else None)
-                seen.add(a)
-            ax.set_yticks(range(len(laws)))
-            ax.set_yticklabels([LAW_LABEL.get(l, l) for l in laws])
-            ax.set_ylim(len(laws) - 0.4, -0.6)
-            ax.set_xlabel(lab)
-            ax.grid(True, axis="x", alpha=0.25, lw=0.5)
-        col[0].set_title(FAMILY_PLOT_LABEL.get(fam, fam))
+    fig, axes, key = _three_and_key(plt, _law_panels_height(len(laws)))
+    for ax, (k, lab) in zip(axes, METRICS):
+        pts = []                                 # (y, arm, value, row)
+        for y, law in enumerate(laws):
+            for a in arms:
+                r = next((x for x in sub if x.get("law") == law
+                          and x.get("backend") == a), None)
+                v = _f(r, k) if r else float("nan")
+                if _ok(v) and v > 0:
+                    pts.append((y, a, v, r))
+        ax.set_yticks(range(len(laws)))
+        ax.set_yticklabels([LAW_LABEL.get(l, l) for l in laws])
+        ax.set_ylim(len(laws) - 0.4, -0.6)
+        ax.set_xlabel(lab)
+        ax.grid(True, axis="x", alpha=0.25, lw=0.5)
+        fin = [v for _y, _a, v, _r in pts if v < CATASTROPHIC]
+        if not fin:
+            continue
+        band = any(v >= CATASTROPHIC for _y, _a, v, _r in pts)
+        lo, hi = min(fin), max(fin)
+        if band:
+            ax.set_xscale("log")
+            xfail = _band_x(ax, lo / 2.0)
+        elif hi / lo >= 10.0:
+            ax.set_xscale("log")
+        else:
+            pad = 0.18 * (hi - lo) if hi > lo else max(0.1 * hi, 1e-9)
+            ax.set_xlim(lo - pad, hi + 2.6 * pad)
+        if ax.get_xscale() == "log":
+            import matplotlib.ticker as _tk
+            ax.xaxis.set_minor_formatter(_tk.NullFormatter())
+        for y, _law in enumerate(laws):
+            xs = [(xfail if (band and v >= CATASTROPHIC) else v)
+                  for yy, _a, v, _r in pts if yy == y]
+            if len(xs) > 1:
+                ax.plot([min(xs), max(xs)], [y, y], "-", color="0.75",
+                        lw=1.1, zorder=1, solid_capstyle="round")
+        for y, a, v, _r in pts:
+            x = xfail if (band and v >= CATASTROPHIC) else v
+            ax.plot([x], [y], style.FOLD_MARK[a], ms=style.FOLD_MS[a],
+                    mfc=style.FOLD_COLOR[a], mec=style.FOLD_COLOR[a], mew=1.0,
+                    zorder=4 if a == "scalar" else 3, ls="none")
+    from matplotlib.lines import Line2D
+    _key_cell(key, [Line2D([], [], ls="none", marker=style.FOLD_MARK[a],
+                           ms=style.FOLD_MS[a], mfc=style.FOLD_COLOR[a],
+                           mec=style.FOLD_COLOR[a]) for a in arms],
+              [style.FOLD_LABEL[a] for a in arms])
 
-    _top = _title(fig, 
+    _top = _title(fig,
         "The Matérn prefactor folded into the kernels or applied "
-        "outside, scalar backend%s\n"
+        "outside, scalar backend, %s%s\n"
         "same domain decomposition; the twin applies the factors to "
         "$K_\\nu$ directly or through exp-log"
-        % (("   [%s]" % arch) if arch else ""))
-    hh, ll = [], []
-    for ax in axes.ravel():
-        for hx, lx in zip(*ax.get_legend_handles_labels()):
-            if lx not in ll:
-                hh.append(hx); ll.append(lx)
-    _foot = style.footer(fig, hh or None, ll or None, ncol=4)
+        % (FAMILY_LABEL.get(family, family), ("   [%s]" % arch) if arch else ""))
+    _foot = style.footer(fig)
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _facts(_FOLD_TWIN_DETAIL,
-           _acc_sentence(rows, None, "median and maximum of the ULP error"),
+           _acc_sentence(sub, None, "median and maximum of the ULP error"),
            "A maximum at or above $10^6$ ULP sits in the hatched band; a row with "
            "non-finite results is scored over its finite points (counts in the "
            "`nonfinite` column of the run's `fold.csv`).",
-           _cost_sentence(rows, "median"))
+           _cost_sentence(sub, "median"))
     _caption("Effect of folding the Mat\\'ern prefactor into the kernels of the "
-             "scalar backend.",
-             _columns(fams),
-             "From top to bottom, the rows show the median ULP error, the "
-             "worst-case ULP error and the runtime cost per element.",
+             "scalar backend for the %s datasets." % CONV.get(family, family),
+             _columns([family]),
+             "The panels show the median ULP error (top left), the worst-case "
+             "ULP error (top right) and the runtime cost per element (bottom "
+             "left).",
              "Circles denote the folded backend, triangles the unfolded twin "
              "applying the prefactor directly and squares the unfolded twin "
              "applying it through exp-log; maxima at or above $10^6$ ULP are "
              "drawn in the hatched band.",
              _obtained(arch))
-    return _finish(fig, outdir, "fig-paper-fold", stamp)
+    return _finish(fig, outdir, f"fig-paper-fold-{family}", stamp)
 
 
 def fig_fold_ecdf(plt, fold, outdir, stamp, family="z_nu", arch=""):
@@ -2342,168 +2347,154 @@ def thread_integrity(thr, family=None):
     return s, True
 
 
-def fig_threads_combined(plt, thr, outdir, stamp, arch=""):
-    """Weak scaling of the library and the externals against the pinned thread count."""
+def fig_threads_combined(plt, thr, outdir, stamp, arch="", family="z_nu"):
+    """Weak scaling of the library and the externals against the pinned thread count, for
+    one argument convention."""
+    name = f"threads-{family}"
     if not thr:
-        return _skip("threads", "no threads rows (the stage is opt-in at run time)")
+        return _skip(name, "no threads rows (the stage is opt-in at run time)")
     thr, _thr_med = threads_median(thr)
     if not _thr_med:
-        return _skip("threads", THREADS_NO_MEDIAN)
-    fams = [f for f in ("z_nu", "h_nu_s")
-            if any(r.get("family") == f for r in thr)]
-    if not fams:
-        return _skip("threads", "no family in the threads rows")
-    has_vps = any(_ok(_f(r, "values_per_s")) for r in thr)
+        return _skip(name, THREADS_NO_MEDIAN)
+    fam_rows = [r for r in thr if r.get("family") == family]
+    if not fam_rows:
+        return _skip(name, f"no {family} rows in the threads stage")
+    has_vps = any(_ok(_f(r, "values_per_s")) for r in fam_rows)
 
-    nrow = 3 if has_vps else 2
-    # one y scale per row; the efficiency row, a band near 100 %, gets less height
-    fig, axes = plt.subplots(nrow, len(fams),
-                             figsize=(style.TEXT_W, 7.6 if has_vps else 5.2),
-                             squeeze=False, sharex=True, sharey="row",
-                             gridspec_kw={"height_ratios":
-                                          [1.0, 0.75, 1.15][:nrow]})
-    loads = [_f(r, "load1") for r in thr if _ok(_f(r, "load1"))]
-    cores = max([_i(r, "physical_cores") for r in thr] or [0])
-    band_gap = []
+    if has_vps:
+        # speedup and efficiency on top, throughput bottom left, the key bottom right
+        fig, axes, key = _three_and_key(plt, 5.6, sharex=True)
+        top, mid, bot = axes
+    else:
+        fig, (top, mid) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.2),
+                                       sharex=True)
+        axes, key, bot = [top, mid], None, None
+    loads = [_f(r, "load1") for r in fam_rows if _ok(_f(r, "load1"))]
+    cores = max([_i(r, "physical_cores") for r in fam_rows] or [0])
+    band_gap = None
     # Only T > 1 rows are checked: `identical` is `n/a` at T = 1.
-    reent = [r for r in thr
+    reent = [r for r in fam_rows
              if _i(r, "threads") > 1 and (r.get("identical") or "") != "yes"]
-    n_sup = 0
 
-    def _series(fam_rows, name, supplier):
+    def _series(name, supplier):
         sub = [r for r in fam_rows
                if (r.get("supplier") or "-") == supplier
                and (supplier != "-" or r.get("backend") == name)]
         return sorted(sub, key=lambda r: _i(r, "threads"))
 
-    for ci, fam in enumerate(fams):
-        fam_rows = [r for r in thr if r.get("family") == fam]
-        top, mid = axes[0][ci], axes[1][ci]
-        bot = axes[2][ci] if has_vps else None
-        best1 = 0.0
-
-        # library backends solid, externals dashed
-        lines =[(bk, "-", style.BACKEND_COLOR.get(bk, "magenta"),
-                  style.BACKEND_MARK.get(bk, "o"), "-")
-                 for bk in style.BACKEND_ORDER]
-        sups = sorted({r["supplier"] for r in fam_rows
-                       if (r.get("supplier") or "-") not in ("-", "")})
-        n_sup = max(n_sup, len(sups))
-        lines += [(s, "--", style.supplier_color(s), "s", s) for s in sups]
-
-        for name, ls, col, mk, supplier in lines:
-            sub = _series(fam_rows, name, supplier)
-            if not sub:
-                continue
-            x = [_i(r, "threads") for r in sub]
-            lw = 1.3 if supplier == "-" else 1.0
-            ms = 3.6 if supplier == "-" else 3.0
-            al = 1.0 if supplier == "-" else 0.85
-            top.plot(x, [_f(r, "speedup") for r in sub], mk + ls, color=col,
-                     ms=ms, lw=lw, alpha=al, label=name)
-            mid.plot(x, [100.0 * _f(r, "efficiency") for r in sub], mk + ls,
-                     color=col, ms=ms, lw=lw, alpha=al)
-            if bot is not None:
-                y = [_f(r, "values_per_s") for r in sub]
-                if any(_ok(v) for v in y):
-                    bot.plot(x, y, mk + ls, color=col, ms=ms, lw=lw, alpha=al)
-                    if x and x[0] == 1 and _ok(y[0]):
-                        best1 = max(best1, y[0])
-
-        lim = max([_i(r, "threads") for r in fam_rows] or [1])
-        # one style and label for the ideal on all three panels, so the legend
-        # merge below keeps a single entry
-        _IDEAL = dict(ls="--", color="0.40", lw=0.9, label="Ideal scaling")
-        top.plot([1, lim], [1, lim], zorder=0, **_IDEAL)
-        top.set_xscale("log", base=2)
-        top.set_yscale("log", base=2)
-        top.set_title(FAMILY_PLOT_LABEL.get(fam, fam))
-        top.grid(True, alpha=0.25, lw=0.5)
-
-        mid.axhline(100.0, zorder=0, **_IDEAL)
-        mid.set_xscale("log", base=2)
-        mid.set_ylim(0, 115)
-        mid.grid(True, alpha=0.25, lw=0.5)
-        if ci == 0:
-            top.set_ylabel("Speedup")
-            mid.set_ylabel("Parallel\nefficiency (%)")
-        if bot is None:
-            mid.set_xlabel("Pinned threads")
-
+    # library backends solid, externals dashed
+    lines =[(bk, "-", style.BACKEND_COLOR.get(bk, "magenta"),
+              style.BACKEND_MARK.get(bk, "o"), "-")
+             for bk in style.BACKEND_ORDER]
+    sups = sorted({r["supplier"] for r in fam_rows
+                   if (r.get("supplier") or "-") not in ("-", "")})
+    lines += [(s_, "--", style.supplier_color(s_), "s", s_) for s_ in sups]
+    best1 = 0.0
+    _h, _l = [], []
+    for name_, ls, col, mk, supplier in lines:
+        sub = _series(name_, supplier)
+        if not sub:
+            continue
+        x = [_i(r, "threads") for r in sub]
+        lw = 1.3 if supplier == "-" else 1.0
+        ms = 3.6 if supplier == "-" else 3.0
+        al = 1.0 if supplier == "-" else 0.85
+        h, = top.plot(x, [_f(r, "speedup") for r in sub], mk + ls, color=col,
+                      ms=ms, lw=lw, alpha=al)
+        _h.append(h); _l.append(name_)
+        mid.plot(x, [100.0 * _f(r, "efficiency") for r in sub], mk + ls,
+                 color=col, ms=ms, lw=lw, alpha=al)
         if bot is not None:
-            # alternate cost bands (_cost_clusters on the throughput at the
-            # largest thread count) are shaded
-            ends = {}
-            for name, ls, col, mk, supplier in lines:
-                sub = _series(fam_rows, name, supplier)
-                if sub and _ok(_f(sub[-1], "values_per_s")):
-                    ends[name] = _f(sub[-1], "values_per_s")
-            if len(ends) > 2:
-                order = sorted(ends, key=lambda k: ends[k])
-                cl = _cost_clusters(order, ends, gap=0.5)
-                for bi, (i0, i1, lo, hi) in enumerate(cl):
-                    if bi % 2 == len(cl) % 2:
-                        bot.axhspan(lo / 1.35, hi * 1.35, facecolor="0.85",
-                                    alpha=0.35, lw=0, zorder=0)
-                # widest gap between adjacent bands, for the title note
-                ratio = _widest_band_gap(ends)
-                if ratio is not None:
-                    band_gap.append((fam, ratio))
-            # ideal from the fastest one-thread row, drawn above the data
-            if best1 > 0:
-                bot.plot([1, lim], [best1, best1 * lim], zorder=8, **_IDEAL)
-            bot.set_xscale("log", base=2)
-            bot.set_yscale("log")
-            bot.set_xlabel("Pinned threads")
-            if ci == 0:
-                bot.set_ylabel("Covariance values / s")
-            bot.grid(True, alpha=0.25, lw=0.5, which="both")
+            y = [_f(r, "values_per_s") for r in sub]
+            if any(_ok(v) for v in y):
+                bot.plot(x, y, mk + ls, color=col, ms=ms, lw=lw, alpha=al)
+                if x and x[0] == 1 and _ok(y[0]):
+                    best1 = max(best1, y[0])
 
-    # legend handles from the top panel plus any unique ones from the bottom
-    _h, _l = axes[0][0].get_legend_handles_labels()
-    if has_vps:
-        _hb, _lb = axes[2][0].get_legend_handles_labels()
-        for h, l in zip(_hb, _lb):
-            if l not in _l:
-                _h.append(h); _l.append(l)
+    lim = max([_i(r, "threads") for r in fam_rows] or [1])
+    # one style for the ideal on every panel, one key entry
+    _IDEAL = dict(ls="--", color="0.40", lw=0.9)
+    h, = top.plot([1, lim], [1, lim], zorder=0, **_IDEAL)
+    _h.append(h); _l.append("Ideal scaling")
+    top.set_xscale("log", base=2)
+    top.set_yscale("log", base=2)
+    top.set_ylabel("Speedup")
+    top.grid(True, alpha=0.25, lw=0.5)
+
+    mid.axhline(100.0, zorder=0, **_IDEAL)
+    mid.set_xscale("log", base=2)
+    mid.set_ylim(0, 115)
+    mid.set_ylabel("Parallel efficiency (%)")
+    mid.grid(True, alpha=0.25, lw=0.5)
+    # pinned threads under every panel: the top-right one has none below it
+    for ax in axes:
+        ax.set_xlabel("Pinned threads")
+
+    if bot is not None:
+        # alternate cost bands (_cost_clusters on the throughput at the
+        # largest thread count) are shaded
+        ends = {}
+        for name_, ls, col, mk, supplier in lines:
+            sub = _series(name_, supplier)
+            if sub and _ok(_f(sub[-1], "values_per_s")):
+                ends[name_] = _f(sub[-1], "values_per_s")
+        if len(ends) > 2:
+            order = sorted(ends, key=lambda k: ends[k])
+            cl = _cost_clusters(order, ends, gap=0.5)
+            for bi, (i0, i1, lo, hi) in enumerate(cl):
+                if bi % 2 == len(cl) % 2:
+                    bot.axhspan(lo / 1.35, hi * 1.35, facecolor="0.85",
+                                alpha=0.35, lw=0, zorder=0)
+            # widest gap between adjacent bands, for the title note
+            band_gap = _widest_band_gap(ends)
+        # ideal from the fastest one-thread row, drawn above the data
+        if best1 > 0:
+            bot.plot([1, lim], [best1, best1 * lim], zorder=8, **_IDEAL)
+        bot.set_xscale("log", base=2)
+        bot.set_yscale("log")
+        bot.set_ylabel("Covariance values / s")
+        bot.grid(True, alpha=0.25, lw=0.5, which="both")
 
     note = "%d physical cores" % cores if cores else ""
     # worst ULP per library backend over thread 0's scored points; it must not vary with T
     _ub = defaultdict(float)
-    for r in thr:
+    for r in fam_rows:
         if (r.get("supplier") or "-") == "-" and _ok(_f(r, "u_max")):
             _ub[r.get("backend")] = max(_ub[r.get("backend")], _f(r, "u_max"))
-    _drift = not thread_integrity(thr)[1]
+    _drift = not thread_integrity(fam_rows)[1]
     if _ub:
         note += "   |   worst ULP %s%s" % (
             ", ".join("%s %.3g" % (b, _ub[b]) for b in style.BACKEND_ORDER if b in _ub),
             ", changes with the thread count" if _drift else ", the same at every T")
-    if n_sup:
-        note += "   |   %d external supplier(s), dashed" % n_sup
-    if band_gap:
-        note += "   |   widest gap between cost bands %s" % ", ".join(
-            "%.1fx" % r for _, r in band_gap)
+    if sups:
+        note += "   |   %d external supplier(s), dashed" % len(sups)
+    if band_gap is not None:
+        note += "   |   widest gap between cost bands %.1fx" % band_gap
     if loads:
         # load1 includes the stage's own threads, so it is reported, not interpreted
         note += "   |   load1 = %.0f, incl. this stage's own threads" % max(loads)
     if reent:
         note += "   |   %d rows failed the re-entrancy check" % len(reent)
-    _label_every_panel(axes.ravel())
+    _label_every_panel(axes)
     _top = _title(fig,
-        "Weak scaling against pinned thread count%s\n%s"
-        % ((" --- " + arch) if arch else "", note))
+        "Weak scaling against pinned thread count, %s%s\n%s"
+        % (FAMILY_LABEL.get(family, family), (" --- " + arch) if arch else "", note))
     # caveat for the two ratio panels
-    _foot = style.footer(fig, _h, _l, ncol=4, width=90, note=
-        "speedup and efficiency are ratios against each row's own one-thread "
-        "cost; an implementation with a higher cost per element moves less "
-        "data per second and can reach a higher efficiency" + (
-            ".  The bottom panel shows the absolute throughput"
-            if has_vps else
-            ".  The throughput panel needs the values_per_s column, which "
-            "these rows do not carry"))
+    _note = ("speedup and efficiency are ratios against each row's own one-thread "
+             "cost; an implementation with a higher cost per element moves less "
+             "data per second and can reach a higher efficiency" + (
+                 ".  The bottom panel shows the absolute throughput"
+                 if has_vps else
+                 ".  The throughput panel needs the values_per_s column, which "
+                 "these rows do not carry"))
+    if key is not None:
+        _key_cell(key, _h, _l, ncol=2)
+        _foot = style.footer(fig, width=90, note=_note)
+    else:
+        _foot = style.footer(fig, _h, _l, ncol=4, width=90, note=_note)
     fig.tight_layout(rect=(0, _foot, 1, _top))
-    _npt = sorted({_i(r, "n_per_thread") for r in thr if _i(r, "n_per_thread")})
-    _tl = sorted({r.get("law") for r in thr if r.get("law")})
+    _npt = sorted({_i(r, "n_per_thread") for r in fam_rows if _i(r, "n_per_thread")})
+    _tl = sorted({r.get("law") for r in fam_rows if r.get("law")})
     _facts("Each thread evaluates its own %s points (dataset %s), so $N$ = %s "
            "times the thread count; %s.  Worst ULP (per backend, in the "
            "title) is the maximum over those first points of the dataset, scored "
@@ -2515,21 +2506,22 @@ def fig_threads_combined(plt, thr, outdir, stamp, arch=""):
               " / ".join(_num(v) for v in _npt) or "$n$",
               ("a row's time is the median over %s of the slowest thread in "
                "each repetition (repetitions start together on a barrier)"
-               % _reps_phrase(thr))),
-           thread_integrity(thr)[0])
-    _caption("Thread-scaling behaviour of the tested implementations.",
-             _columns(fams),
-             "From top to bottom, the rows show the speedup relative to one "
-             "thread, the parallel efficiency%s as the number of pinned threads "
-             "increases." % (" and the throughput in covariance values per second"
-                             if has_vps else ""),
+               % _reps_phrase(fam_rows))),
+           thread_integrity(fam_rows)[0])
+    _caption("Thread-scaling behaviour of the tested implementations for the %s "
+             "datasets." % CONV.get(family, family),
+             _columns([family]),
+             "The panels show the speedup relative to one thread (top left) and "
+             "the parallel efficiency (top right)%s as the number of pinned "
+             "threads increases." % (" and the throughput in covariance values "
+                                     "per second (bottom left)" if has_vps else ""),
              "The grey dashed line indicates ideal scaling%s." % (
                  ", and dashed lines with square markers are external "
-                 "implementations" if n_sup else ""),
+                 "implementations" if sups else ""),
              "Some rows failed the thread integrity check, so their timings are "
              "not scaling results." if (reent or _drift) else "",
              _obtained(arch))
-    return _finish(fig, outdir, "fig-paper-threads", stamp)
+    return _finish(fig, outdir, f"fig-paper-threads-{family}", stamp)
 
 
 def fig_gpu_knobs(plt, gthr, outdir, stamp, arch=""):

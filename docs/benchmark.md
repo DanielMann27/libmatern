@@ -534,7 +534,7 @@ clock. Progress lines go to descriptor 3 (`WM_PROGRESS_FD`), not into the record
 By default the figure and table targets, `make benchmark` and `make pipeline` write the
 **paper set**: the figures the paper includes and the tables its own tables are taken from,
 each in both argument conventions, `(z,ν)` beside `(h,ν,s)` (`PAPER_FIGURES` and
-`PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 28 figures and 17 tables with
+`PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`), 33 figures and 17 tables with
 the published runs. Each CPU result, the machine-independent tables
 included, comes from one machine: the first that has the stage it is drawn from, machines
 without GPU data first (`ARGS=--cpu-machine NAME` puts one machine first), and a GPU run's
@@ -577,9 +577,9 @@ supplier stages:
 | `<m>/fig-paper-accuracy-distribution-<family>`, `tab-medmax-<family>` | accuracy distributions; median and maximum ULP error | suppliers |
 | `<m>/fig-paper-ladder-<law>-z_nu`, `<m>/tab-throughput-<family>` | throughput against N | ladders |
 | `<m>/fig-paper-workspace-<law>-<family>` | cost with a new and a reused workspace against N | ladders |
-| `<m>/fig-paper-levin-cpu-<backend>`, `<m>/tab-levin-cpu-<backend>` | Levin A/B on the CPU | `LEVIN=yes` |
-| `<m>/fig-paper-fold`, `<m>/fig-paper-fold-ecdf-<family>`, `tab-fold-quantiles-<family>`, `<m>/tab-fold-cpu` | prefactor fold | `FOLD=yes` |
-| `<m>/fig-paper-threads`, `<m>/tab-threads` | thread scaling | `THREADS=yes` |
+| `<m>/fig-paper-levin-cpu-<backend>-<family>`, `<m>/tab-levin-cpu-<backend>` | Levin A/B on the CPU | `LEVIN=yes` |
+| `<m>/fig-paper-fold-<family>`, `<m>/fig-paper-fold-ecdf-<family>`, `tab-fold-quantiles-<family>`, `<m>/tab-fold-cpu` | prefactor fold | `FOLD=yes` |
+| `<m>/fig-paper-threads-<family>`, `<m>/tab-threads` | thread scaling | `THREADS=yes` |
 | `cross-machine/fig-paper-machine-independence`, `tab-machine-independence` | the rows of two CPU models against each other | runs of two CPU models |
 | `<g>/fig-paper-gpu-assembly-<family>`, `<g>/tab-gpu-assembly-<family>` | assemblies of the device kernels | `GPU=yes` |
 | `<g>/fig-paper-gpu-plane-<family>`, `<g>/tab-gpu-cost-<family>`, `<g>/tab-gpu-medmax-<family>` | cost and accuracy of the device kernels | `GPU=yes` |
@@ -587,7 +587,7 @@ supplier stages:
 | `<g>/tab-gpu-call-<family>` | whole calls, transfers included | `GPU=yes` |
 | `<g>/fig-paper-gpu-modes-<law>-<family>`, `<g>/tab-gpu-throughput-<family>` | transfer strategies against N; device throughput | `GPU=yes` |
 | `<g>/fig-paper-gpu-boost-shortcut` | Boost's `K_ν` near ν = 5/2 | `GPU=yes`, Boost 1.87 or later |
-| `<g>/fig-paper-levin-cuda-async-direct` | Levin A/B on the GPU | `GPU=yes LEVIN=yes` |
+| `<g>/fig-paper-levin-cuda-async-direct-<family>` | Levin A/B on the GPU | `GPU=yes LEVIN=yes` |
 | `<g>/fig-paper-gpu-knobs` | CUDA block size and host staging threads | `GPU=yes THREADS=yes` |
 | `tab-environment` | machines and software of the runs | any run |
 

@@ -407,6 +407,11 @@ def group_by_machine(runs):
     return {m: bymach[m] for m in machine_order(bymach)}, dropped
 
 
+def families(rows):
+    """The argument conventions present in `rows`, (z,nu) first."""
+    return [f for f in ("z_nu", "h_nu_s") if any(r.get("family") == f for r in rows)]
+
+
 def is_cpu_machine(rs):
     """True if the machine's accuracy rows come from a CPU run, not only from a
     GPU-pipeline run's one-backend reference."""
@@ -418,16 +423,17 @@ def is_cpu_machine(rs):
 # as fnmatch patterns, by the machine they come from: "cpu" the machine that cpu_source
 # picks for the CPU data the result is drawn from, "gpu" a machine with GPU data, "every"
 # each machine, "shared" the tree root (tables) or cross-machine/ (figures).
-# levin-cpu-vector is the vector router's Levin figure, whichever backend carries it.
-# Both argument conventions, (z,nu) beside the paper's (h,nu,s); fold, Levin and threads
-# carry both in one figure, the ladder is drawn for (z,nu) only.
+# levin-cpu-vector-<family> is the vector router's Levin figure, whichever backend
+# carries it.  Both argument conventions, (z,nu) beside the paper's (h,nu,s); the ladder
+# is drawn for (z,nu) only.  fold-* would also take the fold ECDFs, so the fold figures
+# are named.
 PAPER_FIGURES = {
-    "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-*", "fold",
-            "ladder-*", "workspace-*", "levin-cpu-vector"),
+    "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-*", "fold-z_nu",
+            "fold-h_nu_s", "ladder-*", "workspace-*", "levin-cpu-vector-*"),
     "gpu": ("gpu-plane-*", "gpu-accuracy-distribution-*", "gpu-assembly-*",
             "gpu-modes-size_random*", "gpu-boost-shortcut", "gpu-knobs",
-            "levin-cuda"),
-    "every": ("threads",),
+            "levin-cuda-*"),
+    "every": ("threads-*",),
     "shared": ("machine-independence",),
 }
 # The tables the paper's own tables are taken from, with their (z,nu) twins.
@@ -750,33 +756,42 @@ def main():
             _vec = pf.lib_backend_for([r for r in lev if (r.get("device") or "cpu").strip() == "cpu"
                                        and r.get("backend") != "scalar"]) or "avx512"
             for bk in (_vec, "scalar"):
-                if want("levin-cpu-vector" if bk == _vec else f"levin-cpu-{bk}", "levin"):
-                    note(pf.fig_levin(plt, lev, sub, stamp_of("levin"), device="cpu",
-                                      backend=bk, arch=arch),
-                         f"{mach}/levin-cpu-{bk}")
-        if glev and want("levin-cuda"):
+                for fam in families(lev):
+                    if want(f"levin-cpu-vector-{fam}" if bk == _vec
+                            else f"levin-cpu-{bk}-{fam}", "levin"):
+                        note(pf.fig_levin(plt, lev, sub, stamp_of("levin"),
+                                          device="cpu", backend=bk, arch=arch,
+                                          family=fam),
+                             f"{mach}/levin-cpu-{bk}-{fam}")
+        if glev:
             # On the device `backend` is the transfer mode; the band does not depend on it, so
             # one mode is shown, the default async-direct when present.
             gbk = "async-direct"
             have = {r.get("backend") for r in glev}
             if gbk not in have and have:
                 gbk = sorted(have)[0]
-            note(pf.fig_levin(plt, glev, sub, stamp_of("gpu_levin"), device="cuda",
-                              backend=gbk, arch=garch),
-                 f"{mach}/levin-cuda")
+            for fam in families(glev):
+                if want(f"levin-cuda-{fam}"):
+                    note(pf.fig_levin(plt, glev, sub, stamp_of("gpu_levin"),
+                                      device="cuda", backend=gbk, arch=garch,
+                                      family=fam),
+                         f"{mach}/levin-cuda-{fam}")
         if fold:
-            if want("fold", "fold"):
-                note(pf.fig_fold(plt, fold, sub, stamp_of("fold"), arch=arch),
-                     f"{mach}/fold")
+            for fam in families(fold):
+                if want(f"fold-{fam}", "fold"):
+                    note(pf.fig_fold(plt, fold, sub, stamp_of("fold"), arch=arch,
+                                     family=fam),
+                         f"{mach}/fold-{fam}")
             for fam in ("z_nu", "h_nu_s"):
                 if want(f"fold-ecdf-{fam}", "fold"):
                     note(pf.fig_fold_ecdf(plt, fold, sub, stamp_of("fold"),
                                           family=fam, arch=arch),
                          f"{mach}/fold-ecdf-{fam}")
-        if thr and want("threads", "threads"):
-            note(pf.fig_threads_combined(plt, thr, sub, stamp_of("threads"),
-                                         arch=arch),
-                 f"{mach}/threads")
+        for fam in families(thr):
+            if want(f"threads-{fam}", "threads"):
+                note(pf.fig_threads_combined(plt, thr, sub, stamp_of("threads"),
+                                             arch=arch, family=fam),
+                     f"{mach}/threads-{fam}")
         if gthr and want("gpu-knobs"):
             note(pf.fig_gpu_knobs(plt, gthr, sub, stamp_of("gpu_threads"),
                                   arch=garch),

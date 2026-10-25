@@ -947,7 +947,7 @@ if make build/fold_cpu >/dev/null 2>&1; then
   run "figures: the fold run draws" bash -c '
       m=$(bash -c "$FIGMIRROR"); cp -r "'"$FOLDRUN"'" "$m/runs/2026-01-01T00-00Z_hosta_cpu-fold"
       "'"$PY"'" "$m/plots/make_paper_figures.py" --full >/dev/null 2>&1; rc=$?
-      f=$(find "$m/plots/paper" -name "fig-paper-fold.png" | wc -l)
+      f=$(find "$m/plots/paper" -name "fig-paper-fold-z_nu.png" | wc -l)
       e=$(find "$m/plots/paper" -name "fig-paper-fold-ecdf-z_nu.png" | wc -l); rm -rf "$m"
       [ "$rc" -eq 0 ] && [ "$f" -eq 1 ] && [ "$e" -eq 1 ]'
   # Marker control: a scalar row given u_max 1e15 and non-finite points reads `Cap (dag)`.
