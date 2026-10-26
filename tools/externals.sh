@@ -55,8 +55,8 @@ if [ "${EXTERNALS_PLAN:-}" = yes ]; then
     [ -n "$SYS_GSL" ] || { [ -f references/gsl/2.6/lib/pkgconfig/gsl.pc ] && [ -f references/gsl/2.6/lib/libgsl.a ]; } ||
         echo "GSL 2.6|about 8 MB download, then a build of a few minutes"
     _p="${PYTHON:-python3 -B}"; _p=${_p%% *}
-    { command -v "$_p" >/dev/null 2>&1 && "$_p" -c 'import numpy, matplotlib' >/dev/null 2>&1; } ||
-    { [ -x .venv/bin/python3 ] && .venv/bin/python3 -c 'import numpy, matplotlib' >/dev/null 2>&1; } ||
+    { command -v "$_p" >/dev/null 2>&1 && "$_p" tools/py_stack.py >/dev/null 2>&1; } ||
+    { [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; } ||
         echo "NumPy and Matplotlib|about 40 MB download into .venv/"
     exit 0
 fi
@@ -140,15 +140,20 @@ done
 py="${PYTHON:-python3 -B}"; py=${py%% *}
 # PY_PINS: the versions that drew the published figures, from wheels only.  Where pip cannot
 # install them, PY_FLOORS: pip takes the newest versions at or above the oldest stack the
-# generators are tested with.
-PY_PINS="numpy==2.2.5 matplotlib==3.11.0"
-PY_FLOORS="numpy>=2.0.2 matplotlib>=3.9.4"
+# generators are tested with.  Both from tools/py_stack.py, which also decides whether an
+# interpreter's NumPy and Matplotlib count (at or above PY_FLOORS).
+PY_PINS=$(sed -n 's/^PY_PINS = "\(.*\)"$/\1/p' tools/py_stack.py)
+PY_FLOORS=$(sed -n 's/^PY_FLOORS = "\(.*\)"$/\1/p' tools/py_stack.py)
 python_packages() {
-    if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import numpy, matplotlib' >/dev/null 2>&1; then
-        echo "  present   $("$py" -c 'import numpy,matplotlib; print("numpy", numpy.__version__, "and matplotlib", matplotlib.__version__)') for $(command -v "$py")"
-        return 0
+    local st
+    if command -v "$py" >/dev/null 2>&1; then
+        st=$("$py" tools/py_stack.py 2>/dev/null)
+        case $? in
+            0) echo "  present   $st for $(command -v "$py")"; return 0 ;;
+            1) echo "  too old   $st for $(command -v "$py")" ;;
+        esac
     fi
-    if [ -x .venv/bin/python3 ] && .venv/bin/python3 -c 'import numpy, matplotlib' >/dev/null 2>&1; then
+    if [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; then
         echo "  present   .venv (numpy and matplotlib)"
         python_user_set && echo "  note      PYTHON=${PYTHON:-} is set (${PYTHON_ORIGIN:-}), so the Makefile uses it, not .venv/bin/python3"
         return 0
@@ -157,7 +162,7 @@ python_packages() {
     # A .venv whose interpreter runs but does not import both (e.g. after a Python minor
     # upgrade) is adapted to the current Python in place.
     if [ -x .venv/bin/python3 ] && .venv/bin/python3 -c '' >/dev/null 2>&1; then
-        echo "  updating  .venv ($(.venv/bin/python3 -c 'import sys; print("Python", sys.version.split()[0])') does not import numpy and matplotlib), installing $PY_PINS"
+        echo "  updating  .venv ($(.venv/bin/python3 -c 'import sys; print("Python", sys.version.split()[0])') has no numpy and matplotlib at or above the tested minimum), installing $PY_PINS"
         .venv/bin/python3 -m venv --upgrade .venv && made=yes
     fi
     if [ $made = no ]; then
@@ -175,7 +180,7 @@ python_packages() {
         .venv/bin/python3 -m pip install --quiet --disable-pip-version-check $PY_FLOORS || {
             echo "  failed    pip install $PY_FLOORS"; return 1; }
     fi
-    echo "  verified  .venv: $(.venv/bin/python3 -c 'import numpy,matplotlib; print("numpy", numpy.__version__, "matplotlib", matplotlib.__version__)')"
+    echo "  verified  .venv: $(.venv/bin/python3 tools/py_stack.py)"
     if python_user_set; then
         echo "  note      PYTHON=${PYTHON:-} is set (${PYTHON_ORIGIN:-}), so the Makefile uses it, not .venv/bin/python3;"
         echo "            without PYTHON it searches PYTHON_CANDIDATES (make python-info shows the result)"
@@ -183,10 +188,10 @@ python_packages() {
         # the search of the Makefile for PYTHON
         local p sel=""
         for p in ${PYTHON_CANDIDATES:-python3 /usr/bin/python3 python $PWD/.venv/bin/python3}; do
-            command -v "$p" >/dev/null 2>&1 && "$p" -c 'import numpy, matplotlib' >/dev/null 2>&1 && { sel=$p; break; }
+            command -v "$p" >/dev/null 2>&1 && "$p" tools/py_stack.py >/dev/null 2>&1 && { sel=$p; break; }
         done
-        echo "  selected  ${sel:-none}: the Makefile now takes the first of PYTHON_CANDIDATES that imports"
-        echo "            both (make python-info shows it)"
+        echo "  selected  ${sel:-none}: the Makefile now takes the first of PYTHON_CANDIDATES with both at"
+        echo "            or above the tested minimum (make python-info shows it)"
     fi
 }
 item "NumPy, Matplotlib" python_packages

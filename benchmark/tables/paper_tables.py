@@ -564,7 +564,8 @@ def medmax_comparison_rows(series, lib_by, laws):
         if names[0] == names[1]:
             lowest.append(Cell(style.Raw(esc(names[0])), names[0], full))
         else:
-            lowest.append(Cell(style.Raw(esc(names[0]) + "/" + esc(names[1])),
+            # two names stacked, so that this row does not set the column width
+            lowest.append(Cell(style.Raw(_stack(esc(names[0]) + "/", esc(names[1]))),
                                names[0] + "/" + names[1], full))
         # Advantage factor: the favoured implementation once when both halves agree.
         parts = [(h[1], sig(h[2], 3)) if (h and h[1]) else (None, (None, None))
@@ -581,8 +582,13 @@ def medmax_comparison_rows(series, lib_by, laws):
             continue
         tex = [esc(f) + "~" + t[0] if f else "--" for f, t in parts]
         md = [f"{f} {t[1]}" if f else "--" for f, t in parts]
-        adv.append(Cell(style.Raw("/".join(tex)), "/".join(md), csv_))
+        adv.append(Cell(style.Raw(_stack(tex[0] + "/", tex[1])), "/".join(md), csv_))
     return lowest, adv, incomplete
+
+
+def _stack(top, bottom):
+    r"""Two lines in one right-aligned cell, the first on the row's baseline."""
+    return r"\begin{tabular}[t]{@{}r@{}}" + top + r"\\" + bottom + r"\end{tabular}"
 
 
 def medmax_comparison_note(dashed, rows):
@@ -1783,7 +1789,7 @@ ENV_KEYS = [
     ("build_cpu_supplier_cxx_boost",     "Boost, CPU row"),
     ("build_gpu_suppliers_boost",        "Boost, GPU row"),
     ("build_cpu_supplier_gsl_runtime",   "GSL"),
-    ("l3_per_socket",     "L3 cache (total)"),
+    ("l3_total",          "L3 cache (total)"),
     ("cpufreq_driver",    "cpufreq driver"),
     ("cpufreq_governor",  "cpufreq governor"),
     ("cpufreq_range_kHz", "cpufreq range"),
@@ -1814,6 +1820,8 @@ ENV_FALLBACK = {
     "build_cpu_supplier_gsl_runtime": ("gsl",),
     "gpu_cuda_driver": ("build_gpu_benchmark_cuda_driver_api",
                         "build_gpu_suppliers_cuda_driver_api"),
+    # The published runs record it as l3_per_socket; the value is the total there as well.
+    "l3_total": ("l3_per_socket",),
 }
 
 

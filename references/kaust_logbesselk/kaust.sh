@@ -2,6 +2,8 @@
 # kaust.sh [notice|box|ask|given|download|clean] [--quiet] -- the KAUST CuBesselK rows: copyright
 # notice (make kaust), its short form in a box, the question of make pipeline (ask; given: for KAUST=yes),
 # download and port (make kaust DOWNLOAD=yes, the only mode that downloads CuBesselK), and clean.
+# KAUST_PIPELINE=1 (make pipeline, after its question showed the box): download without the
+# notice and with a one-line result.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 . ./tools/ask.sh || exit 2
@@ -179,6 +181,7 @@ download() {
     mkdir -p "$(dirname "$HDR")" || return 1
     echo "  porting   $K/derive_port.py -> $HDR"
     $PY "$K/derive_port.py" "$UP" "$HDR" || { rm -f "$HDR"; return 1; }
+    [ -n "${KAUST_PIPELINE:-}" ] && { echo "  done      the KAUST rows are built with the supplier programs"; return 0; }
     echo "  done      the KAUST rows are built with the supplier programs"
     echo "            (make build/suppliers, build/threads_cpu, build/suppliers_gpu);"
     echo "            the port is deleted at the end of make pipeline or make reproduce and by"
@@ -215,7 +218,8 @@ case "$MODE" in
     box)      box ;;
     ask)      ask; exit $? ;;
     given)    ask given; exit $? ;;
-    download) notice_text; download || { echo "make kaust DOWNLOAD=yes: FAILED"; exit 1; } ;;
+    download) [ -n "${KAUST_PIPELINE:-}" ] || notice_text
+              download || { echo "make kaust DOWNLOAD=yes: FAILED"; exit 1; } ;;
     clean)    clean ;;
     *)        echo "usage: kaust.sh [notice|box|ask|given|download|clean] [--quiet]" >&2; exit 2 ;;
 esac

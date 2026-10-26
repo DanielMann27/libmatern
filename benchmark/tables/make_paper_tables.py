@@ -390,10 +390,14 @@ def main():
                 and want(stems, any_role=True)):
             pt.SKIPPED.append((stems, why))
 
-    # Output files this run did not write are listed, not deleted.
+    # Output files this run did not write are listed, not deleted.  The preview.tex of a
+    # directory that gets a preview below is not one of them: it is rewritten after this check.
+    preview_dirs = {os.path.normpath(d) for d in [out] + [os.path.join(out, m) for m in bymach]}
     produced = set()
     for root, _d, files in os.walk(out):
         for fn in files:
+            if fn == "preview.tex" and os.path.normpath(root) in preview_dirs:
+                continue
             if fn.endswith((".tex", ".md", ".csv")):
                 produced.add(os.path.relpath(os.path.join(root, fn), out)
                              .replace(os.sep, "/"))

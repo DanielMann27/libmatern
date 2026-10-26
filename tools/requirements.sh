@@ -334,26 +334,29 @@ generators() {
         local why
         if ! command -v "$p" >/dev/null 2>&1; then
             why="not found"
-        elif ! "$p" -c 'import numpy' >/dev/null 2>&1; then
-            why="$(command -v "$p") $("$p" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null): no numpy"
-        elif ! "$p" -c 'import matplotlib' >/dev/null 2>&1; then
-            why="$(command -v "$p") $("$p" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null): no matplotlib"
         else
-            why="$(command -v "$p") $("$p" -c 'import sys,numpy,matplotlib; print(sys.version.split()[0], "numpy", numpy.__version__, "matplotlib", matplotlib.__version__)' 2>/dev/null)"
-            [ -n "$sel" ] || sel=$p
+            # tools/py_stack.py: 0 at or above the tested minimum, 1 below it, 2 not importable
+            local st rc
+            st=$("$p" tools/py_stack.py 2>/dev/null); rc=$?
+            why="$(command -v "$p") $("$p" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null)"
+            case $rc in 0|1) why="$why $st" ;; *) why="$why: ${st:-no numpy}" ;; esac
+            [ $rc -ne 0 ] || [ -n "$sel" ] || sel=$p
         fi
         printf "  %-8s %-26s %s\n" "" "candidate $p" "$why"
     done
     # The interpreter the Makefile uses: PYTHON as the user set it, else the first candidate
-    # above that imports both, else python3 (the Makefile's search and its fallback).
+    # above with both at or above the tested minimum, else python3 (the Makefile's search and
+    # its fallback).
     local first user=no
     if is_user_set "${PYTHON_ORIGIN:-}"; then
         user=yes; first=${chosen%% *}; [ -n "$first" ] || first=python3
         printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$chosen   (set on the ${PYTHON_ORIGIN}; the candidates are not searched)"
     else
         first=${sel:-python3}
-        printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$first -B   ($([ -n "$sel" ] && echo "the first candidate that imports both" || echo "no candidate imports both"); override: make PYTHON=<interpreter>)"
+        printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$first -B   ($([ -n "$sel" ] && echo "the first candidate with both at or above the tested minimum" || echo "no candidate has both at or above the tested minimum"); override: make PYTHON=<interpreter>)"
     fi
+    local stack stack_rc
+    stack=$("$first" tools/py_stack.py 2>/dev/null); stack_rc=$?
     if ! command -v "$first" >/dev/null 2>&1; then
         if user_chose "${PYTHON_ORIGIN:-}" "$chosen" python3 python /usr/bin/python3; then
             row MISSING "Python 3" "PYTHON=$chosen (set on the ${PYTHON_ORIGIN}) not found" "figures and tables, make check (audit, readme-example)" \
@@ -361,24 +364,30 @@ generators() {
         else
             row MISSING "Python 3" "$first not found" "figures and tables, make check (audit, readme-example)" "$(hint python)" python
         fi
-    elif "$first" -c 'import numpy, matplotlib' >/dev/null 2>&1; then
-        row found "NumPy, Matplotlib" "$("$first" -c 'import numpy,matplotlib; print("numpy", numpy.__version__, "matplotlib", matplotlib.__version__)') ($first)" \
-            "figures and tables"
+    elif [ $stack_rc -eq 0 ]; then
+        row found "NumPy, Matplotlib" "$stack ($first)" "figures and tables"
     else
-        # pip only where the interpreter accepts it (PEP 668)
-        local pip="" mods em=no
-        if externally_managed "$first"; then em=yes; else pip="$first -m pip install numpy matplotlib"; fi
+        # pip only where the interpreter accepts it (PEP 668); below the minimum the
+        # distribution's packages are what the interpreter already has
+        local pip="" mods em=no what
+        if [ $stack_rc -eq 1 ]; then
+            what="$stack in $first"
+            externally_managed "$first" && em=yes || pip="$first -m pip install --upgrade $("$first" tools/py_stack.py --floors | sed "s/\([^ ]*\)/'\1'/g")"
+        else
+            what="not importable by $first"
+            if externally_managed "$first"; then em=yes; else pip="$first -m pip install numpy matplotlib"; fi
+        fi
         if [ $user = yes ]; then
-            row MISSING "NumPy, Matplotlib" "not importable by $first (PYTHON, set on the ${PYTHON_ORIGIN})" \
+            row MISSING "NumPy, Matplotlib" "$what (PYTHON, set on the ${PYTHON_ORIGIN})" \
                 "figures and tables; without them make paper-figures and make paper-tables stop" \
                 "unset PYTHON, then make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
         else
-            row MISSING "NumPy, Matplotlib" "not importable by $first$([ -z "$sel" ] && echo " (no candidate imports both)")" \
+            row MISSING "NumPy, Matplotlib" "$what$([ -z "$sel" ] && echo " (no candidate has both at or above the tested minimum)")" \
                 "figures and tables; without them make paper-figures and make paper-tables stop" \
                 "make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
-            mods=$(hint pymods "$first")
+            mods=""; [ $stack_rc -eq 1 ] || mods=$(hint pymods "$first")
             if [ -n "$mods" ] && [ "$mods" != "$pip" ]; then
                 printf "  %-8s %-26s %s\n" "" "" "  or: $mods"
                 printf "  %-8s %-26s %s\n" "" "" "      the Makefile then selects the first candidate that imports both"

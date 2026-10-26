@@ -1462,6 +1462,30 @@ run "invalid SETTINGS, KAUST, CORPUS refused" bash -c '
             </dev/null >/dev/null 2>&1; [ $? -eq 2 ] || { echo "$a accepted"; exit 1; }
     done'
 
+echo "== stage 8: the NumPy and Matplotlib of the generators (tools/py_stack.py) =="
+# Stand-in packages of a given version on PYTHONPATH, and an interpreter that sees them.
+fakepy(){ local d="$TMP/py_$1"; mkdir -p "$d/numpy" "$d/matplotlib"
+          echo "__version__ = \"$2\"" > "$d/numpy/__init__.py"
+          echo "${3:-__version__ = \"$4\"}" > "$d/matplotlib/__init__.py"
+          printf '#!/bin/sh\nPYTHONPATH=%s exec python3 "$@"\n' "$d" > "$d/python3"; chmod +x "$d/python3"; }
+fakepy old 1.26.4 "" 3.6.3
+fakepy floor 2.0.2 "" 3.9.4
+fakepy nompl 2.2.5 "raise ImportError('no matplotlib')"
+run "py_stack: below the minimum is 1"  bash -c '
+    "'"$TMP"'/py_old/python3" tools/py_stack.py | grep -q "below the tested minimum"
+    [ "${PIPESTATUS[0]}" -eq 1 ]'
+run "py_stack: at the minimum is 0"     "$TMP/py_floor/python3" tools/py_stack.py
+run "py_stack: no matplotlib is 2"      bash -c '
+    "'"$TMP"'/py_nompl/python3" tools/py_stack.py >/dev/null; [ $? -eq 2 ]'
+# The Makefile's search passes over an old stack and takes the next candidate.
+run "PYTHON search skips an old stack"  bash -c '
+    o=$(env -u PYTHON MAKEFLAGS= make -s --no-print-directory python-info \
+        PYTHON_CANDIDATES="'"$TMP"'/py_old/python3 '"$TMP"'/py_floor/python3")
+    echo "$o" | grep -q "^PYTHON = '"$TMP"'/py_floor/python3 -B"'
+run "paper-tables refuses an old stack" bash -c '
+    o=$(MAKEFLAGS= make -s --no-print-directory paper-tables PYTHON="'"$TMP"'/py_old/python3" 2>&1)
+    [ $? -ne 0 ] && echo "$o" | grep -q "below the tested minimum"'
+
 echo
 echo "  $pass passed, $fail failed"
 exit $((fail>0))

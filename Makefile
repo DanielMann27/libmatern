@@ -262,12 +262,13 @@ endif
 # parameter that make pipeline passes through.
 CHECK_BACKENDS = avx512 avx2 scalar scalar_portable matched matched_fma
 
-# PYTHON: the first candidate that imports NumPy and Matplotlib, else python3;
-# searched once, on first use.  The .venv path is absolute for scripts run elsewhere.
+# PYTHON: the first candidate whose NumPy and Matplotlib are at or above the tested minimum
+# (tools/py_stack.py), else python3; searched once, on first use.  The .venv path is
+# absolute for scripts run elsewhere.
 PYTHON_CANDIDATES ?= python3 /usr/bin/python3 python $(CURDIR)/.venv/bin/python3
 ifeq ($(origin PYTHON),undefined)
 PYTHON = $(eval PYTHON := $(or $(shell for p in $(PYTHON_CANDIDATES); do \
-    command -v $$p >/dev/null 2>&1 && $$p -c 'import numpy, matplotlib' \
+    command -v $$p >/dev/null 2>&1 && $$p $(CURDIR)/tools/py_stack.py \
     >/dev/null 2>&1 && { echo "$$p -B"; break; }; done),python3 -B))$(PYTHON)
 endif
 
@@ -920,6 +921,7 @@ build/fold_cpu: benchmark/benchmark_cpu.c benchmark/corpus_dataset.c $(LIBRARY) 
 	$(call say,CC)
 	$(Q)$(CC) $(BENCH_CFLAGS) -DBENCH_FOLD $(BENCH_INC) -o $@ benchmark/benchmark_cpu.c \
 	    benchmark/corpus_dataset.c $(OBJECTS_FOLD) $(LIBRARY_INTERNAL) -lm
+	@echo "built $@"
 
 # The supplier drivers print a summary line; V=yes prints their compile commands.
 SUP_WITH = Bessels.jl $$(sed -e 's/-DCPU_SUPPLIER_WITH_CXX/std/' -e 's/-DCPU_SUPPLIER_WITH_BOOST/Boost/' -e 's/-DCPU_SUPPLIER_WITH_//g' references/build/defines.txt)
@@ -1153,11 +1155,15 @@ benchmark: benchmark-build
 
 # The interpreter, its version, whether it is this tree's .venv/, and its NumPy/Matplotlib.
 python-info:
-	@echo "PYTHON = $(PYTHON)   ($(if $(filter file,$(origin PYTHON)),searched: the first of PYTHON_CANDIDATES that imports NumPy and Matplotlib; python3 if none does,set on the $(origin PYTHON)))"
+	@echo "PYTHON = $(PYTHON)   ($(if $(filter file,$(origin PYTHON)),searched: the first of PYTHON_CANDIDATES with NumPy and Matplotlib at or above the tested minimum; python3 if none has them,set on the $(origin PYTHON)))"
 	@if command -v $(firstword $(PYTHON)) >/dev/null 2>&1; then \
 	     $(firstword $(PYTHON)) -c 'import os, sys; v = os.path.realpath(sys.prefix) == os.path.realpath(".venv"); print("  interpreter  %s, Python %s, %s" % (sys.executable, sys.version.split()[0], "the .venv/ of this tree" if v else "not the .venv/ of this tree"))'; \
-	     $(firstword $(PYTHON)) -c 'import numpy, matplotlib; print("  packages     numpy", numpy.__version__, "matplotlib", matplotlib.__version__)' 2>/dev/null || \
-	         echo "  packages     NumPy/Matplotlib not importable -- make externals (installs NumPy and Matplotlib into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)), or make requirements for the system packages"; \
+	     _pk=$$($(firstword $(PYTHON)) tools/py_stack.py 2>/dev/null); \
+	     case $$? in \
+	         0) echo "  packages     $$_pk" ;; \
+	         1) echo "  packages     $$_pk -- make externals installs the published versions into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)" ;; \
+	         *) echo "  packages     NumPy/Matplotlib not importable -- make externals (installs NumPy and Matplotlib into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)), or make requirements for the system packages" ;; \
+	     esac; \
 	 else \
 	     echo "  interpreter  $(firstword $(PYTHON)) not found -- $(if $(filter file,$(origin PYTHON)),install Python 3 (make requirements names the package) then make externals (installs NumPy and Matplotlib into .venv/),unset PYTHON or set it to an installed interpreter)"; \
 	 fi
@@ -1165,8 +1171,12 @@ python-info:
 # The check and the generator share one shell line, so its `exit 2` ends the target first.
 PY_FOUND_CHECK = command -v $(firstword $(PYTHON)) >/dev/null 2>&1 || { \
 	    echo "$@: $(firstword $(PYTHON)) not found; not made -- $(if $(filter file,$(origin PYTHON)),install Python 3 (make requirements names the package),unset PYTHON (set on the $(origin PYTHON)) or set it to an installed interpreter)"; exit 2; }
-PY_GEN_CHECK = $(PY_FOUND_CHECK); $(PYTHON) -c 'import matplotlib' >/dev/null 2>&1 || { \
-	    echo "$@: NumPy/Matplotlib not importable by $(firstword $(PYTHON)); not made -- make externals (installs NumPy and Matplotlib into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)), or make requirements for the system packages"; exit 2; }
+# PY_GEN_CHECK: NumPy and Matplotlib at or above the tested minimum (tools/py_stack.py).
+PY_GEN_CHECK = $(PY_FOUND_CHECK); _pk=$$($(PYTHON) tools/py_stack.py 2>/dev/null); case $$? in \
+	  0) ;; \
+	  1) echo "$@: $(firstword $(PYTHON)) has $$_pk; not made -- make externals (installs the published versions into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset))"; exit 2 ;; \
+	  *) echo "$@: NumPy/Matplotlib not importable by $(firstword $(PYTHON)); not made -- make externals (installs NumPy and Matplotlib into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)), or make requirements for the system packages"; exit 2 ;; \
+	esac
 
 # Figures and tables are drawn from the recorded runs only.  paper-figures writes
 # benchmark/plots/paper/ (text on the canvas), paper-figures-final

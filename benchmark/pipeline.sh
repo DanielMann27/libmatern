@@ -167,7 +167,9 @@ python_line() {
 }
 
 # The answers; on a terminal the questions below set them.
-SET_ANSWER=""; EXT_ANSWER=""; KAUST_ANSWER=""; CORPUS_ANSWER=""
+SET_ANSWER=""; EXT_ANSWER=""; KAUST_ANSWER=""; CORPUS_ANSWER=""; PY_PLAN=""
+# ASKED: the questions this run asked (settings externals KAUST corpus), which "== the answers" lists
+ASKED=""
 SWITCHED=no; KAUST_GET=no; CORPUS_GET=no; CORPUS_STOP=no
 
 show() { printf '  %-22s %s\n' "$1" "$2"; }
@@ -192,7 +194,8 @@ plan() {
         elif [ -n "$(bash benchmark/tools/missing.sh lines pdflatex)" ]; then
             _figs="$_figs -- the tables not made without pdflatex (missing externals)"
         fi
-        show "Python" "$(python_line)"
+        PY_PLAN=$(python_line)
+        show "Python" "$PY_PLAN"
     fi
     show "figures and tables" "$_figs"
     show "LADDER_SET" "$LADDER_SET${LADDER_LAWS:+ (LADDER_LAWS=$LADDER_LAWS)}${LADDER_MAX:+ (LADDER_MAX=$LADDER_MAX)}"
@@ -294,7 +297,8 @@ q_settings() {
             awk '$1=="set"{s=s" "$2"="$3} $1=="unset"{s=s" "$2"=(unset)"} END{print substr(s,2)}')$([ "$GPU" = no ] && echo '; GPU=no is kept'))"
         return 0
     fi
-    echo; echo "== [1/4] the settings of this run differ from the full benchmark"
+    echo; echo "== question: the settings of this run differ from the full benchmark"
+    ASKED="$ASKED settings"
     full_run --brief
     echo
     full_run --durations
@@ -331,7 +335,8 @@ q_externals() {
         show "[2/4] externals" "Download them with make externals? ($(echo "$plan" | awk -F'|' '{printf "%s%s", (NR > 1 ? ", " : ""), $1}'))"
         return 0
     fi
-    echo; echo "== [2/4] externals"
+    echo; echo "== question: externals"
+    ASKED="$ASKED externals"
     echo "  make externals downloads, without root (into references/ and .venv/):"
     echo "$plan" | awk -F'|' '{printf "      %-34s %s\n", $1, $2}'
     sys=""
@@ -377,7 +382,7 @@ q_kaust() {
         KAUST_ANSWER="KAUST=yes: the copyright notice of CuBesselK, then the two files are downloaded and the port is generated first"
     elif [ "$KAUST_SW" = yes ]; then
         # the answer is given: the box and the check of the question, without the question
-        echo; echo "== [3/4] KAUST (KAUST=yes)"
+        echo; echo "== KAUST (KAUST=yes)"
         if bash references/kaust_logbesselk/kaust.sh given; then
             KAUST_GET=yes; KAUST_ANSWER="downloaded and ported first (KAUST=yes); the port is deleted at the end"
         else
@@ -388,10 +393,11 @@ q_kaust() {
         show "[3/4] KAUST" "the copyright notice of CuBesselK (make kaust), then: Download the two CuBesselK files and generate the port?"
         return 0
     else
-        echo; echo "== [3/4] KAUST"
+        echo; echo "== question: KAUST"
+        ASKED="$ASKED KAUST"
         bash references/kaust_logbesselk/kaust.sh ask
         case $? in
-            0) KAUST_GET=yes; KAUST_ANSWER="downloaded and ported first; the port is deleted at the end" ;;
+            0) KAUST_GET=yes; KAUST_ANSWER="downloaded and ported first" ;;
             1) KAUST_ANSWER="not downloaded; the KAUST rows are left out" ;;
             *) KAUST_ANSWER="cannot be downloaded here (above); the KAUST rows are left out" ;;
         esac
@@ -416,7 +422,8 @@ q_corpus() {
         show "[4/4] corpus" "Download the missing files from Zenodo? ($cs; a no stops the pipeline)"
         return 0
     fi
-    echo; echo "== [4/4] corpus"
+    echo; echo "== question: corpus"
+    ASKED="$ASKED corpus"
     if DATA="$DATA_DIR" sh tools/corpus.sh ask "$ENTRY"; then
         CORPUS_GET=yes; CORPUS_ANSWER="downloaded at the start of the run"
     else
@@ -469,11 +476,14 @@ kaust_no_ported && kaust_ported_refuse
 [ $DRY = yes ] && exit 0
 if ask_tty; then
     q_settings ask; q_externals ask; q_kaust ask; q_corpus ask
-    echo; echo "== the answers"
-    show "settings" "$SET_ANSWER"
-    show "externals" "$EXT_ANSWER"
-    show "KAUST" "$KAUST_ANSWER"
-    show "corpus" "$CORPUS_ANSWER"
+    # the answers to the questions asked; the plan above states the rest
+    if [ -n "$ASKED" ]; then
+        echo; echo "== the answers"
+        case " $ASKED " in *" settings "*)  show "settings" "$SET_ANSWER" ;; esac
+        case " $ASKED " in *" externals "*) show "externals" "$EXT_ANSWER" ;; esac
+        case " $ASKED " in *" KAUST "*)     show "KAUST" "$KAUST_ANSWER" ;; esac
+        case " $ASKED " in *" corpus "*)    show "corpus" "$CORPUS_ANSWER" ;; esac
+    fi
     if [ $CORPUS_STOP = yes ]; then
         echo "pipeline: the corpus is incomplete; nothing was run (make corpus DOWNLOAD=yes downloads it)" >&2
         exit 2
@@ -493,6 +503,8 @@ fi
 _fr_notice=${BENCH_FULL_RUN_NOTICE:-}
 fr_show() {
     if [ $FR_SHOW = brief ]; then
+        # nothing to say when this run is the full benchmark and the plan was not changed
+        [ $SWITCHED = no ] && [ -z "$(full_run --diff)" ] && return 0
         if [ $SWITCHED = yes ]; then echo; plan
         elif [ "${1:-}" = after ]; then echo; echo "== this run against the full benchmark"; fi
         full_run --brief
@@ -551,7 +563,9 @@ build() {
         mkdir -p "${log%/*}"
         "$MAKE" --no-print-directory "$@" >"$log" 2>&1; rc=$?
         if [ $rc -eq 0 ]; then
-            grep -Ev '^  [A-Z]{2,5} +[^ ]+$' "$log"
+            # the build's own lines: not make's per-file ones, and its "is up to date" in short
+            grep -Ev '^  [A-Z]{2,5} +[^ ]+$' "$log" |
+                sed -E 's/^make(\[[0-9]+\])?: (.* is up to date\.|Nothing to be done for .*)$/  up to date/'
         else
             echo "  FAILED; the end of $log:"; tail -25 "$log"
         fi
@@ -597,7 +611,10 @@ finish() {
 
 # 1. Downloads: externals, KAUST, corpus.  A failed external or KAUST is reported and the
 # stages that need it skip; an incomplete corpus stops the pipeline.
-if [ $EXTERNALS = yes ]; then
+if [ $EXTERNALS = yes ] && [ -z "$(ext_plan)" ]; then
+    # the plan said "nothing to download"
+    note "externals" "nothing to download"
+elif [ $EXTERNALS = yes ]; then
     echo; echo "== download externals"
     _xs=$(mktemp) || exit 1
     EXTERNALS_STATUS="$_xs" EXTERNALS_PIPELINE=$(ext_mode) "$MAKE" --no-print-directory externals
@@ -608,7 +625,8 @@ if [ $EXTERNALS = yes ]; then
 fi
 if [ $KAUST_GET = yes ]; then
     echo; echo "== KAUST: download and port"
-    if "$MAKE" --no-print-directory kaust DOWNLOAD=yes; then
+    # the box of the KAUST question was the notice; KAUST_PIPELINE leaves out the long one
+    if KAUST_PIPELINE=1 "$MAKE" --no-print-directory kaust DOWNLOAD=yes; then
         KAUST_STATE=ported; note "KAUST" "downloaded and ported"
     else
         note "KAUST" "WARNING download or port failed; the KAUST rows are left out"; warned=1
@@ -628,7 +646,11 @@ fi
 if [ $EXTERNALS = yes ] || [ $KAUST_GET = yes ]; then
     # probe again for the stages and the summary
     _mxn=$(bash benchmark/tools/missing.sh probe) && mv -f "$_mxn" "$BENCH_MISSING_CACHE"
-    [ $FIGURES = yes ] && echo "pipeline: Python for the figures and tables: $(python_line)"
+    # the interpreter again only where the downloads changed it from the plan's
+    if [ $FIGURES = yes ]; then
+        _pl=$(python_line)
+        [ "$_pl" = "$PY_PLAN" ] || echo "pipeline: Python for the figures and tables now: $_pl"
+    fi
 fi
 [ $FR_SHOW = shown ] || fr_show after
 [ "${BENCH_PIPELINE_STOP:-}" = downloads ] && exit 0
@@ -661,7 +683,7 @@ fi
 # run_benchmark.sh call (also the one of run_gpu.sh) writes the result from BENCH_CORPUS_CHECK
 # into its MANIFEST.txt and, on a mismatch, a STATUS warning.  The file holds `<exit status>
 # <DATA>`, then the output of tools/corpus_check.sh --list.
-echo; echo "== corpus: sha256 against data/MANIFEST.md (once, for every run record)"
+echo; echo "== corpus: sha256 check against data/MANIFEST.md (recorded in every run)"
 if BENCH_CORPUS_CHECK=$(mktemp "${TMPDIR:-/tmp}/bench_corpus.XXXXXX"); then
     _cc=$(bash tools/corpus_check.sh "$DATA_DIR" --list 2>/dev/null); _ccrc=$?
     printf '%s %s\n%s\n' "$_ccrc" "$DATA_DIR" "$_cc" > "$BENCH_CORPUS_CHECK"
@@ -673,15 +695,20 @@ if BENCH_CORPUS_CHECK=$(mktemp "${TMPDIR:-/tmp}/bench_corpus.XXXXXX"); then
 else
     BENCH_CORPUS_CHECK=""; echo "  no temporary file: each run checks the corpus itself"
 fi
-stage "CPU run" env STAGES=all bash benchmark/run_benchmark.sh
-[ $LEVIN = yes ] && stage "Levin A/B" env STAGES=levin bash benchmark/run_benchmark.sh
+# With the full settings the CPU runs carry the label of the published ones (run ids
+# <stamp>_<host>_cpu[-<stage>]); other settings keep run_benchmark.sh's default or custom, and
+# a SCOPE given to the pipeline names every run as before.
+CPU_SCOPE=""
+[ -z "${SCOPE:-}" ] && [ -z "$(full_assign)" ] && CPU_SCOPE=cpu
+stage "CPU run" env STAGES=all ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
+[ $LEVIN = yes ] && stage "Levin A/B" env STAGES=levin ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
 if [ "$FOLD" = yes ]; then
-    stage "prefactor fold" env STAGES=fold bash benchmark/run_benchmark.sh
+    stage "prefactor fold" env STAGES=fold ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
 elif [ "$FOLD" = failed ]; then
     note "prefactor fold" "not run: build/fold_cpu did not build"; failed=1
 fi
 if [ "$THREADS" = yes ]; then
-    stage "thread scaling" env STAGES=threads bash benchmark/run_benchmark.sh
+    stage "thread scaling" env STAGES=threads ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
 elif [ "$THREADS" = failed ]; then
     note "thread scaling" "not run: build/threads_cpu did not build"; failed=1
 fi

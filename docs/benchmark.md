@@ -69,8 +69,8 @@ optional; its absence removes only what it enables:
 `make requirements` reports each component, its version, what it enables and the command or
 package that adds it; `MISSING` marks an absence that stops a target, `absent` one that only
 removes rows. It changes nothing and exits 0. The generators use the first of
-`PYTHON_CANDIDATES` that imports NumPy and Matplotlib (`make python-info`); `PYTHON`
-overrides it.
+`PYTHON_CANDIDATES` with NumPy and Matplotlib at or above the tested minimum, NumPy 2.0.2
+and Matplotlib 3.9.4 (`make python-info`); `PYTHON` overrides it.
 
 ## Running the benchmark
 
@@ -85,8 +85,8 @@ in this order:
    downloaded; it lists what a yes downloads: Boost 1.75.0 and GSL 2.6 when neither
    `references/` nor the system has that version, Boost 1.87.0 (with a GPU part) when neither
    `references/` nor the system has a Boost with GPU support and `BOOST_ROOT` is not `none`
-   ([Boost versions](#boost-versions)), NumPy and Matplotlib when the selected Python lacks
-   them. A GSL of another version found by pkg-config counts as present, so it does not by
+   ([Boost versions](#boost-versions)), NumPy and Matplotlib when no Python has them at or
+   above the tested minimum. A GSL of another version found by pkg-config counts as present, so it does not by
    itself lead to this question, and the gsl row uses it (row `gsl-<version>`,
    `build_cpu_supplier_gsl_*` in `PROVENANCE.txt`) unless GSL 2.6 is built: by a yes to this
    question asked for another external, by `EXTERNALS=yes` or by `make reproduce`;
@@ -94,7 +94,7 @@ in this order:
    runs a KAUST row and the port is absent;
 4. whether to download the missing or damaged corpus files; without them it stops.
 
-It prints the answers and then runs unattended: the downloads first, then the builds, whose
+It prints the answers to the questions it asked and then runs unattended: the downloads first, then the builds, whose
 commands go to `build/pipeline.<build>.log` (the Levin arms to `build-ab/`; `V=yes` prints
 them), then the stages.
 
@@ -230,7 +230,7 @@ the first question does; the other switches act as for `make pipeline`.
 | `CORPUS_URL` | `make corpus` | a mirror URL or a local directory in place of the Zenodo record |
 | `BOOST_CPU_ROOT`, `BOOST_ROOT` | the supplier builds | the Boost of the CPU row and of the GPU rows; `none` disables the row ([Boost versions](#boost-versions)) |
 | `BOOST_VERSIONS` | `make boost-headers` | the versions fetched, of `1.75.0` and `1.87.0` (default both) |
-| `PYTHON` | the generators, `make check` | the interpreter (default: the first of `PYTHON_CANDIDATES` that imports NumPy and Matplotlib, else `python3`) |
+| `PYTHON` | the generators, `make check` | the interpreter (default: the first of `PYTHON_CANDIDATES` with NumPy and Matplotlib at or above the tested minimum, `tools/py_stack.py`, else `python3`) |
 | `PYTHON_CANDIDATES` | the generators, `make check`, `make requirements` | the interpreters searched (default `python3 /usr/bin/python3 python .venv/bin/python3`) |
 
 **Figures and tables**: `ARGS` passes options to the generators: `--list` (the runs a
@@ -268,7 +268,7 @@ both families, and it refuses `SUP_MAX_POINTS` and `TIME_MAX_POINTS`.
 | `BENCH_RUNS_DIR` | `benchmark/runs` | the root of the run records, from which `make benchmark` also draws its figures and tables (not used by `make pipeline`) |
 | `NOTIFY` | `auto` | the end-of-run notice: `auto` adds a desktop notification where possible, `none` prints only, any other value is run as a command with `BENCH_NOTIFY_TITLE` and `BENCH_NOTIFY_MESSAGE` set |
 | `BENCH_UNATTENDED` | unset | when non-empty, no script asks a question, as without a terminal; `make pipeline` sets it after its own questions |
-| `SCOPE`, `TIER` | derived, `default` | labels, `SCOPE` in the run id and `PROVENANCE.txt`, `TIER` in `PROVENANCE.txt`; the derived `SCOPE` is `default` when every run parameter has its default, else `custom` |
+| `SCOPE` | derived | the label in the run id and `PROVENANCE.txt` (`run_label`): `default` when every run parameter has its default, else `custom`; `make pipeline` and `make reproduce` with the full settings set `cpu` for their CPU runs and `run_gpu.sh` sets `gpu`, as in the published runs |
 | `THREADS_LAW`, `THREADS_N`, `THREADS_REPS`, `THREADS_ASSEMBLY`, `THREADS_PIN_MODES`, `THREADS_SUPPLIERS`, `THREADS_MAX` | `size_random`, `262144`, `REPS`, `direct`, `dense`, `ship`, the physical core count | the thread-scaling stage: law, points per thread, repetitions, supplier assembly, pinning (`dense`, `spread`), suppliers, largest thread count |
 | `THREADS_WS_N`, `THREADS_WS_THREADS`, `THREADS_WS_BACKENDS` | unset, the online CPU count (at most `THREADS_MAX`), `BACKENDS` | the working-set sweep, run when `THREADS_WS_N` (points per thread, a comma list) is set |
 
@@ -302,8 +302,9 @@ available and not yet present: the Bessels.jl upstream sources at the pinned com
 1.87.0 (`references/boost/<version>/`), GSL 2.6 as a static library
 (`references/gsl/<version>/`, preferred to a system GSL), and NumPy and Matplotlib into
 `.venv/` (pip; the versions of the published figures, NumPy 2.2.5 and Matplotlib 3.11.0,
-else versions at or above NumPy 2.0.2 and Matplotlib 3.9.4) when the selected Python lacks
-them. It checks every other
+else versions at or above NumPy 2.0.2 and Matplotlib 3.9.4) when no Python has them at or
+above that tested minimum; an older NumPy or Matplotlib is not used (`tools/py_stack.py`
+decides, for the Makefile's search of `PYTHON` as well). It checks every other
 archive against a pinned SHA-256 digest and ends with `make requirements`.
 
 ```sh

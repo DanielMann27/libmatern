@@ -120,7 +120,8 @@ rows() {
     [ "$got" = yes ] && [ -n "$param" ] && [ "${value:-ship}" != all ] && \
         kaust_off="the KAUST rows are built but not run ($param=all adds them)"
     if [ ${#out[@]} -eq 0 ]; then
-        echo "$title: every supplier row${kaust_off:+; $kaust_off}"
+        if [ -n "$kaust_off" ]; then echo "$title: every supplier row but KAUST's ($param=all adds them)"
+        else echo "$title: every supplier row"; fi
         return 0
     fi
     echo "$title: without the rows of"

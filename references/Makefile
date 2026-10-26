@@ -73,14 +73,18 @@ $(OBJECTS): common/cpu_supplier.h
 # The drivers read build/defines.txt and build/link.txt, so detection happens here
 # only; the explicit object list keeps a leftover object of another configuration out.
 .PHONY: all clean check-flags FORCE
-all: $(OBJECTS)
+all: build/objects.stamp
 	@printf '%s\n' "$(strip $(DEFINES))" > build/defines.txt
 	@printf '%s\n' "$(strip $(addprefix references/,$(OBJECTS)) $(LINK_LIBS))" > build/link.txt
-	@echo "built $(words $(OBJECTS)) supplier objects in build/"
+
+# The report, only when an object was (re)built: the drivers call `all` on every build.
+build/objects.stamp: $(OBJECTS)
+	@echo "built $(words $?) of the $(words $(OBJECTS)) supplier objects in references/build/"
 	@[ "$(CXX_PRESENT)" = yes ] || echo "  (cpu_cxx.o skipped: no C++ compiler $(CXX); no std:: and Boost rows)"
 	@[ "$(CXX_PRESENT)" != yes ] || [ -n "$(BOOST_CPU_DIR)" ] || echo "  (Boost row skipped: no Boost 1.75.0 selected; std:: row built; make externals adds it)"
 	@[ -z "$(BOOST_CPU_DIR)" ] || echo "  Boost row: $(BOOST_CPU_DIR) (BOOST_VERSION $(BOOST_CPU_VERSION))"
 	@[ "$(GSL_PRESENT)" = yes ] || echo "  (cpu_gsl.o skipped: no GSL found; make externals builds one)"
+	@touch $@
 
 build/cpu_bessels_jl.o: bessels_jl/port/cpu_bessels_jl.c
 	@mkdir -p build

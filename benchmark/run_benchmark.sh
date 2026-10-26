@@ -21,7 +21,6 @@ case "${TIME_MAX_POINTS:-}" in
     *) time_cap="--time-points $TIME_MAX_POINTS" ;;
 esac
 
-TIER="${TIER:-default}"
 # matched_fma: the matched source built with -mfma, selected on FMA3 machines without AVX2.
 # BACKENDS unset: every backend this CPU runs (filtered below); set: used as given, and a
 # backend the CPU cannot run fails the accuracy stage.
@@ -299,7 +298,6 @@ fi
 {
   echo "run_id            $RUNID"
   echo "generated         $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-  echo "tier              $TIER"
   echo "rep_policy        FIXED $REPS reps per rung and per row (comparable estimators)"
   # --max-points is a stride over the scored points; every row carries n_file, so a capped row
   # is identifiable.
@@ -378,7 +376,8 @@ fi
     [ -d "$_i" ] || continue
     echo "cache_L$(cat "$_i/level" 2>/dev/null)$(cat "$_i/type" 2>/dev/null | cut -c1)        size=$(cat "$_i/size" 2>/dev/null) shared_by=$(cat "$_i/shared_cpu_list" 2>/dev/null)"
   done
-  echo "l3_per_socket     $(lscpu 2>/dev/null | sed -n 's/^L3 cache: *//p' | head -1)"
+  # lscpu's "L3 cache": every L3 instance of the machine (the per-instance size is cache_L3U).
+  echo "l3_total          $(lscpu 2>/dev/null | sed -n 's/^L3 cache: *//p' | head -1)"
   # The clock state: a powersave or schedutil governor caps every timing in the record without
   # showing in the load average.
   _cf=/sys/devices/system/cpu/cpu0/cpufreq
@@ -571,7 +570,7 @@ if [ -n "${BENCH_CORPUS_CHECK:-}" ] && [ -r "$BENCH_CORPUS_CHECK" ]; then
     [ "$_cc_data" = "$DATA" ] || _cc_rc=""
 fi
 if [ -n "$_cc_rc" ]; then
-    progress "manifest: sha256 of the sources; the corpus result of make pipeline"
+    progress "manifest: sha256 of the sources; the corpus check made before the runs"
     _cc_out=$(tail -n +2 "$BENCH_CORPUS_CHECK")
 else
     progress "manifest: sha256 of the corpus and the sources"
