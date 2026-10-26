@@ -15,6 +15,7 @@
 /* The ULP mode of the scoring call and of the `ulp_mode` column. */
 #define BENCH_ACCURACY_ULP_MODE BENCH_ULP_MODE_DEFAULT
 #include "common/bench_timing.h"
+#include "common/bench_cuda_call.h"
 #include "common/build_info_cuda.h"
 
 #ifdef GPU_SUPPLIER_WITH_BOOST
@@ -203,6 +204,51 @@ static int timed_call(int which, int a, int mode, size_t cn, int has_length_scal
     /* The sync and mapped modes clear a launch error before returning, so a
      * kernel that never ran would otherwise be timed as a call. */
     return rc != MATERN_OK || g_ov_err;
+}
+
+/* timed_call's arguments, for bench_time_cuda_call. */
+typedef struct {
+    int which, a, mode, has_length_scale; size_t n;
+    const double *hz, *hnu, *hh, *hr; double *hout;
+} sg_call;
+static int sg_call_once(void *p)
+{
+    const sg_call *c = (const sg_call *)p;
+    return timed_call(c->which, c->a, c->mode, c->n, c->has_length_scale,
+                      c->hz, c->hnu, c->hh, c->hr, c->hout);
+}
+
+/* The device copies of one dataset for the kernel-only launches: allocated and uploaded by
+ * dev_acquire, freed by dev_release, so that none is held while the public call is timed
+ * (common/bench_cuda_call.h).  Returns 0, or -1 after printing a CUDA error. */
+typedef struct { double *z, *nu, *out, *h, *scale; } dev_set;
+static int dev_acquire(dev_set *d, const corpus_dataset *cs, const double *zh, size_t n)
+{
+    CK(cudaMalloc(&d->z,   n*sizeof(double)));
+    CK(cudaMalloc(&d->nu,  n*sizeof(double)));
+    CK(cudaMalloc(&d->out, n*sizeof(double)));
+    CK(cudaMemcpy(d->z,  zh,            n*sizeof(double), cudaMemcpyHostToDevice));
+    CK(cudaMemcpy(d->nu, cs->set.order, n*sizeof(double), cudaMemcpyHostToDevice));
+    /* h and s: the external kernels derive z in double, the library's kernel in
+     * double-double. */
+    if (cs->set.has_length_scale) {
+        CK(cudaMalloc(&d->h,     n*sizeof(double)));
+        CK(cudaMalloc(&d->scale, n*sizeof(double)));
+        CK(cudaMemcpy(d->h,     cs->set.h,            n*sizeof(double), cudaMemcpyHostToDevice));
+        CK(cudaMemcpy(d->scale, cs->set.length_scale, n*sizeof(double), cudaMemcpyHostToDevice));
+    }
+    g_dh = d->h; g_dscale = d->scale;
+    return 0;
+}
+static void dev_release(dev_set *d)
+{
+    if (d->h) cudaFree(d->h);
+    if (d->scale) cudaFree(d->scale);
+    if (d->z) cudaFree(d->z);
+    if (d->nu) cudaFree(d->nu);
+    if (d->out) cudaFree(d->out);
+    memset(d, 0, sizeof *d);
+    g_dh = NULL; g_dscale = NULL;
 }
 
 static int launch_s(int which, const double *dz, const double *dnu, double *dout,
@@ -473,25 +519,10 @@ int main(int argc, char **argv)
                                          : cs.set.argument[i];
             double *out  = (double *)malloc(n * sizeof *out);
             /* Device copies for the kernel-only launches; none with --call-only,
-             * where every timed call moves its own data. */
-            double *dz=NULL,*dnu=NULL,*dout=NULL;
-            double *dh = NULL, *dscale = NULL;
-            if (!call_only) {
-                CK(cudaMalloc(&dz,   n*sizeof(double)));
-                CK(cudaMalloc(&dnu,  n*sizeof(double)));
-                CK(cudaMalloc(&dout, n*sizeof(double)));
-                CK(cudaMemcpy(dz,  zh,           n*sizeof(double), cudaMemcpyHostToDevice));
-                CK(cudaMemcpy(dnu, cs.set.order, n*sizeof(double), cudaMemcpyHostToDevice));
-                /* h and s: the external kernels derive z in double, the library's
-                 * kernel in double-double. */
-                if (has_length_scale) {
-                    CK(cudaMalloc(&dh,     n*sizeof(double)));
-                    CK(cudaMalloc(&dscale, n*sizeof(double)));
-                    CK(cudaMemcpy(dh,     cs.set.h,            n*sizeof(double), cudaMemcpyHostToDevice));
-                    CK(cudaMemcpy(dscale, cs.set.length_scale, n*sizeof(double), cudaMemcpyHostToDevice));
-                }
-            }
-            g_dh = dh; g_dscale = dscale;
+             * where every timed call moves its own data, and none while a call is
+             * timed (released around the call-scope loop below). */
+            dev_set D; memset(&D, 0, sizeof D);
+            if (!call_only && dev_acquire(&D, &cs, zh, n)) return -1;
 
             for (int si = 0; si < nsup; si++) {
                 if (only && strcmp(only, sup[si].label)) continue;
@@ -502,9 +533,9 @@ int main(int argc, char **argv)
                     bench_metrics M; memset(&M, 0, sizeof M);
                     if (!call_only) {
                         /* NaN first (all-ones bytes) and the launch error checked:
-                         * `dout` is reused across suppliers and assemblies. */
-                        CK(cudaMemset(dout, 0xFF, n*sizeof(double)));
-                        if (launch(sup[si].which, dz, dnu, dout, (int)n, a)) continue;
+                         * `D.out` is reused across suppliers and assemblies. */
+                        CK(cudaMemset(D.out, 0xFF, n*sizeof(double)));
+                        if (launch(sup[si].which, D.z, D.nu, D.out, (int)n, a)) continue;
                         { cudaError_t le = cudaGetLastError();
                           if (le != cudaSuccess) {
                               fprintf(stderr, "suppliers_gpu: %s %s/%s launch failed: %s"
@@ -513,7 +544,7 @@ int main(int argc, char **argv)
                               continue;
                           } }
                         CK(cudaDeviceSynchronize());
-                        CK(cudaMemcpy(out, dout, n*sizeof(double), cudaMemcpyDeviceToHost));
+                        CK(cudaMemcpy(out, D.out, n*sizeof(double), cudaMemcpyDeviceToHost));
 
                         bench_metrics_compute(&M, out, cs.set.reference_high,
                                            cs.set.reference_low, cs.accuracy_bits,
@@ -531,27 +562,20 @@ int main(int argc, char **argv)
 
                     /* Call scope, under the four transfer modes.  Not in ladder
                      * mode: ladder rows (19 fields) must not mix with accuracy rows
-                     * (44 fields) in one file; --call-only writes the ladder's 19. */
+                     * (44 fields) in one file; --call-only writes the ladder's 19.
+                     * No device copy of this driver is held while a call is timed. */
+                    if (!ladder) dev_release(&D);
                     for (int tm = 0; !ladder && tm < TM_COUNT; tm++) {
                         size_t cn = n;
                         if (time_points && cn > time_points) cn = time_points;
                         double *ct = (double *)malloc((size_t)reps * sizeof *ct);
                         int ok = (ct != NULL);
-                        for (int w = 0; ok && w < BENCH_WARMUP_REPS; w++)
-                            if (timed_call(sup[si].which, a, tm, cn, has_length_scale,
-                                           zh, cs.set.order, cs.set.h,
-                                           cs.set.length_scale, out)) ok = 0;
-                        for (int r = 0; ok && r < reps; r++) {
-                            cudaDeviceSynchronize();
-                            double t0 = bench_now_s();
-                            if (timed_call(sup[si].which, a, tm, cn, has_length_scale,
-                                           zh, cs.set.order, cs.set.h,
-                                           cs.set.length_scale, out)) {
-                                /* A failed call (e.g. refused host registration)
-                                 * makes the mode unavailable; the row is omitted. */
-                                ok = 0; cudaGetLastError(); break;
-                            }
-                            ct[r] = (bench_now_s() - t0) * 1e9 / (double)cn;
+                        sg_call c = { sup[si].which, a, tm, has_length_scale, cn,
+                                      zh, cs.set.order, cs.set.h, cs.set.length_scale, out };
+                        /* A failed call (e.g. refused host registration) makes the mode
+                         * unavailable; the row is omitted. */
+                        if (ok && bench_time_cuda_call(sg_call_once, &c, cn, reps, ct)) {
+                            ok = 0; cudaGetLastError();
                         }
                         /* The call-scope row is scored on its own path's output: one
                          * untimed call over the whole law into a NaN-filled buffer. */
@@ -610,6 +634,7 @@ int main(int argc, char **argv)
                         free(ct);
                     }
                     if (call_only) continue;   /* no kernel-only row */
+                    if (!ladder && dev_acquire(&D, &cs, zh, n)) return -1;
 
                     /* Kernel-only timing, also on the ladder's prefix rungs:
                      * (1) the device is drained before each repetition; (2) CUDA
@@ -622,13 +647,13 @@ int main(int argc, char **argv)
                             double *lt = (double *)malloc((size_t)reps * sizeof *lt);
                             if (!lt) break;
                             for (int w = 0; w < BENCH_WARMUP_REPS; w++) {
-                                launch(sup[si].which, dz, dnu, dout, (int)nn, a);
+                                launch(sup[si].which, D.z, D.nu, D.out, (int)nn, a);
                                 cudaDeviceSynchronize();
                             }
                             for (int r = 0; r < reps; r++) {
                                 cudaDeviceSynchronize();
                                 cudaEventRecord(e0);
-                                launch(sup[si].which, dz, dnu, dout, (int)nn, a);
+                                launch(sup[si].which, D.z, D.nu, D.out, (int)nn, a);
                                 cudaEventRecord(e1);
                                 cudaEventSynchronize(e1);
                                 float ms = 0.0f; cudaEventElapsedTime(&ms, e0, e1);
@@ -656,13 +681,13 @@ int main(int argc, char **argv)
                     cudaEvent_t ev0, ev1;
                     cudaEventCreate(&ev0); cudaEventCreate(&ev1);
                     for (int w = 0; w < BENCH_WARMUP_REPS; w++) {
-                        launch(sup[si].which, dz, dnu, dout, (int)tn, a);
+                        launch(sup[si].which, D.z, D.nu, D.out, (int)tn, a);
                         cudaDeviceSynchronize();
                     }
                     for (int r = 0; r < reps; r++) {
                         cudaDeviceSynchronize();          /* (1) drain */
                         cudaEventRecord(ev0);
-                        launch(sup[si].which, dz, dnu, dout, (int)tn, a);
+                        launch(sup[si].which, D.z, D.nu, D.out, (int)tn, a);
                         cudaEventRecord(ev1);
                         cudaEventSynchronize(ev1);
                         float ms = 0.0f;
@@ -686,10 +711,7 @@ int main(int argc, char **argv)
                                M.rel_max, M.n_nonfinite, T.min);
                 }
             }
-            g_dh = NULL; g_dscale = NULL;
-            if (dh) cudaFree(dh);
-            if (dscale) cudaFree(dscale);
-            cudaFree(dz); cudaFree(dnu); cudaFree(dout);
+            dev_release(&D);
             free(zh); free(out); corpus_dataset_free(&cs);
         }
     }

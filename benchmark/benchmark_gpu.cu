@@ -11,6 +11,7 @@ extern "C" {
 }
 #include "common/bench_metrics.h"
 #include "common/bench_timing.h"
+#include "common/bench_cuda_call.h"
 #include "matern.h"
 
 /* In build/cuda_bench.o, not in matern.h: the device routing compiled in. */
@@ -37,31 +38,34 @@ static const char *ALL_LAWS[] = { "grid","random","small_z","near_int","half_int
                                   "size_random_large","size_half_large" };
 static const int N_LAWS = (int)(sizeof ALL_LAWS / sizeof *ALL_LAWS);
 
-/* Times the scored call under common/bench_timing.h, transfers included, since the
+/* One public call over the first n points, for bench_time_cuda_call. */
+typedef struct { const corpus_dataset *cs; double *out; size_t n; int mode; } bg_call;
+static int bg_call_once(void *p)
+{
+    const bg_call *c = (const bg_call *)p;
+    if (c->cs->set.has_length_scale)
+        matern_covariance_cuda(c->out, c->cs->set.h, c->cs->set.order,
+                               c->cs->set.length_scale, c->n, c->mode);
+    else
+        matern_covariance_cuda_z(c->out, c->cs->set.argument, c->cs->set.order, c->n, c->mode);
+    return 0;   /* as before: a failing mode is caught by its scored call */
+}
+
+/* Times the scored call with common/bench_cuda_call.h, transfers included, since the
  * transfer modes differ in them. */
 static bench_time time_mode(const corpus_dataset *cs, double *out, size_t n,
                          int mode, int has_length_scale, int reps, size_t cap,
                          size_t *timed_points, const char *fam_label,
                          const char *law_label, const char *mode_label)
 {
+    (void)has_length_scale;
     /* The whole law unless --time-points caps it; the count goes to ns_points. */
     if (cap && n > cap) n = cap;
     *timed_points = n;
     double *t = (double *)malloc((size_t)reps * sizeof *t);
     if (!t) { bench_time z; memset(&z, 0, sizeof z); return z; }
-    for (int w = 0; w < BENCH_WARMUP_REPS; w++)
-        has_length_scale ? matern_covariance_cuda(out, cs->set.h, cs->set.order,
-                                                  cs->set.length_scale, n, mode)
-                         : matern_covariance_cuda_z(out, cs->set.argument, cs->set.order,
-                                                    n, mode);
-    for (int r = 0; r < reps; r++) {
-        double t0 = bench_now_s();
-        has_length_scale ? matern_covariance_cuda(out, cs->set.h, cs->set.order,
-                                                  cs->set.length_scale, n, mode)
-                         : matern_covariance_cuda_z(out, cs->set.argument, cs->set.order,
-                                                    n, mode);
-        t[r] = (bench_now_s() - t0) * 1e9 / (double)n;
-    }
+    bg_call c = { cs, out, n, mode };
+    bench_time_cuda_call(bg_call_once, &c, n, reps, t);
     bench_raw_emit("cuda", "-", fam_label, law_label, mode_label, n, t, reps);
     bench_time R = bench_time_reduce(t, reps);
     free(t);
@@ -241,19 +245,8 @@ int main(int argc, char **argv)
                     for (size_t nn = 256; nn <= n && nn <= ladder_max; nn <<= 1) {
                         double *t = (double *)malloc((size_t)reps * sizeof *t);
                         if (!t) break;
-                        for (int w = 0; w < BENCH_WARMUP_REPS; w++)
-                            has_length_scale ? matern_covariance_cuda(out, cs.set.h, cs.set.order,
-                                                                      cs.set.length_scale, nn, MODES[m].mode)
-                                             : matern_covariance_cuda_z(out, cs.set.argument,
-                                                                        cs.set.order, nn, MODES[m].mode);
-                        for (int r = 0; r < reps; r++) {
-                            double t0 = bench_now_s();
-                            has_length_scale ? matern_covariance_cuda(out, cs.set.h, cs.set.order,
-                                                                      cs.set.length_scale, nn, MODES[m].mode)
-                                             : matern_covariance_cuda_z(out, cs.set.argument,
-                                                                        cs.set.order, nn, MODES[m].mode);
-                            t[r] = (bench_now_s() - t0) * 1e9 / (double)nn;
-                        }
+                        bg_call c = { &cs, out, nn, MODES[m].mode };
+                        bench_time_cuda_call(bg_call_once, &c, nn, reps, t);
                         bench_raw_emit("cuda", "-", fs, law, MODES[m].name, nn,
                                     t, reps);
                         bench_time T = bench_time_reduce(t, reps);
