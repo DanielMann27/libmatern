@@ -118,8 +118,8 @@ extern "C" {
 /* The release this header belongs to. */
 #define MATERN_VERSION_MAJOR  0
 #define MATERN_VERSION_MINOR  9
-#define MATERN_VERSION_PATCH  0
-#define MATERN_VERSION_STRING "0.9.0"
+#define MATERN_VERSION_PATCH  5
+#define MATERN_VERSION_STRING "0.9.5"
 
 /* The release of the linked library (the MATERN_VERSION_STRING it is built with);
  * comparing the two detects a header that does not belong to the library. */

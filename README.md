@@ -304,7 +304,7 @@ and file formats.
 
 ## Licence and citation
 
-libmatern 0.9.0 is released under the MIT licence ([`LICENSE`](LICENSE)), copyright Daniel
+libmatern 0.9.5 is released under the MIT licence ([`LICENSE`](LICENSE)), copyright Daniel
 Mann, Matthis Ehrhardt and Martin Schlather. Third-party code under `references/` keeps its own
 licence ([`docs/benchmark.md`, "External suppliers"](docs/benchmark.md#external-suppliers)).
 KAUST CuBesselK is not distributed: `make kaust` prints its copyright notice, and
