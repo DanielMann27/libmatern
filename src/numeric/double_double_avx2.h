@@ -1,6 +1,6 @@
 /* double_double_avx2.h -- dd_two_sum and dd_log for four doubles, with the coefficients
  * and operation order of double_double_avx512.h; the dd_log tables are stored as 32-bit
- * halves. */
+ * halves.  dd_log is accurate to about 2^-58 absolute, not to double-double precision. */
 #ifndef MATERN_DOUBLE_DOUBLE_AVX2_H
 #define MATERN_DOUBLE_DOUBLE_AVX2_H
 
@@ -29,7 +29,10 @@ static inline void dd_two_sum(__m256d a, __m256d b, __m256d *s, __m256d *e){
 }
 
 /* log(rh) as lh + ll, for positive normal rh; same coefficients and operation order as
- * the AVX-512 version. */
+ * the AVX-512 version.  Not a full double-double logarithm:
+ * log(1+r) is a double polynomial and r is rounded, so lh + ll is accurate to about 2^-58
+ * absolute; near rh = 1, where log rh is small, that is about 2^-52.6 relative, no better
+ * than one double. */
 static inline void dd_log(__m256d rh, __m256d *lh, __m256d *ll){
     const __m256d thresh = _mm256_set1_pd(0x1.6555555555556p+0);
     const __m256d one  = _mm256_set1_pd(1.0), half = _mm256_set1_pd(0.5), neg1 = _mm256_set1_pd(-1.0);

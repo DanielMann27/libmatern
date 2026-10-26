@@ -28,9 +28,10 @@ static inline SIMD_TYPE_FLOAT debye_polynomial_sum_capped(SIMD_TYPE_FLOAT P1,
 /* debye_cell -- one vector of M(h) from the double-double argument (Z, ZL):
  *   M = sqrt(p) exp(nu G - S(nu)) SUM_k (-1)^k u_k(p)/nu^k,   G = ln((1+t)/2) - (t - 1),
  * with x = z/nu, t = sqrt(1+x^2), p = 1/t and S(nu) the Stirling correction of lnGamma(nu).
- * An absolute error in nu*G is a relative error in M, so x, x^2, 1+x^2, t, 1+t, G and nu*G
- * are double-doubles: z_lo enters at the inlet, xl = (fnma(xh, nu, z) + z_lo) * rn, and
- * propagates exactly. */
+ * An absolute error in nu*G is a relative error in M, so x, x^2, 1+x^2, t and 1+t are
+ * double-doubles: z_lo enters at the inlet, xl = (fnma(xh, nu, z) + z_lo) * rn.  G and nu*G
+ * are carried as pairs too, but G is no more accurate than dd_log (about 2^-58 absolute,
+ * double_double_*.h), so the error of M in this region grows about linearly with nu. */
 static inline __attribute__((always_inline))
 SIMD_TYPE_FLOAT debye_cell(SIMD_TYPE_FLOAT Z, SIMD_TYPE_FLOAT ZL, SIMD_TYPE_FLOAT NU){
     const SIMD_TYPE_FLOAT one = VEC_VSET(1.0), zero = VEC_VSET(0.0);

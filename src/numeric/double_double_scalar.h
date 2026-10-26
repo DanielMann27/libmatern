@@ -1,6 +1,7 @@
 /* double_double_scalar.h -- width-1 dd_two_sum and dd_log, a line-by-line transcription of
  * double_double_avx512.h (same reduction, table, coefficients and operation order); dd_log
- * requires a positive normal argument, as the vector getmant/getexp pair does. */
+ * requires a positive normal argument, as the vector getmant/getexp pair does, and is
+ * accurate to about 2^-58 absolute, not to double-double precision. */
 #ifndef MATERN_DOUBLE_DOUBLE_SCALAR_H
 #define MATERN_DOUBLE_DOUBLE_SCALAR_H
 
@@ -35,7 +36,10 @@ static const double MATERN_DDLOG_LC[16] = {
     0x1.4d2ee3308680bp-3, 0x1.b7357487f3e5ap-3, 0x1.0e0176feb050ap-2, 0x1.3e0a7a097f046p-2
 };
 
-/* log(rh) as lh + ll; operation order as in double_double_avx512.h. */
+/* log(rh) as lh + ll; operation order as in double_double_avx512.h.  Not a full
+ * double-double logarithm: log(1+r) is a double polynomial and r is rounded, so lh + ll is
+ * accurate to about 2^-58 absolute; near rh = 1, where log rh is small, that is about
+ * 2^-52.6 relative, no better than one double. */
 static inline void dd_log(double rh, double *lh, double *ll)
 {
     const double   thresh = 0x1.6555555555556p+0;

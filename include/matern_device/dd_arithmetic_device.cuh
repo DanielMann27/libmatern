@@ -1,6 +1,7 @@
 /* dd_arithmetic_device.cuh -- device double-double primitives: TwoSum, and log x = lh + ll for
  * positive normal x with the method, coefficients and operation order of dd_log in
- * double_double_avx512.h.  The __constant__ tables are statically initialised (no upload). */
+ * double_double_avx512.h, accurate to about 2^-58 absolute, not to double-double precision.
+ * The __constant__ tables are statically initialised (no upload). */
 #ifndef MATERN_DD_ARITHMETIC_DEVICE_CUH
 #define MATERN_DD_ARITHMETIC_DEVICE_CUH
 
@@ -25,6 +26,10 @@ static __device__ inline void matern_two_sum_device(double a, double b, double *
     *s = x;
 }
 
+/* log(x) as lh + ll, for positive normal x.  Not a full double-double logarithm:
+ * log(1+r) is a double polynomial and r is rounded, so lh + ll is accurate to about 2^-58
+ * absolute; near x = 1, where log x is small, that is about 2^-52.6 relative, no better
+ * than one double. */
 static __device__ inline void matern_dd_log_device(double x, double *lh, double *ll)
 {
     const double thresh = 0x1.6555555555556p+0;

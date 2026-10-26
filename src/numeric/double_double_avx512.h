@@ -1,6 +1,7 @@
 /* double_double_avx512.h -- double-double primitives (hi + lo) for the AVX-512 kernels:
  * dd_two_sum (Knuth TwoSum) and dd_log for positive normal x (16-entry table reduction,
- * degree-9 polynomial for log(1+r), recomposition whose low word is not normalised). */
+ * degree-9 polynomial for log(1+r), recomposition whose low word is not normalised).
+ * dd_log is accurate to about 2^-58 absolute, not to double-double precision (see dd_log). */
 #ifndef MATERN_DOUBLE_DOUBLE_AVX512_H
 #define MATERN_DOUBLE_DOUBLE_AVX512_H
 
@@ -16,7 +17,10 @@ static inline void dd_two_sum(__m512d a, __m512d b, __m512d *s, __m512d *e){
     *s = ss;
 }
 
-/* log(rh) as lh + ll, for positive normal rh. */
+/* log(rh) as lh + ll, for positive normal rh.  Not a full double-double logarithm:
+ * log(1+r) is a double polynomial and r is rounded, so lh + ll is accurate to about 2^-58
+ * absolute; near rh = 1, where log rh is small, that is about 2^-52.6 relative, no better
+ * than one double. */
 static inline void dd_log(__m512d rh, __m512d *lh, __m512d *ll){
     const __m512d thresh = _mm512_set1_pd(0x1.6555555555556p+0);
     const __m512d half   = _mm512_set1_pd(0.5);

@@ -51,7 +51,9 @@ static __device__ double matern_debye_polynomial_device(double nu, double p)
  *   G = log1p(d/2) - d, d = t-1: (1+t)/2 = 1 + d/2 exactly, so ln 2 is never formed and
  *       its cancellation against -t is avoided; d = th-1 is exact by Sterbenz for t in [1,2].
  *   The ln nu and ln 2pi terms of Stirling's Gamma(nu) cancel against sqrt(2pi/(nu t)),
- *       so sqrt(1/th) is the only factor outside the exponent. */
+ *       so sqrt(1/th) is the only factor outside the exponent.
+ *   G is no more accurate than matern_dd_log_device (about 2^-58 absolute), so the error
+ *       of M grows about linearly with nu. */
 static __device__ double matern_debye_fold_dd_argument_device(double zh, double zl, double nu)
 {
     double z = zh;
