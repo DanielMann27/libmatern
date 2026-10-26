@@ -89,6 +89,11 @@ needs a second run on a CPU of the other vendor (Intel, AMD). The system softwar
 and the details are in
 [`docs/benchmark.md`, "Replicating the published results"](docs/benchmark.md#replicating-the-published-results).
 
+The figures and tables written here may differ from those printed in the paper in their sizing
+and captions: page width, legend layout, font size, and the wording of captions and notes.
+The values they show are read from the run records, so the same runs give the same numbers.
+`make figures` and `make tables` write them again from the recorded runs.
+
 ## Building
 
 libmatern builds and runs on x86-64 Linux; other architectures and operating systems are not
