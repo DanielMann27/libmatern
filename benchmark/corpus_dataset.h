@@ -42,6 +42,14 @@ int  corpus_dataset_list(const char *root, const char *family,
 
 void corpus_dataset_free(corpus_dataset *set);
 
+/* An array a timed call reads or writes: page-aligned, so that every input and output
+ * array lies at the same address modulo 4096 in every stage.  Placed otherwise, an output a
+ * few vectors past an input modulo 4096 makes its stores alias the next loads of the input
+ * (4K aliasing), and the half-integer path of the vector backends ran up to 2.8x slower in
+ * one stage than in another; with plain malloc the placement depended on everything the
+ * process had allocated before.  NULL on failure; freed with free(). */
+void *bench_array_alloc(size_t bytes);
+
 /* 0 when every name of the comma list `families` is a family of the corpus (z_nu,
  * h_nu_s); otherwise names the first unknown one on stderr and returns 1. */
 int  corpus_family_check(const char *families);

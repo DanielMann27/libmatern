@@ -289,7 +289,7 @@ static int run_at(int threads, const cpu_topology *topo, int pin,
 {
     pthread_t   tid[MAX_THREADS];
     worker      work[MAX_THREADS];
-    double     *out = (double *)malloc((size_t)threads * n * sizeof *out);
+    double     *out = (double *)bench_array_alloc((size_t)threads * n * sizeof *out);
     if (!out) return -1;
     /* Every repetition of every thread, for the timing distribution. */
     double     *rep_s = (double *)calloc((size_t)threads * (size_t)reps, sizeof *rep_s);

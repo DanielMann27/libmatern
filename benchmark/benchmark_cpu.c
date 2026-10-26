@@ -313,7 +313,7 @@ static void run_ladder(const corpus_dataset *cs, const char *backend,
             matern_workspace_destroy(ws);
         }
 
-    double *out = (double *)malloc(full * sizeof *out);
+    double *out = (double *)bench_array_alloc(full * sizeof *out);
     /* The top rung is the corpus size or --ladder-max; `e <= 30` only guards the shift.
      * Rungs from --ladder-pass-from up are timed in one cumulative pass afterwards. */
     size_t top = 0;
@@ -743,7 +743,7 @@ int main(int argc, char **argv)
                     : corpus_dataset_load(&cs, root, fs, law, maxpts))
                 { fprintf(stderr, "corpus: no data for %s/%s under %s -- dataset skipped\n", fs, law, root); continue; }
             size_t n = cs.set.count;
-            double *out = (double *)malloc(n * sizeof *out);
+            double *out = (double *)bench_array_alloc(n * sizeof *out);
 
             char bkb[128]; snprintf(bkb, sizeof bkb, "%s", backends);
             char *bsave = NULL;

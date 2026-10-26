@@ -8,6 +8,14 @@
 #include <string.h>
 #include <dirent.h>
 
+void *bench_array_alloc(size_t bytes)
+{
+    const size_t page = 4096;
+    /* aligned_alloc takes a non-zero size that is a multiple of the alignment */
+    const size_t size = bytes ? (bytes + page - 1) / page * page : page;
+    return aligned_alloc(page, size);
+}
+
 /* Reads every `stride`-th of the first `limit` records (0: all).  Returns the
  * points kept, or (size_t)-1.  `*on_disk` receives the records considered, which
  * the count-equality check compares, so that a stride cannot hide a short file. */
@@ -24,7 +32,7 @@ static size_t read_axis(const char *path, double **out, size_t stride,
     }
     const size_t points = (limit && limit < h.count) ? limit : (size_t)h.count;
     const size_t kept = (points + stride - 1) / stride;
-    double *v = (double *)malloc((kept ? kept : 1) * sizeof *v);
+    double *v = (double *)bench_array_alloc((kept ? kept : 1) * sizeof *v);
     if (!v || corpus_bin_read_array(f, &h, 0, stride, points, v)) {
         fprintf(stderr, "corpus: %s: read error\n", path);
         free(v); fclose(f); return (size_t)-1;

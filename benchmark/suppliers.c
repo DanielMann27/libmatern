@@ -318,7 +318,7 @@ int main(int argc, char **argv)
                 { fprintf(stderr, "corpus: no data for %s/%s under %s -- dataset skipped\n", fs, law, root); continue; }
             const size_t n = cs.set.count;
             const int has_length_scale = cs.set.has_length_scale;
-            double *out = (double *)malloc(n * sizeof *out);
+            double *out = (double *)bench_array_alloc(n * sizeof *out);
 
             for (int si = 0; si < nsup; si++) {
                 if (only && strcmp(only, sup[si].label)) continue;
