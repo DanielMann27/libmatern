@@ -208,9 +208,9 @@ FINITE_NOTE = (r"\emph{finite}: number of datasets with a finite result at "
                r"every point and a maximum below $10^{6}$ ULP. ")
 
 
-# The rule of paper_figures.best_assembly, as the captions state it.
-BEST_RULE = ("the one with the lowest maximum ULP error among those with the "
-             "fewest non-finite results")
+# The assembly rule of paper_figures (best_assembly, supplier_assembly), as the captions
+# state it.
+BEST_RULE = pf.BEST_RULE
 BEST_ASSEMBLY = ("Each external implementation is shown in its best assembly for "
                  "each dataset, " + BEST_RULE + ".")
 # The statistic of every cost the tables show (`ns_med`, `ns_ws_per_call_med`).
@@ -1581,8 +1581,7 @@ def tab_throughput(lad, slad, outdir, runs_note, arch, family="z_nu",
         r"$N$ is the largest rung every row reached: an external's ladder "
         r"stops when a rung exceeds its wall-clock budget, so the comparison "
         r"covers $N$ up to this value.",
-        r"Each external is shown in the assembly selected from its accuracy "
-        r"rows, the same in every table.",
+        pf.pooled_rule() + ".",
         _machine(arch))
     return t.write(outdir)
 
@@ -1689,8 +1688,7 @@ def tab_gpu_throughput(gklad, outdir, runs_note, arch, family="z_nu",
         r"divided by \texttt{" + esc(lib_supplier) + r"}'s. Kernel scope "
         r"excludes the host-device transfers, which are the same for every "
         r"row and are compared in the transfer-strategy table.",
-        r"Each external is shown in the assembly selected from its device "
-        r"accuracy rows, by the rule of the host throughput table.",
+        pf.pooled_rule(device=True) + ".",
         _machine(arch))
     return t.write(outdir)
 
@@ -2397,7 +2395,7 @@ def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
                        "gives the speedup of " + esc(next(
                            (n for n in names if n.startswith(LIB)), LIB))
                        + " relative to the fastest external implementation for "
-                       "each dataset.", MEDIAN_COST,
+                       "each dataset.", BEST_ASSEMBLY, MEDIAN_COST,
                        _obtained(arch, gpu=True)),
               f"tab:gpu-{metric}-{family.replace('_', '-')}",
               head, align=wrapcol("2.6cm") + "r" * len(laws))
@@ -2508,8 +2506,7 @@ def tab_gpu_exclusions(gsup, outdir, runs_note, arch, family="z_nu"):
         r"\texttt{tab-gpu-accuracy-%s} is taken over fewer points and carries "
         r"a dagger there, also where it reads `\textit{Cap}'." % esc(family),
         r"As in that table, each external is shown on each dataset in its "
-        r"best assembly: one that returned a finite result everywhere if there "
-        r"is one, otherwise the one with the most scored points.",
+        r"best assembly, " + BEST_RULE + ".",
         r"%d of %d measured cells are zero." % (clean, cells),
         _machine(arch))
     return t.write(outdir)
@@ -2590,10 +2587,11 @@ def tab_gpu_medmax(gsup, outdir, runs_note, arch, family="z_nu",
     return t.write(outdir)
 
 
-def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu", asm_of=None,
+def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu",
                  lib_supplier=LIB_CUDA):
     """Call-scope device cost (transfers included): each row at its fastest
-    transfer strategy, each external in its `asm_of` assembly."""
+    transfer strategy, each external on each dataset in the assembly best_assembly
+    selects from its kernel-scope accuracy rows, as in the device accuracy table."""
     stem = f"tab-gpu-call-{family}"
     if not gsup:
         return _skip(stem, "no device supplier rows -- the GPU stage did not "
@@ -2603,12 +2601,18 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu", asm_of=None,
     if not rows:
         return _skip(stem, f"the device rows carry no call-scope measurement "
                            f"for {family}")
-    asm_of = asm_of or {}
+    # The assembly of each external on each dataset, chosen from the accuracy rows of
+    # the same kernels (kernel scope) by the rule of the device accuracy table.
+    chosen = {(s, l): r.get("backend")
+              for (s, _fam, l), r in best_assembly(
+                  [r for r in gsup if scope_of(r) == "kernel"
+                   and r.get("family") == family]).items()}
     best = {}                     # {supplier: {law: (ns_med, strategy, row)}}
     for r in rows:
         s = r["supplier"]
         asm, mode = r["backend"].split("/", 1)
-        if s != lib_supplier and asm_of.get(s) and asm != asm_of[s]:
+        want = chosen.get((s, r["law"]))
+        if s != lib_supplier and want and asm != want:
             continue
         v = _f(r, "ns_med")
         if not (_ok(v) and v > 0):
@@ -2633,7 +2637,7 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu", asm_of=None,
                        "and dataset at its fastest data-transfer strategy; the "
                        "final row gives the speedup of " + esc(lib_supplier)
                        + " relative to the fastest external implementation for "
-                       "each dataset.", MEDIAN_COST,
+                       "each dataset.", BEST_ASSEMBLY, MEDIAN_COST,
                        _obtained(arch, gpu=True)),
               f"tab:gpu-call-{family.replace('_', '-')}",
               head, align=wrapcol("2.6cm") + "r" * len(laws))
@@ -2649,7 +2653,9 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu", asm_of=None,
     key = {s: i + 1 for i, s in enumerate(exts)}
 
     def label(s):
-        want = asm_of.get(s) if s != lib_supplier else None
+        # One assembly per row only where the rule picks the same one on every dataset.
+        asms = {chosen.get((s, l)) for l in laws} if s != lib_supplier else set()
+        want = asms.pop() if len(asms) == 1 else None
         name = s + (f" ({pf.asm_label(want)})" if want else "")
         if s == lib_supplier:
             return text(name)
@@ -2726,8 +2732,7 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu", asm_of=None,
         r"transfer cost is the same on both sides of every ratio, and the "
         r"ratios are smaller than the kernel-scope ones of the device cost "
         r"table. The last row is the fastest external's cost on that dataset "
-        r"divided by the library's. Each external is shown in the assembly "
-        r"selected by its device accuracy rows.",
+        r"divided by the library's. " + BEST_ASSEMBLY,
         _machine(arch))
     return t.write(outdir)
 
@@ -3201,10 +3206,10 @@ def tab_threads_throughput(thr, outdir, runs_note, arch, family="z_nu"):
         r"row's own one-thread cost, so a row that is slower per element asks "
         r"less of the shared hardware and can reach a higher efficiency at a "
         r"lower throughput.",
-        r"Every external is timed in the \texttt{direct} assembly here, unlike "
-        r"the throughput table, where each supplier is shown in the assembly "
-        r"selected from its accuracy rows: the size datasets carry timing only, "
-        r"and \texttt{direct} is the assembly every supplier supports.",
+        r"Every external is timed in the \texttt{direct} assembly here, the one "
+        r"every supplier supports, unlike the throughput table, where each "
+        r"supplier is shown in the assembly the accuracy rule selects over its "
+        r"accuracy datasets taken together.",
         r"The reference of the last row is the fastest library backend at the "
         r"widest thread count (\texttt{scalar} is never selected "
         r"automatically).",

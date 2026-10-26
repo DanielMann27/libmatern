@@ -322,9 +322,7 @@ def main():
         for fam in ("z_nu", "h_nu_s"):
             if gsup and want(f"tab-gpu-call-{fam}"):
                 emit(pt.tab_gpu_call(
-                         gsup, sub, note_of("gpu_sup"), garch, family=fam,
-                         asm_of=mpf.preferred_assembly(gsup, family=fam,
-                                                       scope="kernel")),
+                         gsup, sub, note_of("gpu_sup"), garch, family=fam),
                      f"{mach}/tab-gpu-call-{fam}")
         for fam in ("z_nu", "h_nu_s"):
             if gklad and want(f"tab-gpu-throughput-{fam}"):

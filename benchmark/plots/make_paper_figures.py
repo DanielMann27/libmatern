@@ -427,30 +427,10 @@ def merge(runs, key):
 
 
 def preferred_assembly(sup_rows, family="z_nu", scope="call"):
-    """{supplier: assembly} chosen from the accuracy rows by the `best_assembly` rule: no
-    non-finite results first, then the smallest worst-case max ULP over the laws.
-    `scope="kernel"` applies it to the device rows."""
-    worst = {}
-    for r in sup_rows:
-        if r["family"] != family or scope_of_row(r) != scope:
-            continue
-        k = (r["supplier"], r["backend"])
-        try:
-            u = float(r["u_max"])
-        except (TypeError, ValueError):
-            continue
-        nf = 1 if int(float(r.get("nonfinite") or 0)) > 0 else 0
-        prev = worst.get(k, (0, 0.0))
-        worst[k] = (max(prev[0], nf), max(prev[1], u))
-    out = {}
-    for (sname, asm), rank in worst.items():
-        if sname not in out or rank < out[sname][0]:
-            out[sname] = (rank, asm)
-    return {k: v[1] for k, v in out.items()}
-
-
-def scope_of_row(r):
-    return (r.get("timing_scope") or "call").strip()
+    """{supplier: assembly} for the outputs on the size datasets, which carry no accuracy
+    rows: pf.supplier_assembly, the best_assembly ranking with the accuracy datasets of
+    `family` taken together.  `scope="kernel"` applies it to the device rows."""
+    return pf.supplier_assembly(sup_rows, family=family, scope=scope)
 
 
 def group_by_machine(runs):

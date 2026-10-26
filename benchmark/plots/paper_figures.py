@@ -171,6 +171,30 @@ def failed(r):
     return _i(r, "nonfinite") > 0 or _f(r, "u_max") >= CATASTROPHIC
 
 
+# The assembly rule, one ranking for every table and figure: a finite result at every
+# point first (a maximum over fewer points is not better), then more scored points, then
+# the lowest maximum ULP error, and on an exact tie the order of ASM_TIE_ORDER.
+# best_assembly applies it to each dataset; supplier_assembly to the accuracy datasets of
+# a family taken together, for the outputs on datasets with no accuracy rows of their own
+# (the size datasets of the throughput tables and the ladders).
+ASM_TIE_ORDER = ("direct", "scaled", "logtrick")
+BEST_RULE = ("the one with the lowest maximum ULP error among those with the fewest "
+             "non-finite results, direct on an exact tie")
+
+
+def pooled_rule(device=False):
+    """The caption sentence of supplier_assembly's choice."""
+    return ("Each external implementation is shown in one assembly on every dataset, "
+            "chosen from its %saccuracy rows by the rule of the accuracy tables with "
+            "the accuracy datasets taken together (%s), since the size datasets carry "
+            "no accuracy rows" % ("device " if device else "", BEST_RULE))
+
+
+def _assembly_rank(nonfinite, scored, u_max, asm):
+    tie = ASM_TIE_ORDER.index(asm) if asm in ASM_TIE_ORDER else len(ASM_TIE_ORDER)
+    return (1 if nonfinite > 0 else 0, -scored, u_max, tie, asm)
+
+
 def best_assembly(rows, prefer="u_max"):
     """One row per (supplier, family, law): its best assembly (named in `backend`)."""
     best = {}
@@ -179,11 +203,34 @@ def best_assembly(rows, prefer="u_max"):
         v = _f(r, prefer)
         if not _ok(v):
             continue
-        # Finite everywhere first (a maximum over fewer points is not better),
-        # then more scored points, then u_max.
-        rank = (1 if _i(r, "nonfinite") > 0 else 0, -_i(r, "n_scored"), v)
+        rank = _assembly_rank(_i(r, "nonfinite"), _i(r, "n_scored"), v,
+                              r.get("backend", ""))
         if k not in best or rank < best[k][0]:
             best[k] = (rank, r)
+    return {k: v[1] for k, v in best.items()}
+
+
+def supplier_assembly(rows, family="z_nu", scope="call"):
+    """{supplier: assembly}: the best_assembly ranking applied to the accuracy datasets of
+    `family` taken together (non-finite anywhere, scored points summed, the largest
+    maximum), for outputs on datasets that carry no accuracy rows of their own.
+    `scope="kernel"` applies it to the device rows."""
+    pooled = {}
+    for r in rows:
+        if (r.get("family") != family or scope_of(r) != scope
+                or r.get("law") not in ACC_LAWS):
+            continue
+        v = _f(r, "u_max")
+        if not _ok(v):
+            continue
+        k = (r["supplier"], r.get("backend", ""))
+        nf, sc, mx = pooled.get(k, (0, 0, 0.0))
+        pooled[k] = (nf + _i(r, "nonfinite"), sc + _i(r, "n_scored"), max(mx, v))
+    best = {}
+    for (sname, asm), (nf, sc, mx) in pooled.items():
+        rank = _assembly_rank(nf, sc, mx, asm)
+        if sname not in best or rank < best[sname][0]:
+            best[sname] = (rank, asm)
     return {k: v[1] for k, v in best.items()}
 
 
@@ -920,8 +967,8 @@ def fig_ladder(plt, lad, slad, outdir, stamp, law="size_random",
                 marker=style.BACKEND_MARK.get(b, "o"), ms=4.0, lw=1.3,
                 color=style.BACKEND_COLOR.get(b, "0.4"),
                 label=f"{style.LIB} {b}")
-    # One assembly per supplier: `asm_of` is best_assembly's choice from the
-    # accuracy rows, so this curve and the cost-accuracy marker are one row.
+    # One assembly per supplier: `asm_of` is supplier_assembly's choice, the accuracy
+    # datasets taken together, since the size datasets carry no accuracy rows.
     asm_of = asm_of or {}
     ends = {}
     for sname in sorted({r["supplier"] for r in slad}):
@@ -929,7 +976,9 @@ def fig_ladder(plt, lad, slad, outdir, stamp, law="size_random",
         want = asm_of.get(sname)
         if want and any(r["backend"] == want for r in mine):
             mine = [r for r in mine if r["backend"] == want]
-        elif len({r["backend"] for r in mine}) > 1:
+        else:
+            want = None
+        if want is None and len({r["backend"] for r in mine}) > 1:
             # no accuracy row to choose an assembly: reported, not picked
             print(f"    !! ladder {law}: {sname} has "
                   f"{len({r['backend'] for r in mine})} assemblies and no "
@@ -938,7 +987,7 @@ def fig_ladder(plt, lad, slad, outdir, stamp, law="size_random",
         p = _pts(mine, "ns_med")
         if not p:
             continue
-        lab = sname
+        lab = sname + (f" ({asm_label(want)})" if want else "")
         ax.plot([x for x, _ in p], [y for _, y in p], marker="s", ms=3.2,
                 lw=1.0, ls="--", color=style.supplier_color(sname),
                 label=lab, alpha=0.85)
@@ -1000,6 +1049,7 @@ def fig_ladder(plt, lad, slad, outdir, stamp, law="size_random",
              "Open circles mark the largest set size reached by implementations "
              "that were stopped by the wall-clock budget."
              if locals().get("short") else "",
+             pooled_rule() + "." if slad and asm_of else "",
              _obtained(arch))
     return _finish(fig, outdir, f"fig-paper-ladder-{law}-{family}", stamp)
 
@@ -1332,6 +1382,12 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     """Call cost per device supplier, one box per transfer strategy over the laws."""
     sup_modes = defaultdict(dict)        # {supplier: {mode: {law: ns}}}
     law_n = defaultdict(set)
+    # each supplier on each law in the assembly best_assembly selects from the
+    # kernel-scope accuracy rows, as in the device tables
+    chosen = {(s, l): r.get("backend")
+              for (s, _fam, l), r in best_assembly(
+                  [r for r in (gsup or []) if scope_of(r) == "kernel"
+                   and r.get("family") == family]).items()}
     for r in (gsup or []):
         if r.get("family") != family or scope_of(r) != "call":
             continue
@@ -1339,11 +1395,13 @@ def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
         if "/" not in bk:
             continue
         asm, mode = bk.split("/", 1)
+        want = chosen.get((r["supplier"], r["law"]))
+        if want and asm != want:
+            continue
         v = _f(r, "ns_med")
         if not _ok(v):
             continue
         cur = sup_modes[r["supplier"]].setdefault(mode, {})
-        # the cheapest assembly per supplier and law
         k = r["law"]
         if k not in cur or v < cur[k]:
             cur[k] = v
