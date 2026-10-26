@@ -1876,10 +1876,14 @@ def env_foreign_load(run_dir):
 
 
 def _env_stage(rid):
-    """The stage of a run id: `<stamp>_<host>_cpu-rest` -> `rest`;
-    `..._gpu` -> `gpu`."""
-    tail = str(rid).rsplit("_", 1)[-1]
-    return tail[4:] if tail.startswith("cpu-") else tail
+    """The stage of a run id: `<stamp>_<host>_cpu-rest` -> `rest`; `..._gpu` -> `gpu`; a run
+    of every CPU stage at once (`..._cpu`, `..._default`, `..._custom`, as make pipeline and
+    run_benchmark.sh name it) -> `all`.  A `.<n>` collision suffix is dropped."""
+    tail = re.sub(r"\.\d+$", "", str(rid).rsplit("_", 1)[-1])
+    label, _, stage = tail.partition("-")
+    if label in ("cpu", "default", "custom"):
+        return stage or "all"
+    return tail
 
 
 def _env_recorded(key, v):
