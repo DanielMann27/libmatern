@@ -739,6 +739,16 @@ ulp, with `s` taken at the reference: the spacing above `|r_hi|` by default (`ul
 Times are in ns per element; every cost in the figures and tables is the median over the
 repetitions.
 
+The arrays a timed call reads and writes are page-aligned (`bench_array_alloc` in
+`benchmark/corpus_dataset.c`), so every input and output array lies at the same address
+modulo 4096 in every stage. Placed otherwise, an output a few vectors past an input modulo
+4096 makes its stores alias the next loads of the input. The half-integer datasets of the
+vector backends then cost up to 2.8 times as much, so a caller's cost there depends on where
+its arrays lie. A GPU call is timed by one loop in both drivers
+(`benchmark/common/bench_cuda_call.h`), with the device drained before each repetition and
+no device buffer of the driver held. The CUDA entry allocates its device memory in every
+call, and those allocations take less time while the process holds others.
+
 **Per dataset**: `accuracy.csv`, `suppliers.csv`, `gpu.csv`, `gpu_kernels.csv`,
 `levin_<arm>.csv`, `gpu_levin_<arm>.csv`, `exp_source.csv` and `fold.csv` have one row per
 family, dataset and backend, or supplier variant and assembly; `levin.csv` and `gpu_levin.csv`
