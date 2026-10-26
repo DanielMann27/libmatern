@@ -583,7 +583,16 @@ depend on it:
 | `std::cyl_bessel_k` and the Boost CPU row | g++ 14.2.0 (libstdc++ 14), C++17; Boost 1.75.0, evaluated in `long double` |
 | GSL | GSL 2.6, the Red Hat Enterprise Linux 9.6 package (a shared library, found by pkg-config) |
 | the device code and the GPU drivers | nvcc 12.8.61 with host compiler GCC 14.2.0; CUDA runtime 12.8; the Boost GPU rows use Boost 1.87.0, evaluated in `double` |
-| the figures | NumPy 2.2.5 and Matplotlib 3.11.0, the versions `make externals` installs into `.venv/` |
+| the figures and tables | Python 3.12.9 with NumPy 2.2.5 and Matplotlib 3.11.0 (the two versions `make externals` installs into `.venv/`); pdfTeX of TeX Live 2020 for the tables |
+
+`tools/published_env.sh` holds these versions. `make requirements` ends with a `published
+environment` section that compares them with the tools found here, and `make pipeline` and
+`make reproduce` show the comparison for the tools the run uses in their plan and warn on
+standard error where one differs. A different compiler or nvcc changes the values (in the
+last bits) and the timings of the rows it builds; a different Python, NumPy, Matplotlib or
+pdflatex changes only the rendering of the figures and the fitted column widths of the
+tables, since the generators compute every value in plain Python. The comparison covers
+these tools, not the processor, the libm or the other system libraries.
 
 Every measuring command prints the full-run notice at its start (`benchmark/tools/full_run.sh`),
 with the settings in which it differs from the full run.

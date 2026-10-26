@@ -164,6 +164,11 @@ python_line() {
     "$MAKE" -s --no-print-directory python-info 2>/dev/null |
         sed -n 's/^  interpreter  //p; s/^  packages     //p' | paste -sd';' - | sed 's/;/; /'
 }
+# py_exe: the path of the interpreter the Makefile selects; empty when it does not run.
+py_exe() {
+    "$MAKE" -s --no-print-directory python-info 2>/dev/null |
+        sed -n 's/^  interpreter  \(.*\), Python [0-9].*/\1/p'
+}
 
 # The answers; on a terminal the questions below set them.
 SET_ANSWER=""; EXT_ANSWER=""; KAUST_ANSWER=""; CORPUS_ANSWER=""; PY_PLAN=""
@@ -235,6 +240,20 @@ plan() {
         [ $EXTERNALS = yes ] && [ -n "$(bash benchmark/tools/missing.sh fetchable $MX_KEYS)" ] &&
             show "" "(make externals runs first; the summary says what is still missing)"
     fi
+    # The tools of the published results against those this run uses (tools/published_env.sh):
+    # the compilers always, nvcc and the GPU Boost with a GPU part, Python and pdflatex with the
+    # figures and tables.  A tool not found is not compared (missing externals, above).
+    local _pc="cc cxx" _pel _pn _pd _ph="published environment" _pdiff=""
+    [ $RUN_GPU = yes ] && _pc="$_pc nvcc boost-gpu"
+    [ $FIGURES = yes ] && _pc="$_pc python tex"
+    _pel=$(PYTHON="$([ $FIGURES = yes ] && py_exe)" bash tools/published_env.sh lines $_pc)
+    if [ -z "$_pel" ]; then
+        show "$_ph" "no tool found here differs from the published ones"
+    else
+        while IFS=$'\t' read -r _pn _pd; do
+            show "$_ph" "$(printf '%-22s %s' "$_pn" "$_pd")"; _ph=""; _pdiff="$_pdiff, $_pn"
+        done <<< "$_pel"
+    fi
     local _given="" _p
     for _p in BACKENDS FAMILIES REPS SUPPLIERS SUP_LADDER SUP_LADDER_BUDGET LADDER_PASS_FROM \
               THREADS_N THREADS_REPS THREADS_LAW THREADS_PIN_MODES THREADS_SUPPLIERS NOTIFY; do
@@ -245,6 +264,8 @@ plan() {
     if [ "$GPU" = yes ] && { [ $have_nvcc = no ] || [ $have_gpu = no ]; }; then
         echo "pipeline: GPU=yes, but nvcc: $have_nvcc, GPU visible: $have_gpu -- the GPU pipeline will fail" >&2
     fi
+    [ -z "$_pdiff" ] ||
+        echo "pipeline: not the tools of the published results (${_pdiff#, }) -- what they make can differ from the published results (published environment, above; make requirements)" >&2
     return 0
 }
 

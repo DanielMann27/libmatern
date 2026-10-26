@@ -1,8 +1,9 @@
 #!/bin/bash
 # requirements.sh [all|suppliers|missing] -- reports the external software the build and
 # benchmark can use and how to add what is absent (make requirements | references |
-# externals-missing).  Measures and changes nothing; exits 1 if the repository root cannot
-# be entered, 2 for an unknown section, otherwise 0.
+# externals-missing); `all` ends with the tools of the published results against this
+# machine's (tools/published_env.sh).  Measures and changes nothing; exits 1 if the repository
+# root cannot be entered, 2 for an unknown section, otherwise 0.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -355,6 +356,7 @@ generators() {
         first=${sel:-python3}
         printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$first -B   ($([ -n "$sel" ] && echo "the first candidate with both at or above the tested minimum" || echo "no candidate has both at or above the tested minimum"); override: make PYTHON=<interpreter>)"
     fi
+    PY_USED=$first   # published() compares it
     local stack stack_rc
     stack=$("$first" tools/py_stack.py 2>/dev/null); stack_rc=$?
     if ! command -v "$first" >/dev/null 2>&1; then
@@ -448,10 +450,16 @@ gpu() {
     fi
 }
 
+# The tools of the published results against those found here, and what a difference changes.
+published() {
+    section "published environment (the tools of the published results against those found here)"
+    PYTHON="${PY_USED:-${PYTHON:-}}" bash tools/published_env.sh report cc cxx nvcc boost-gpu python tex
+}
+
 echo "requirements ($SECTION) -- package manager: $PM"
 case "$SECTION" in
     suppliers) suppliers ;;
-    all)       toolchain; suppliers; generators; corpus; gpu ;;
+    all)       toolchain; suppliers; generators; corpus; gpu; published ;;
     missing)   toolchain; suppliers; generators; gpu; exit 0 ;;
 esac
 echo

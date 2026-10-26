@@ -84,7 +84,9 @@ stage and writes the figures and tables of the paper. It takes about 18 hours on
 with an NVIDIA A100 GPU, downloads not included. The GPU part runs where `nvcc` and an NVIDIA
 GPU are found; `make reproduce GPU=no` runs the CPU part only. On a terminal it asks at most
 one question: whether to download KAUST CuBesselK, after showing its copyright notice. Without
-a terminal, as in a batch job, add `KAUST=yes` or `KAUST=no`. The machine-independence figure
+a terminal, as in a batch job, add `KAUST=yes` or `KAUST=no`. Its plan compares the compilers,
+nvcc, Python and pdflatex with those of the published results and warns where one differs
+(`make requirements` shows the comparison). The machine-independence figure
 needs a second run on a CPU of the other vendor (Intel, AMD). The system software the run needs
 and the details are in
 [`docs/benchmark.md`, "Replicating the published results"](docs/benchmark.md#replicating-the-published-results).

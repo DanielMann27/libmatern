@@ -1476,6 +1476,21 @@ run "invalid SETTINGS, KAUST, CORPUS refused" bash -c '
         env -u SETTINGS -u KAUST -u CORPUS MAKEFLAGS= make --no-print-directory pipeline DRY=yes "$a" \
             </dev/null >/dev/null 2>&1; [ $? -eq 2 ] || { echo "$a accepted"; exit 1; }
     done'
+# The plan compares the tools with those of the published results (tools/published_env.sh): a
+# stand-in compiler that predefines another GCC version is named, the published one is not.
+fakecc(){ printf '#!/bin/sh\nprintf "#define __GNUC__ %s\\n#define __GNUC_MINOR__ %s\\n#define __GNUC_PATCHLEVEL__ %s\\n"\n' \
+              "$2" "$3" "$4" > "$TMP/cc_$1"; chmod +x "$TMP/cc_$1"; }
+fakecc other 9 1 0
+fakecc same 11 5 0
+run "plan: published environment shown" bash -c '
+    grep -q "^  published environment  " "'"$TMP"'/dry_pipeline" &&
+    grep -q "^  published environment  " "'"$TMP"'/dry_reproduce"'
+run "published env: other compiler" bash -c '
+    CC="'"$TMP"'/cc_other" bash tools/published_env.sh lines cc |
+        grep -q "^C compiler	GCC 9.1.0 here, published GCC 11.5.0: the library"'
+run "published env: same compiler" bash -c '
+    [ -z "$(CC="'"$TMP"'/cc_same" bash tools/published_env.sh lines cc)" ] &&
+    CC="'"$TMP"'/cc_same" bash tools/published_env.sh report cc | grep -q "^  same     C compiler  *GCC 11.5.0"'
 
 echo "== stage 8: the NumPy and Matplotlib of the generators (tools/py_stack.py) =="
 # Stand-in packages of a given version on PYTHONPATH, and an interpreter that sees them.
