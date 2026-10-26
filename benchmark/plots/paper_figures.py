@@ -1561,7 +1561,12 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
         return all(ka[k].get(c) == kb[k].get(c) for c in ACC_COLS)
     ident = {k: _identical(k) for k in keys}
     same = sum(1 for k in keys if ident[k])
-    differing = sorted({(k[2], k[1]) for k in keys if not ident[k]})
+    # rows, not (backend, dataset) pairs: a pair covers one row per argument convention
+    differing_rows = [k for k in keys if not ident[k]]
+    conventions = {}
+    for f, l, b in differing_rows:
+        conventions.setdefault((b, l), []).append(f)
+    differing = sorted(conventions)
     fig, (axl, axr) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.5))
     for k in keys:
         c = style.BACKEND_COLOR.get(k[2], "0.4")
@@ -1592,9 +1597,15 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
     if differing:
         movers = sorted({c for k in keys if not ident[k]
                          for c in ACC_COLS if ka[k].get(c) != kb[k].get(c)})
-        which = ", ".join(f"{b} on {LAW_LABEL.get(l, l)}"
-                          for b, l in differing[:4])
-        _note = (f"hollow markers are the {len(differing)} rows that differ "
+        which = ", ".join(
+            f"{b} on {LAW_LABEL.get(l, l)}"
+            + (" in both conventions" if len(conventions[(b, l)]) > 1 else
+               " in " + {"z_nu": r"$(z,\nu)$", "h_nu_s": r"$(h,\nu,s)$"}.get(
+                   conventions[(b, l)][0], conventions[(b, l)][0]))
+            for b, l in differing[:4])
+        if len(differing) > 4:
+            which += ", ..."
+        _note = (f"hollow markers are the {len(differing_rows)} rows that differ "
                  f"({which}); they differ only in {', '.join(movers)}")
     axr.set_title(style.panel_title("cost on each machine"), pad=4)
     hs = [plt.Line2D([], [], ls="none", marker="o", ms=4.6,

@@ -107,10 +107,10 @@ text_durations() {
   default 2^22); LADDER_PASS_FROM=off times every rung on its own and about doubles
   the ladder time.  Durations of the published run, as the wall time of each batch
   job (build included):
-      ladders (up to 2^25 points)   12.2 h on the AMD EPYC 9454, 14.3 h on the Intel
+      ladders (up to 2^25 points)   12.1 h on the AMD EPYC 9454, 14.3 h on the Intel
                                     Xeon 8358
       accuracy and suppliers        2.0 h (AMD), 2.3 h (Intel); the KAUST rows 1.7 h
-                                    and 1.8 h of it
+                                    and 1.9 h of it
       Levin A/B                     10 min (AMD), 13 min (Intel)
       thread scaling                14 min (AMD), 15 min (Intel)
       prefactor fold                5 min (AMD), 6 min (Intel), a separate run

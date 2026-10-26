@@ -680,8 +680,10 @@ def tab_exclusions(acc, sup, outdir, runs_note, family="z_nu", backend=None,
     series = _impl_series(acc, sup, family, backend)
     if not laws or len(series) < 2:
         return _skip(stem, "needs the library and at least one external")
-    # Not written when every count is zero.
-    total = sum(_i(r, "nonfinite") for _, b in series for r in b.values())
+    # Every count is over the datasets shown: the library's rows also carry the size
+    # datasets, which have no column here.  Not written when every count is zero.
+    shown = [(name, {l: b[l] for l in laws if l in b}) for name, b in series]
+    total = sum(_i(r, "nonfinite") for _, b in shown for r in b.values())
     if total == 0:
         return _skip(stem, "every implementation returned a finite result at "
                            "every point; no table of zeros is written")
@@ -691,7 +693,7 @@ def tab_exclusions(acc, sup, outdir, runs_note, family="z_nu", backend=None,
                        "number, for " + _sets(family) + ".", _obtained(arch)),
               f"tab:exclusions-{family.replace('_', '-')}",
               head, align=wrapcol("2.3cm") + "r" * (len(laws) + 1))
-    for name, by_law in series:
+    for name, by_law in shown:
         cells = [text(name)]
         for l in laws:
             cells.append(count(_i(by_law[l], "nonfinite")) if l in by_law
@@ -702,9 +704,9 @@ def tab_exclusions(acc, sup, outdir, runs_note, family="z_nu", backend=None,
         t.add(cells)
         if name.startswith(LIB):
             t.rule_here()
-    clean = sum(1 for _, b in series for r in b.values()
+    clean = sum(1 for _, b in shown for r in b.values()
                 if _i(r, "nonfinite") == 0)
-    tot = sum(len(b) for _, b in series)
+    tot = sum(len(b) for _, b in shown)
     varies = any(r[-1].md == "varies" for r in t.rows)
     t.note = _note(
         r"\emph{points}: size of the datasets"
@@ -1517,7 +1519,9 @@ def tab_gpu_exclusions(gsup, outdir, runs_note, arch, family="z_nu"):
     if not laws or len(names) < 2:
         return _skip(stem, "needs the device library and at least one external "
                            "kernel on a shared law")
-    by = {s: {l: r for (sn, f, l), r in best.items() if sn == s and f == family}
+    # the datasets shown only, as in tab_exclusions
+    by = {s: {l: r for (sn, f, l), r in best.items()
+              if sn == s and f == family and l in laws}
           for s in names}
     total = sum(_i(r, "nonfinite") for b in by.values() for r in b.values())
     if total == 0:
