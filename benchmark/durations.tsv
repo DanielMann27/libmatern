@@ -1,0 +1,19 @@
+# benchmark/durations.tsv -- the durations of the published run, one line per part
+# and machine.  Written by `make durations` (benchmark/tools/durations.py) from the
+# run records; do not edit by hand.  `source`: record = TIMES.txt of the run (wall
+# time of the runner, build excluded); slurm-wall = wall time of the batch job, build
+# included; log = time stamps of the run's log.
+part	cpu	device	seconds	run	source
+ladders	AMD EPYC 9454		43560	2026-10-24T23-35Z_uc3n095_cpu-ladder	slurm-wall
+ladders	Intel Xeon Platinum 8358		51480	2026-10-25T09-03Z_uc2n621_cpu-ladder	slurm-wall
+rest	AMD EPYC 9454		7200	2026-10-24T23-27Z_uc3n096_cpu-rest	slurm-wall
+rest	Intel Xeon Platinum 8358		8280	2026-10-25T00-16Z_uc2n752_cpu-rest	slurm-wall
+kaust	AMD EPYC 9454		6120	2026-10-24T23-27Z_uc3n096_cpu-rest	log
+kaust	Intel Xeon Platinum 8358		6758	2026-10-25T00-16Z_uc2n752_cpu-rest	log
+levin	AMD EPYC 9454		600	2026-10-24T23-36Z_uc3n067_cpu-levin	slurm-wall
+levin	Intel Xeon Platinum 8358		780	2026-10-24T21-24Z_uc2n751_cpu-levin	slurm-wall
+threads	AMD EPYC 9454		840	2026-10-24T21-36Z_uc3n070_cpu-threads	slurm-wall
+threads	Intel Xeon Platinum 8358		900	2026-10-24T21-21Z_uc2n601_cpu-threads	slurm-wall
+fold	AMD EPYC 9454		300	2026-10-24T23-43Z_uc3n046_cpu-fold	slurm-wall
+fold	Intel Xeon Platinum 8358		360	2026-10-24T21-37Z_uc2n751_cpu-fold	slurm-wall
+gpu	Intel Xeon Platinum 8358	NVIDIA A100 80GB PCIe	2760	2026-10-26T01-46Z_uc2n912_gpu	slurm-wall

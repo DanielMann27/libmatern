@@ -212,9 +212,14 @@ declare -a SKIPPED=()
 declare -a WARNINGS=()
 warn(){ WARNINGS+=("$1"); say "WARNING: $1"; }
 
+# TIMES.txt: the wall time of each recorded stage, as the seconds since the previous record,
+# and run_total at the end; benchmark/tools/durations.py reads it (make durations).
+_record_t=$SECONDS
 record(){  # record <name> <rc>
     if [ "$2" -ne 0 ]; then MISSING+=("$1"); stage_rc=1; fi
     printf '%-22s rc=%d\n' "$1" "$2" >> "$OUT/STAGES.txt"
+    printf '%-40s %d\n' "$1" "$((SECONDS - _record_t))" >> "$OUT/TIMES.txt"
+    _record_t=$SECONDS
 }
 # record_laws <stage> <stderr file>: each `corpus: no data for <family>/<law>` line of a driver
 # is a missing part of <stage>, so a run without every dataset is not `complete`.
@@ -1043,6 +1048,7 @@ if [ "$STAGES" = record ]; then
     SKIPPED+=("ladder (STAGES=record: no CPU measurement)")
 fi
 rows=$(grep -c '^[0-9]' "$ROW_SRC" 2>/dev/null); rows=${rows:-0}
+printf '%-40s %d\n' run_total "$SECONDS" >> "$OUT/TIMES.txt"
 {
   if [ "$stage_rc" -eq 0 ]; then
       echo "STATUS   complete"

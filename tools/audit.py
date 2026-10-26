@@ -268,4 +268,13 @@ else:
                                           sum(a != b for a, b in zip(have, want)) + abs(len(have) - len(want)))]
         check("the device half-integer table is the generator's", bad)
 
+# 13. Every place that states the durations of the published run (the full-run notice,
+# docs/benchmark.md, README.md) is the rendering of benchmark/durations.tsv.
+r = subprocess.run([sys.executable, '-B', 'benchmark/tools/durations.py', '--check'],
+                   capture_output=True, text=True)
+check("the durations agree with benchmark/durations.tsv",
+      [l for l in r.stdout.splitlines() + r.stderr.splitlines() if l.strip()] or
+      (['durations.py --check exited %d' % r.returncode] if r.returncode else []),
+      "make durations renders them again")
+
 sys.exit(1 if FAIL else 0)

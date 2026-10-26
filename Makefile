@@ -34,7 +34,7 @@
 #   make requirements     external software: present, what it enables, how to add it
 #   make reproduce        the full benchmark behind the published results on this machine:
 #                         make pipeline with SETTINGS=full, EXTERNALS=yes and CORPUS=yes
-#                         (about 18 hours with an A100 GPU, downloads not included;
+#                         (durations: benchmark/durations.tsv; downloads not included;
 #                         GPU=no runs the CPU part only); on a terminal it asks about
 #                         KAUST after its copyright notice, without one it needs KAUST=yes
 #                         or KAUST=no while the port is absent; the cross-machine figure
@@ -43,9 +43,10 @@
 #   make pipeline         everything in one command: builds, CPU run, optional Levin,
 #                         prefactor-fold, thread and GPU stages, figures, tables; on a
 #                         terminal it first asks whether to switch to the full run
-#                         behind the published results (about 18 hours) and whether to
-#                         download the missing externals, KAUST and the corpus; without
-#                         a terminal it asks nothing, and the switches give the answers
+#                         behind the published results (durations: benchmark/durations.tsv)
+#                         and whether to download the missing externals, KAUST and the
+#                         corpus; without a terminal it asks nothing, and the switches
+#                         give the answers
 #   make benchmark-build  the drivers build/detect and build/benchmark_cpu
 #   make build/suppliers  the driver of the external CPU suppliers; without it make
 #                         benchmark skips the supplier stages
@@ -57,6 +58,8 @@
 #                         captions.tex) and the tables its own tables are taken from
 #                         (benchmark/tables/paper/)
 #   make tables-check     compiles every generated table in one document (needs pdflatex)
+#   make durations        benchmark/durations.tsv from the run records (TIMES.txt), and the
+#                         full-run notice, docs/benchmark.md and README.md rendered from it
 #   make python-info      the Python the generators use
 #   make build/threads_cpu                     the thread-scaling driver (STAGES=threads)
 #   make build/fold_cpu                        the prefactor-fold driver (STAGES=fold)
@@ -271,7 +274,7 @@ endif
         direct-argument threads neutral audit exports readme-example strict tsan install clean \
         clean-clone cuda cuda-modes references benchmark-build benchmark-suppliers \
         benchmark-gpu benchmark levin-ab-build levin-ab-build-gpu \
-        figures tables tables-check \
+        figures tables tables-check durations \
         benchmark-test python-info requirements supplier-objects boost-headers pipeline externals \
         corpus-tools corpus-check kaust externals-missing corpus dist help reproduce
 
@@ -1185,6 +1188,12 @@ tables:
 # Compiles every generated table in one document (needs pdflatex).
 tables-check:
 	@$(PY_FOUND_CHECK); $(PYTHON) benchmark/tables/check_tex.py $(ARGS)
+
+# The durations of the published run: benchmark/durations.tsv from the TIMES.txt of the runs
+# under RUNS_DIR, then the three places that state them rendered from it
+# (benchmark/tools/durations.py; make audit checks that they agree).
+durations:
+	@$(PY_FOUND_CHECK); $(PYTHON) benchmark/tools/durations.py --runs $(RUNS_DIR) $(ARGS)
 
 benchmark-test: benchmark-build
 	@bash benchmark/tests/run_tests.sh

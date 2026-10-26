@@ -558,20 +558,26 @@ make reproduce KAUST=no > run.log 2>&1   # without a terminal: KAUST=yes or KAUS
 Without a terminal, `make reproduce DRY=yes` exits with status 2 where the run would refuse
 to start, as without `KAUST=yes` or `KAUST=no` while the port is absent.
 
+<!-- BEGIN durations: written by `make durations` from benchmark/durations.tsv -->
 The full run takes about 18 hours on one machine with an A100 GPU, most of it the CPU
 ladders. The ladders time every rung up to 2^21 points on its own and the rungs from 2^22 up
 in one cumulative pass per repetition (`LADDER_PASS_FROM`, default 2^22);
 `LADDER_PASS_FROM=off` times every rung on its own and about doubles the ladder time.
-Durations of the published run, as the wall time of each batch job (build included):
+Durations of the published run, as the wall time of each batch job, build included (these
+runs record no times); those marked log are from the time stamps of the run's log; `make
+durations` writes them from the run records into `benchmark/durations.tsv`. AMD: AMD EPYC
+9454; Intel: Intel Xeon Platinum 8358; A100: NVIDIA A100 80GB PCIe.
 
 | part | time |
 |---|---|
-| ladders (up to 2^25 points) | 12.1 h on the AMD EPYC 9454, 14.3 h on the Intel Xeon 8358 |
-| accuracy and suppliers | 2.0 h (AMD), 2.3 h (Intel); the KAUST rows 1.7 h and 1.9 h of it |
+| ladders (up to 2^25 points) | 12.1 h (AMD), 14.3 h (Intel) |
+| accuracy and suppliers | 2.0 h (AMD), 2.3 h (Intel) |
+| of it the KAUST rows | 1.7 h (AMD, log), 1.9 h (Intel, log) |
 | Levin A/B | 10 min (AMD), 13 min (Intel) |
 | thread scaling | 14 min (AMD), 15 min (Intel) |
-| prefactor fold | 5 min (AMD), 6 min (Intel), a separate run |
-| GPU stages (A100) | 46 min (core, Levin A/B and thread settings) |
+| prefactor fold | 5 min (AMD), 6 min (Intel) |
+| GPU (core, Levin, threads) | 46 min (A100) |
+<!-- END durations -->
 
 The published rows come from this toolchain (the `build_*` keys of each run's
 `PROVENANCE.txt`); a different compiler or libm can change the last bits of the rows that
@@ -616,6 +622,7 @@ directory holds the files of the stages it ran:
 | `MANIFEST.txt` | the sha256 of every input: the corpus files (a `# corpus:` line names any mismatch and the absent files), the benchmark, supplier and library sources, the KAUST files when present, the library archive |
 | `detect.txt` | the report of `build/detect`: CPU, load, NUMA placement, timer, ULP definition, instruction sets, installed components, corpus |
 | `STAGES.txt` | per stage, supplier and missing dataset: exit status, row count, `NO DATA` or `SKIPPED` |
+| `TIMES.txt` | the wall time of each stage and supplier in seconds (since the previous entry), and `run_total`; `make durations` reads it |
 | `STATUS` | `complete`, `partial` or `failed`, what is missing or skipped, warnings (from the sha256 check of the corpus against `data/MANIFEST.md`), the load before and after |
 | `EXPECTED.txt` | `u_max` of `avx512` on four `z_nu` datasets beside a reference value |
 | `timing_raw.<x>` | every timed repetition (`n`, `rep`, `ns_per_elem`) |

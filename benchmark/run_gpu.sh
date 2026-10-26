@@ -157,8 +157,13 @@ snapshot() {
 
 # note_stage records a stage's row count in STAGES.txt.  A stage that ran and produced no rows
 # is recorded as ATTEMPTED, 0 ROWS and marks STATUS (written by run_benchmark.sh) partial.
+# Each note_stage also adds the stage's wall time to TIMES.txt (seconds since the previous
+# stage), as run_benchmark.sh's record does; run_total at the end covers the whole run.
+_note_t=$SECONDS
 note_stage() {   # note_stage <name> <csv> <attempted 0|1>
     local name="$1" csv="$2" tried="$3" rows=0
+    printf '%-40s %d\n' "$name" "$((SECONDS - _note_t))" >> "$R/TIMES.txt"
+    _note_t=$SECONDS
     # Rows are the non-empty lines after the header; gpu_levin.csv rows start
     # with the variant name, not the schema number.
     [ -s "$csv" ] && rows=$(tail -n +2 "$csv" | grep -c . 2>/dev/null); rows=${rows:-0}
@@ -301,6 +306,7 @@ if want_gpu call-large; then
   fi
 fi
 
+printf '%-40s %d\n' run_total "$SECONDS" >> "$R/TIMES.txt"
 echo "[$((SECONDS-t0))s] recorded: $R"
 if [ -n "${BENCH_COPY_RUNS_TO:-}" ]; then
   snapshot final || { echo "!! COPY-BACK FAILED -- the run exists only in $R"; exit 2; }

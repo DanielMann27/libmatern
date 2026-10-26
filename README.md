@@ -80,7 +80,7 @@ make reproduce
 
 runs the full benchmark behind the accompanying paper on this machine: it downloads the
 evaluation corpus and the external implementations it needs, builds the benchmark, runs every
-stage and writes the figures and tables of the paper. It takes about 18 hours on a machine
+stage and writes the figures and tables of the paper. It takes <!-- durations:hours -->about 18 hours<!-- /durations:hours --> on a machine
 with an NVIDIA A100 GPU, downloads not included. The GPU part runs where `nvcc` and an NVIDIA
 GPU are found; `make reproduce GPU=no` runs the CPU part only. On a terminal it asks at most
 one question: whether to download KAUST CuBesselK, after showing its copyright notice. Without
