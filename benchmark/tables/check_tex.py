@@ -31,7 +31,7 @@ def main():
 
     if not os.path.isdir(args.dir):
         print(f"check_tex: no table tree at {args.dir} -- run "
-              f"`make paper-tables` first")
+              f"`make tables` first")
         return 1
     engine = shutil.which("pdflatex")
     if not engine:

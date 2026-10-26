@@ -67,7 +67,6 @@ FOLD_MARK = {"scalar": "o", "scalar-control": "o",
 # so it is drawn largest.
 FOLD_MS = {"scalar": 4.0, "scalar-control": 4.0,
            "scalar-unfolded-direct": 6.0, "scalar-unfolded-explog": 5.0}
-FAMILY_LS   = {"z_nu": "-", "h_nu_s": "--"}
 FAMILY_MARK = {"z_nu": "o", "h_nu_s": "s"}
 
 ULP_ONE  = 1.0
@@ -142,27 +141,20 @@ def apply_display_caps(fig):
             t.set_text(display_caps(s))
 
 
-# The file formats save() writes; make_paper_figures.py --paper without --full writes the
-# PDF only.
-FORMATS = ("pdf", "png")
-
-
 def save(fig, outdir, stem):
-    """Write `fig` in `outdir` as `<stem>.<ext>`, one file per listed format; in paper
-    mode record its printed size (check_size)."""
+    """Write `fig` in `outdir` as `<stem>.pdf`, the file the manuscript includes, and record
+    its printed size (check_size)."""
     import os
     apply_display_caps(fig)
-    for ext in FORMATS:
-        path = os.path.join(outdir, f"{stem}.{ext}")
-        fig.savefig(path)
-        SAVED.append(path)
-    if PAPER:
-        check_size(fig, os.path.join(outdir, f"{stem}.pdf"))
+    path = os.path.join(outdir, f"{stem}.pdf")
+    fig.savefig(path)
+    SAVED.append(path)
+    check_size(fig, path)
     return 1
 
 
 # [(pdf path, printed width in, printed height in, smallest printed pt, its text, scale)] of
-# every figure saved in paper mode, filled by check_size, reported by make_paper_figures.py.
+# every figure saved, filled by check_size, reported by make_paper_figures.py.
 SIZES = []
 
 
@@ -313,7 +305,6 @@ def booktabs(path, caption, label, header, rows, align=None, note=None,
 # Keys and notes sit outside the axes, since the curves move between machines; the type
 # sizes are fixed and a wide key gets more columns.
 LEGEND_FONTSIZE = FS_LEGEND
-NOTE_FONTSIZE   = 6.6
 
 # Must equal the fontsize of the run stamp in paper_figures._stamp.
 STAMP_FONTSIZE = 5.2
@@ -343,50 +334,19 @@ def legend_below(ax, y=-0.17, ncol=None, fontsize=LEGEND_FONTSIZE,
                      loc="upper center", bbox_to_anchor=(0.5, y), **kw)
 
 
-def legend_figure(fig, ax=None, y=0.015, ncol=None, fontsize=LEGEND_FONTSIZE,
-                  handles=None, labels=None, **kw):
-    """One key for the whole figure, under all the panels."""
-    if handles is None and ax is not None:
-        handles, labels = ax.get_legend_handles_labels()
-    if not handles:
-        return None
-    return fig.legend(handles, labels, frameon=False, fontsize=fontsize,
-                      ncol=ncol or _ncol_for(len(handles)),
-                      loc="lower center", bbox_to_anchor=(0.5, y), **kw)
-
-
-def note_below(fig, text, y=None, color="0.30", fontsize=NOTE_FONTSIZE,
-               ha="center", x=0.5, width=118):
-    """A figure note under the panels, wrapped to `width` characters; in paper mode it is
-    recorded for write_hardware instead of drawn."""
-    import textwrap
-    if PAPER:
-        record_note(text)
-        return None
-    if y is None:
-        y = stamp_clearance(fig)
-    wrapped = "\n".join(textwrap.wrap(text, width=width)) if text else text
-    return fig.text(x, y, wrapped, ha=ha, va="bottom", fontsize=fontsize,
-                    color=color, linespacing=1.35)
+def note_below(fig, text):
+    """A figure note: recorded for write_hardware (HARDWARE.md), not drawn."""
+    record_note(text)
 
 
 def footer(fig, handles=None, labels=None, note=None, ncol=None,
-           legend_fontsize=LEGEND_FONTSIZE, note_fontsize=NOTE_FONTSIZE,
-           width=118, note_color="0.30", pad=0.012):
-    """Lay the note and, above it, the key out under the panels; return the figure-fraction
-    height they occupy (for `tight_layout`).  In paper mode the note goes to write_hardware."""
-    import textwrap
+           legend_fontsize=LEGEND_FONTSIZE, pad=0.012):
+    """Lay the key out under the panels and return the figure-fraction height it occupies
+    (for `tight_layout`); the note is recorded for write_hardware (HARDWARE.md)."""
     h_in = fig.get_figheight()
     y = stamp_clearance(fig)
-    if note and PAPER:
-        record_note(note)
-        note = None
     if note:
-        lines = textwrap.wrap(note, width=width) or [note]
-        fig.text(0.5, y, "\n".join(lines), ha="center", va="bottom",
-                 fontsize=note_fontsize, color=note_color, linespacing=1.35)
-        # points -> figure fraction, at the line spacing of the drawn text
-        y += len(lines) * (note_fontsize * 1.35) / (h_in * 72.0) + pad
+        record_note(note)
     if handles:
         fig.legend(handles, labels, frameon=False, fontsize=legend_fontsize,
                    ncol=ncol or _ncol_for(len(handles)),
@@ -396,22 +356,11 @@ def footer(fig, handles=None, labels=None, note=None, ncol=None,
     return y
 
 
-def wrap_title(text, width=96):
-    """Wrap a title to `width` characters without breaking words; with a tight bbox a long
-    title would widen the saved canvas."""
-    import textwrap
-    if not text:
-        return text
-    return "\n".join(textwrap.wrap(text, width=width,
-                                   break_long_words=False))
+# No titles or notes on the canvas: each figure's caption goes to captions.tex, its title,
+# notes and facts to HARDWARE.md.
 
-
-# Paper mode (make_paper_figures.py --paper): no titles or notes on the canvas; each
-# figure's caption goes to captions.tex, its title, notes and facts to HARDWARE.md.
-PAPER = False             # set by make_paper_figures.py --paper
-
-# Paper-mode rewrites of CSV column names to their meaning.  They run before LaTeX
-# escaping (plain underscores), and a longer pattern precedes any pattern it contains.
+# Rewrites of CSV column names to their meaning in titles and captions.  They run before
+# LaTeX escaping (plain underscores), and a longer pattern precedes any pattern it contains.
 _PAPER_REWRITE = [
     ("u_fence, u_iqr, u_mean, u_q1, u_q3",
      "the outlier fence, the interquartile range, the mean and the two inner "
@@ -431,7 +380,7 @@ CAPTION = {"title": "", "notes": [], "text": [], "facts": [], "runs": []}
 # {output directory: run labels of its figures}, returned by caption_finalise().
 RUNS_SEEN = {}
 
-# [(outdir, stem, runs, facts)] of every figure written in paper mode.
+# [(outdir, stem, runs, facts)] of every figure written.
 FIGURES = []
 
 
@@ -442,9 +391,9 @@ def _rewrite(text):
 
 
 def panel_title(text):
-    """A panel label with each line's first letter capitalised; the phrase rewrites apply in
-    paper mode only."""
-    t = _rewrite(text) if PAPER else text
+    """A panel label with each line's first letter capitalised and the phrase rewrites
+    applied."""
+    t = _rewrite(text)
     out = []
     for line in t.split("\n"):
         line = line.strip()
@@ -453,14 +402,12 @@ def panel_title(text):
 
 
 def fig_title(text, width=96):
-    """The figure title, wrapped; in paper mode "" is returned and the text is recorded as
-    sentences for write_hardware."""
-    if PAPER:
-        # Each line of a multi-line title is its own sentence.
-        parts = [" ".join(l.split()) for l in text.split("\n")]
-        CAPTION["title"] = _rewrite(_as_sentences([p for p in parts if p]))
-        return ""
-    return wrap_title(text, width=width)
+    """No title on the canvas: "" is returned and the text is recorded as sentences for
+    write_hardware.  `width` is accepted for the callers' title layout and unused."""
+    # Each line of a multi-line title is its own sentence.
+    parts = [" ".join(l.split()) for l in text.split("\n")]
+    CAPTION["title"] = _rewrite(_as_sentences([p for p in parts if p]))
+    return ""
 
 
 def _sentence(t):
@@ -483,12 +430,12 @@ def _as_sentences(parts):
 
 
 def record_note(text):
-    """Hold a note for write_hardware instead of drawing it (paper mode only)."""
+    """Hold a note for write_hardware instead of drawing it."""
     CAPTION["notes"].append(_rewrite(" ".join(text.split())))
 
 
 def paper_caption(*sentences):
-    """Set the current figure's caption for captions.tex (paper mode)."""
+    """Set the current figure's caption for captions.tex."""
     CAPTION["text"] = [s for s in sentences if s and s.strip()]
 
 
@@ -607,8 +554,7 @@ def _plain(text):
 def caption_flush(outdir, stem):
     """Append the figure's caption to `captions.tex` as a figure environment; keep its title,
     notes and facts for write_hardware."""
-    if not PAPER or not (CAPTION["title"] or CAPTION["notes"]
-                         or CAPTION["text"]):
+    if not (CAPTION["title"] or CAPTION["notes"] or CAPTION["text"]):
         caption_reset()
         return
     import os as _os

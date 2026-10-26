@@ -430,26 +430,30 @@ PY=${PY:-python3}
 # copy of benchmark/plots/ beside fixture runs; FIGMIRROR prints that scratch root.
 FIGMIRROR='m=$(mktemp -d); mkdir -p "$m/runs";
     cp -r benchmark/plots "$m/plots";
-    rm -rf "$m/plots/paper" "$m/plots/paper-final" "$m/plots/__pycache__";
+    rm -rf "$m/plots/paper-final" "$m/plots/__pycache__";
     echo "$m"'
 export FIGMIRROR
 run "figures: a complete run draws" bash -c '
     m=$(bash -c "$FIGMIRROR"); cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
     "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
+    n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
-# The default is the paper set (PAPER_FIGURES): no attribution figure; --full draws it.
-run "figures: paper set by default, --full all" bash -c '
+# Only the paper set (PAPER_FIGURES) is drawn, PDF only: no PNG, no figure outside the set
+# (attribution is one), and the removed --full and --paper options are refused.
+run "figures: the paper set only, PDF only" bash -c '
     m=$(bash -c "$FIGMIRROR"); cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
     "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" | wc -l)
-    a=$(find "$m/plots/paper" -name "fig-paper-attribution-*.png" | wc -l)
+    n=$(find "$m/plots/paper-final" -name "*.pdf" | wc -l)
+    g=$(find "$m/plots/paper-final" -name "*.png" | wc -l)
+    a=$(find "$m/plots/paper-final" -name "fig-paper-attribution-*" | wc -l)
     "'"$PY"'" "$m/plots/make_paper_figures.py" --full >/dev/null 2>&1; rc2=$?
-    f=$(find "$m/plots/paper" -name "fig-paper-attribution-*.png" | wc -l); rm -rf "$m"
-    [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$n" -gt 0 ] && [ "$a" -eq 0 ] && [ "$f" -gt 0 ]'
-run "figures: --paper writes captions.tex" bash -c '
+    "'"$PY"'" "$m/plots/make_paper_figures.py" --paper >/dev/null 2>&1; rc3=$?
+    rm -rf "$m"
+    [ "$rc" -eq 0 ] && [ "$n" -gt 0 ] && [ "$g" -eq 0 ] && [ "$a" -eq 0 ] &&
+    [ "$rc2" -ne 0 ] && [ "$rc3" -ne 0 ]'
+run "figures: captions.tex beside the figures" bash -c '
     m=$(bash -c "$FIGMIRROR"); cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
-    "'"$PY"'" "$m/plots/make_paper_figures.py" --paper >/dev/null 2>&1; rc=$?
+    "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
     n=$(find "$m/plots/paper-final" -name captions.tex 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
 # A CSV of another schema is refused: its figures are skipped, the exit status is nonzero.
@@ -468,8 +472,8 @@ run "figures: partial run, --strict REFUSES" bash -c '
     out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc2=$?; rm -rf "$m"
     [ "$rc" -eq 2 ] && [ "$rc2" -eq 0 ] && echo "$out" | grep -q "runs not marked complete"'
 
-# Partial runs plot: every figure (--full) is drawn or listed as not drawn, with exit
-# status 0.
+# Partial runs plot: every figure of the paper set is drawn or listed as not drawn, with
+# exit status 0.
 # The fixtures are inline because `bash -c` does not inherit shell functions.
 run "subset: one backend only"     bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
@@ -478,8 +482,8 @@ run "subset: one backend only"     bash -c '
         head -1 "'"$LAST"'/$f" > "$d/$f"
         tail -n +2 "'"$LAST"'/$f" | grep ",scalar," >> "$d/$f"
     done
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && { [ "$n" -gt 0 ] || echo "$out" | grep -q "NOT drawn"; }'
 run "subset: no AVX-512 (laptop)"  bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
@@ -488,22 +492,22 @@ run "subset: no AVX-512 (laptop)"  bash -c '
         head -1 "'"$LAST"'/$f" > "$d/$f"
         tail -n +2 "'"$LAST"'/$f" | grep -v ",avx512," >> "$d/$f"
     done
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && { [ "$n" -gt 0 ] || echo "$out" | grep -q "NOT drawn"; }'
 run "subset: accuracy, no timing"  bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
 run "subset: short ladder (3 rungs)" bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
     head -1 "'"$LAST"'/ladder.csv" > "$d/ladder.csv"
     awk -F, "NR>1 && (\$7==256||\$7==512||\$7==1024)" "'"$LAST"'/ladder.csv" >> "$d/ladder.csv"
-    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" --full 2>&1); rc=$?
-    n=$(find "$m/plots/paper" -name "*.png" 2>/dev/null | wc -l); rm -rf "$m"
+    out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
+    n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
 # Runs are grouped into machines by CPU model, so a same-model pair is one machine.
 run "same-CPU pair: machine figure NOT drawn" bash -c '
@@ -511,7 +515,7 @@ run "same-CPU pair: machine figure NOT drawn" bash -c '
     cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hosta_test"
     cp -r "'"$LAST"'" "$m/runs/2026-01-01T00-00Z_hostb_test"
     out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1)
-    n=$(ls "$m"/plots/paper/cross-machine/fig-paper-machine-independence.png 2>/dev/null | wc -l)
+    n=$(ls "$m"/plots/paper-final/cross-machine/fig-paper-machine-independence.pdf 2>/dev/null | wc -l)
     rm -rf "$m"
     [ "$n" -eq 0 ] && echo "$out" | grep -q "needs 2 CPU architectures"'
 # Positive control: the fixture gives the two runs different CPU models.
@@ -522,7 +526,7 @@ run "different-CPU pair: machine figure IS drawn" bash -c '
     sed -i "s/^cpu .*/cpu               AMD EPYC 9454/" "$m/runs/2026-01-01T00-00Z_hosta_test/PROVENANCE.txt"
     sed -i "s/^cpu .*/cpu               Intel(R) Xeon 8358/" "$m/runs/2026-01-01T00-00Z_hostb_test/PROVENANCE.txt"
     "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1
-    n=$(ls "$m"/plots/paper/cross-machine/fig-paper-machine-independence.png 2>/dev/null | wc -l)
+    n=$(ls "$m"/plots/paper-final/cross-machine/fig-paper-machine-independence.pdf 2>/dev/null | wc -l)
     rm -rf "$m"
     [ "$n" -eq 1 ]'
 
@@ -536,8 +540,8 @@ run "paper set: a stage from the machine with it" bash -c '
     sed -i "s/^cpu .*/cpu               Intel(R) Xeon 8358/" "$b/PROVENANCE.txt"
     rm -f "$a/ladder.csv" "$a/suppliers_ladder.csv"
     "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
-    na=$(find "$m/plots/paper" -path "*epyc*" -name "fig-paper-ladder-*.png" | wc -l)
-    nb=$(find "$m/plots/paper" -path "*xeon*" -name "fig-paper-ladder-*.png" | wc -l)
+    na=$(find "$m/plots/paper-final" -path "*epyc*" -name "fig-paper-ladder-*.pdf" | wc -l)
+    nb=$(find "$m/plots/paper-final" -path "*xeon*" -name "fig-paper-ladder-*.pdf" | wc -l)
     rm -rf "$m"
     [ "$rc" -eq 0 ] && [ "$na" -eq 0 ] && [ "$nb" -gt 0 ]'
 
@@ -963,24 +967,9 @@ if make build/fold_cpu >/dev/null 2>&1; then
       grep -q "^suppliers .*SKIPPED" "$d/STAGES.txt"'
   run "figures: the fold run draws" bash -c '
       m=$(bash -c "$FIGMIRROR"); cp -r "'"$FOLDRUN"'" "$m/runs/2026-01-01T00-00Z_hosta_cpu-fold"
-      "'"$PY"'" "$m/plots/make_paper_figures.py" --full >/dev/null 2>&1; rc=$?
-      f=$(find "$m/plots/paper" -name "fig-paper-fold-z_nu.png" | wc -l)
-      e=$(find "$m/plots/paper" -name "fig-paper-fold-ecdf-z_nu.png" | wc -l); rm -rf "$m"
-      [ "$rc" -eq 0 ] && [ "$f" -eq 1 ] && [ "$e" -eq 1 ]'
-  # Marker control: a scalar row given u_max 1e15 and non-finite points reads `Cap (dag)`.
-  run "tables: the fold tables, markers fire" bash -c '
-      m=$(mktemp -d); mkdir -p "$m/runs"
-      cp -r "'"$FOLDRUN"'" "$m/runs/2026-01-01T00-00Z_hosta_cpu-fold"
-      f="$m/runs/2026-01-01T00-00Z_hosta_cpu-fold/fold.csv"
-      awk -F, -v OFS=, "NR==1 { for (i=1;i<=NF;i++) c[\$i]=i; print; next }
-          \$c[\"law\"]==\"grid\" && \$c[\"backend\"]==\"scalar\" { \$c[\"u_max\"]=1e15; \$c[\"nonfinite\"]=5 }
-          { print }" "$f" > "$f.new" && mv "$f.new" "$f"
-      "'"$PY"'" benchmark/tables/make_paper_tables.py --runs "$m/runs" --out "$m/t" \
-          --no-preview --full --only tab-fold >/dev/null 2>&1; rc=$?
-      q=$(ls "$m/t"/tab-fold-quantiles-z_nu.tex 2>/dev/null | wc -l)
-      c=$(ls "$m/t"/*/tab-fold-cpu.md 2>/dev/null | head -1)
-      ok=0; [ -n "$c" ] && grep "z_nu / grid" "$c" | grep -q "Cap (dag)" && ok=1
-      rm -rf "$m"; [ "$rc" -eq 0 ] && [ "$q" -eq 1 ] && [ "$ok" -eq 1 ]'
+      "'"$PY"'" "$m/plots/make_paper_figures.py" >/dev/null 2>&1; rc=$?
+      f=$(find "$m/plots/paper-final" -name "fig-paper-fold-z_nu.pdf" | wc -l); rm -rf "$m"
+      [ "$rc" -eq 0 ] && [ "$f" -eq 1 ]'
 else
   echo "  fold_cpu                           SKIPPED (did not build)"
 fi
@@ -1080,15 +1069,12 @@ run "the figure drops them from the setup panel" bash -c '
     grep -q "^NO_WORKSPACE = {\"scalar\"}" benchmark/plots/paper_figures.py &&
     grep -q "if _no_workspace(b, rows):" benchmark/plots/paper_figures.py'
 
-echo "== stage 5d: paper mode =="
+echo "== stage 5d: captions =="
 
-# Paper mode moves the on-canvas notes into captions.tex.
-run "paper mode is opt-in"          bash -c '
-    cd benchmark/plots && python3 -c "import style; raise SystemExit(0 if not style.PAPER else 1)"'
-run "paper mode moves the title to the caption" bash -c '
+# Nothing but panels and keys is drawn: titles and notes go to captions.tex and HARDWARE.md.
+run "the title goes to the caption" bash -c '
     cd benchmark/plots && python3 -c "
 import style
-style.PAPER = True
 t = style.fig_title(\"Worst-case error and cost on two CPU architectures\")
 raise SystemExit(0 if t == \"\" and style.CAPTION[\"title\"] ==
                  \"Worst-case error and cost on two CPU architectures.\" else 1)"'
@@ -1108,8 +1094,26 @@ run "captions escape text, not math" bash -c '
 import style
 r = style._tex_escape_outside_math(r\"\$(z,\nu)\$ on run a_b_c\")
 raise SystemExit(0 if r.count(chr(92)+\"_\") == 2 and r\"\$(z,\nu)\$\" in r else 1)"'
-run "paper mode writes a separate tree" bash -c '
+run "figures go to plots/paper-final" bash -c '
     grep -q "plots\", \"paper-final\"" benchmark/plots/make_paper_figures.py'
+# Marker control: an external row with u_max 1e15 over non-finite points reads `Cap (dag)`
+# in tab-medmax; the same rows without them read no marker.
+run "tables: medmax markers fire"   bash -c '
+    cd benchmark/tables && python3 -c "
+import sys, tempfile, os; sys.path.insert(0, \"../plots\")
+import paper_tables as pt
+def row(sup, be, law, umax, nf=0):
+    return {\"schema\": \"11\", \"device\": \"cpu\", \"supplier\": sup, \"family\": \"z_nu\",
+            \"law\": law, \"backend\": be, \"ulp_mode\": \"up\", \"n\": \"1000\",
+            \"n_scored\": str(1000 - nf), \"nonfinite\": str(nf), \"u_med\": \"0.5\",
+            \"u_max\": str(umax), \"timing_scope\": \"call\", \"ns_med\": \"1.0\"}
+acc = [row(\"-\", \"avx512\", l, 3.0) for l in (\"grid\", \"random\")]
+def md(sup):
+    d = tempfile.mkdtemp(); pt.tab_medmax(acc, sup, d, \"runs: test\", family=\"z_nu\")
+    return open(os.path.join(d, \"tab-medmax-z_nu.md\")).read()
+bad = md([row(\"ext\", \"direct\", \"grid\", 1e15, nf=5), row(\"ext\", \"direct\", \"random\", 4.0)])
+good = md([row(\"ext\", \"direct\", \"grid\", 5.0), row(\"ext\", \"direct\", \"random\", 4.0)])
+raise SystemExit(0 if \"Cap (dag)\" in bad and \"Cap\" not in good and \"(dag)\" not in good else 1)"'
 run "stale captions are cleared"    bash -c '
     grep -q "if \"captions.tex\" in _f" benchmark/plots/make_paper_figures.py'
 run "absent GPU is not a label"     bash -c '
@@ -1157,7 +1161,6 @@ echo "== stage 5e: caption prose =="
 run "a newline becomes a full stop" bash -c '
     cd benchmark/plots && python3 -c "
 import style
-style.PAPER = True
 style.fig_title(\"A -- x\nb follows\nc follows\")
 raise SystemExit(0 if style.CAPTION[\"title\"] == \"A -- x. B follows. C follows.\" else 1)"'
 run "canvas fragments become sentences" bash -c '
@@ -1171,7 +1174,6 @@ raise SystemExit(0 if style._sentence(\"avx512 wins\").startswith(\"avx512\") el
 run "column names are translated" bash -c '
     cd benchmark/plots && python3 -c "
 import style
-style.PAPER = True
 t = style.panel_title(\"only in u_fence, u_iqr, u_mean, u_q1, u_q3\")
 raise SystemExit(0 if \"u_q1\" not in t and \"quartile\" in t else 1)"'
 # Allowed ALL-CAPS words are acronyms or file names; identifiers with an underscore do not match.
@@ -1207,18 +1209,16 @@ run "no legend relies on loc=best" bash -c '
     src=$(sed "s/#.*$//" benchmark/plots/paper_figures.py);
     ! printf "%s" "$src" | grep -qE "legend\(\)" &&
     ! printf "%s" "$src" | grep -q "loc=\"best\""'
-# Every note but the stamp goes through note_below/footer, which handle paper mode.
-run "only the stamp draws raw text"  bash -c '
-    [ "$(grep -c "fig\.text(" benchmark/plots/paper_figures.py)" -eq 1 ]'
+# Every note goes through note_below/footer, which record it for HARDWARE.md.
+run "no figure draws raw text"      bash -c '
+    [ "$(grep -c "fig\.text(" benchmark/plots/paper_figures.py)" -eq 0 ]'
 
 run "the shared placement helpers exist" bash -c '
     grep -q "^def legend_below"  benchmark/plots/style.py &&
-    grep -q "^def legend_figure" benchmark/plots/style.py &&
     grep -q "^def footer"        benchmark/plots/style.py &&
-    grep -q "^def wrap_title"    benchmark/plots/style.py'
+    grep -q "^def note_below"    benchmark/plots/style.py'
 run "one font floor, not per call site" bash -c '
-    grep -q "^LEGEND_FONTSIZE = " benchmark/plots/style.py &&
-    grep -q "^NOTE_FONTSIZE   = " benchmark/plots/style.py'
+    grep -q "^LEGEND_FONTSIZE = " benchmark/plots/style.py'
 
 # The top rung is the dataset size; the small set is the first 2^20 points of the 2^25 files.
 run "ladder cap: small set stops at 2^20" bash -c '
@@ -1497,8 +1497,8 @@ run "PYTHON search skips an old stack"  bash -c '
     o=$(env -u PYTHON MAKEFLAGS= make -s --no-print-directory python-info \
         PYTHON_CANDIDATES="'"$TMP"'/py_old/python3 '"$TMP"'/py_floor/python3")
     echo "$o" | grep -q "^PYTHON = '"$TMP"'/py_floor/python3 -B"'
-run "paper-tables refuses an old stack" bash -c '
-    o=$(MAKEFLAGS= make -s --no-print-directory paper-tables PYTHON="'"$TMP"'/py_old/python3" 2>&1)
+run "tables refuses an old stack" bash -c '
+    o=$(MAKEFLAGS= make -s --no-print-directory tables PYTHON="'"$TMP"'/py_old/python3" 2>&1)
     [ $? -ne 0 ] && echo "$o" | grep -q "below the tested minimum"'
 
 echo

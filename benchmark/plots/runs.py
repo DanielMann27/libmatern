@@ -6,9 +6,6 @@ import csv, os, platform, re
 # style imports this module only inside a function, so there is no import cycle.
 import style as _style
 
-# SCHEMA_EXPECTED equals bench_metrics.h BENCH_SCHEMA; a schema-10 ladder row has no ladder_mode
-# and is read as `rung`.
-SCHEMA_EXPECTED = 11
 SCHEMA_ACCEPTED = (10, 11)
 
 
@@ -384,24 +381,3 @@ def detail_for(row):
                       f"n_scored {ns} ({run}/{e['file']})")
     return e, ""
 
-
-def hist_share_below(entry, log2_edge=0.0):
-    """Share of points in bins wholly below 2^log2_edge, which must be a bin edge; a point
-    within a rounding error below the edge is binned above it (bench_hist_bin takes the log2)."""
-    if not entry or not entry["total"]:
-        return float("nan")
-    below = sum(c for b, c in enumerate(entry["counts"])
-                if hist_edges(b)[1] <= log2_edge + 1e-9)
-    return below / entry["total"]
-
-
-def hist_tail(entry):
-    """Complementary ECDF at the bin edges: [(x, share with |ulp| >= x)] for x = 2^lo of bins
-    2..49; the last value is the overflow share."""
-    tot = entry["total"]
-    out = []
-    rest = sum(entry["counts"][2:])
-    for b in range(2, HIST_BINS + 2):
-        out.append((2.0 ** hist_edges(b)[0], rest / tot if tot else float("nan")))
-        rest -= entry["counts"][b]
-    return out

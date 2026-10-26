@@ -40,7 +40,6 @@ FOLD=$(yes_no FOLD "${FOLD:-no}") || exit 2
 THREADS=$(yes_no THREADS "${THREADS:-no}") || exit 2
 CHECK=$(yes_no CHECK "${CHECK:-no}") || exit 2
 FIGURES=$(yes_no FIGURES "${FIGURES:-yes}") || exit 2
-FULL=$(yes_no FULL "${FULL:-no}") || exit 2
 TABLES_CHECK=$(yes_no TABLES_CHECK "${TABLES_CHECK:-no}") || exit 2
 DRY=$(yes_no DRY "${DRY:-no}") || exit 2
 VERBOSE=$(yes_no V "${V:-no}") || exit 2
@@ -56,7 +55,7 @@ case "$(lower "${SETTINGS:-}")" in
 esac
 if [ $TABLES_CHECK = yes ] && [ $FIGURES = no ]; then
     echo "pipeline: TABLES_CHECK=yes checks the tables this pipeline writes, and FIGURES=no writes none --" >&2
-    echo "pipeline: set FIGURES=yes, or run make paper-tables-check on its own" >&2
+    echo "pipeline: set FIGURES=yes, or run make tables-check on its own" >&2
     exit 2
 fi
 _g=$(lower "${GPU:-auto}")
@@ -184,7 +183,7 @@ plan() {
     show "thread scaling" "$THREADS${THREADS_MAX:+ (THREADS_MAX=$THREADS_MAX)}"
     show "GPU pipeline" "$RUN_GPU  (GPU=$GPU; nvcc: $have_nvcc, GPU visible: $have_gpu)$([ $RUN_GPU = yes ] && echo "; GPU_STAGES=$GPU_STAGES_PLAN")"
     local _figs _py
-    _figs="$FIGURES$([ $FIGURES = yes ] && { [ $FULL = yes ] && echo ' (every figure and table, FULL=yes)' || echo ' (the paper set; FULL=yes for every figure and table)'; })$([ $TABLES_CHECK = yes ] && echo ', paper-tables-check')"
+    _figs="$FIGURES$([ $FIGURES = yes ] && echo ' (the paper set)')$([ $TABLES_CHECK = yes ] && echo ', tables-check')"
     if [ $FIGURES = yes ]; then
         _py=$(bash benchmark/tools/missing.sh lines python)
         if [ -n "$_py" ] && [ $EXTERNALS = yes ] && [ -n "$(bash benchmark/tools/missing.sh fetchable python)" ]; then
@@ -726,17 +725,17 @@ if [ $FIGURES = yes ]; then
         note "figures" "not made -- ${_py%%$'\t'*} missing: ${_py#*$'\t'}"; failed=1
         note "tables" "not made -- ${_py%%$'\t'*} missing (as for the figures)"
     else
-        if "$MAKE" --no-print-directory paper-figures-final FULL=$FULL; then note "figures" "benchmark/plots/paper-final/"
+        if "$MAKE" --no-print-directory figures; then note "figures" "benchmark/plots/paper-final/"
         else note "figures" "FAILED"; failed=1; fi
         if [ -n "$_tx" ]; then
             note "tables" "not made -- ${_tx%%$'\t'*} missing: ${_tx#*$'\t'}"; failed=1
-        elif "$MAKE" --no-print-directory paper-tables FULL=$FULL; then note "tables" "benchmark/tables/paper/"; _tables=yes
+        elif "$MAKE" --no-print-directory tables; then note "tables" "benchmark/tables/paper/"; _tables=yes
         else note "tables" "FAILED"; failed=1; fi
     fi
     if [ $TABLES_CHECK = yes ]; then
         if [ -z "$_py" ] && [ -n "$_tx" ]; then note "tables check" "not run -- pdflatex missing: ${_tx#*$'\t'}"; failed=1
         elif [ $_tables = no ]; then note "tables check" "not run -- the tables were not made"; failed=1
-        elif "$MAKE" --no-print-directory paper-tables-check; then note "tables check" "passed"
+        elif "$MAKE" --no-print-directory tables-check; then note "tables check" "passed"
         else note "tables check" "FAILED"; failed=1; fi
     fi
 fi

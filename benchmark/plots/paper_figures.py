@@ -134,15 +134,6 @@ def _no_workspace(backend, rows):
     timed = [_f(r, "ns_workspace_med") for r in rows if _ok(_f(r, "ns_workspace_med"))]
     return bool(timed) and not any(v > 0 for v in timed)
 
-BACKEND_LABEL = {
-    "scalar":      "scalar (direct formulas, libm)",
-    "matched":     "matched (vector algorithm, width 1)",
-    # Not LaTeX-escaped (matplotlib draws a backslash); the tables use esc().
-    "matched_fma": "matched_fma (width 1, hardware FMA)",
-    "avx2":        "avx2 (vectorised elementary functions, 4 lanes)",
-    "avx512":      "avx512 (8 lanes)",
-}
-
 
 def _f(row, key):
     try:
@@ -252,35 +243,16 @@ def _band_x(ax, xmin, xtop=CATASTROPHIC):
     return math.sqrt(lo * xtop)
 
 
-def _stamp(fig, text):
-    """Write the run provenance in the bottom-right corner of the figure."""
-    fig.text(0.995, 0.003, text, ha="right", va="bottom",
-             fontsize=5.2, color="0.45")
-
-
-def _title(fig, text, width=80, reserve=False):
-    """Draw the figure title (development mode; in paper mode style.fig_title records it
-    for write_hardware) and return the figure-fraction top for the panels.  tight_layout
-    leaves room for the title itself; `reserve` returns a top under it, for constrained
-    layout, which does not with the title placed explicitly.  The figure grows by the
-    title's height, so the panels keep their paper-mode size; call it before
-    style.footer, which works in fractions of the height."""
-    t = style.fig_title(text, width=width)
-    if not t:
-        return 0.995
-    fig.suptitle(t, y=0.998, fontsize=style.FS_TITLE)
-    dh = ((t.count("\n") + 1) * style.FS_TITLE * 1.35 + 6.0) / 72.0
-    fig.set_figheight(fig.get_figheight() + dh)
-    return (0.995 - dh / fig.get_figheight()) if reserve else 0.995
+def _title(fig, text):
+    """Record the figure title for write_hardware (style.fig_title; nothing is drawn) and
+    return the figure-fraction top for the panels."""
+    style.fig_title(text)
+    return 0.995
 
 
 def _finish(fig, outdir, stem, stamp):
-    """Stamp (development mode) or record the provenance (paper mode), save, close."""
-    if not style.PAPER:
-        env = style.env_line_for(style.stamp_runs(stamp))
-        _stamp(fig, (stamp + "   |   " + env) if env else stamp)
-    else:
-        style.note_provenance(outdir, stamp)
+    """Record the provenance, save, close."""
+    style.note_provenance(outdir, stamp)
     n = style.save(fig, outdir, stem)
     style.caption_flush(outdir, stem)
     import matplotlib.pyplot as _plt
@@ -317,7 +289,7 @@ def threads_median(thr):
     return rows, True
 
 
-# Fact sentences (N per law, cost statistic, repetitions) for HARDWARE.md in paper mode.
+# Fact sentences (N per law, cost statistic, repetitions) for HARDWARE.md.
 def _num(v):
     return f"{int(v):,}".replace(",", " ")
 
@@ -425,13 +397,13 @@ def _pass_sentence(rows):
 
 
 def _facts(*parts):
-    """Sentences for the figure's section written by write_hardware (paper mode)."""
+    """Sentences for the figure's section written by write_hardware."""
     text = " ".join(p for p in parts if p)
-    if style.PAPER and text:
+    if text:
         style.record_fact(text)
 
 
-# Paper-mode captions (captions.tex): the argument conventions as they name them.
+# Captions (captions.tex): the argument conventions as they name them.
 # CONV, CONV_SUPPLIED, _obtained, _and and _size_set are also used by paper_tables.py.
 CONV ={"z_nu": r"$(z,\nu)$", "h_nu_s": r"$(h,\nu,s)$"}
 CONV_SUPPLIED = {"z_nu": r"with $(z,\nu)$ supplied",
@@ -440,9 +412,8 @@ _SIZE_SET = {"size_random": "random", "size_half": r"half-integer $\nu$"}
 
 
 def _caption(*sentences):
-    """The figure's caption (paper mode); nothing is drawn on the canvas."""
-    if style.PAPER:
-        style.paper_caption(*sentences)
+    """The figure's caption (captions.tex); nothing is drawn on the canvas."""
+    style.paper_caption(*sentences)
 
 
 def _obtained(arch, gpu=False):
@@ -579,7 +550,7 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
                   f"   [{arch}, {scope} scope, library = {lib_backend}]")
     _foot = style.footer(
         fig, [handles[k] for k in order if k in handles] + _gh,
-        [k for k in order if k in handles] + _gl, ncol=4, width=90, note=
+        [k for k in order if k in handles] + _gl, ncol=4, note=
         "one panel = one dataset = one $N$:  each implementation sits at a fixed "
         "cost and the bar is its error distribution, not a sweep over $N$.  "
         "A row marked non-finite is scored over fewer points, so its maximum "
@@ -601,170 +572,6 @@ def fig_cost_accuracy_plane(plt, acc, sup, outdir, stamp, family="z_nu",
              "The library is shown with its %s backend." % lib_backend,
              _obtained(arch))
     return _finish(fig, outdir, f"fig-paper-cost-accuracy-{family}-{scope}", stamp)
-
-
-def fig_attribution(plt, acc, outdir, stamp, family="z_nu", arch=""):
-    """Maximum ULP and median cost per law of each library backend, side by side."""
-    acc = [r for r in acc if r["family"] == family and scope_of(r) == "call"]
-    if not acc:
-        return _skip(f"attribution-{family}", "no library accuracy rows")
-    laws = [l for l in ACC_LAWS if any(r["law"] == l for r in acc)]
-    backs = [b for b in style.BACKEND_ORDER
-             if any(r["backend"] == b for r in acc)]
-    if len(backs) < 2 or not laws:
-        return _skip(f"attribution-{family}",
-                     f"needs >=2 library backends to attribute a difference to, "
-                     f"found {len(backs)} ({', '.join(backs) or 'none'})"
-                     if len(backs) < 2 else
-                     f"no rows for family {family}")
-    by = {(r["backend"], r["law"]): r for r in acc}
-
-    fig, (axa, axs) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.3))
-    x = list(range(len(laws)))
-    for b in backs:
-        c = style.BACKEND_COLOR.get(b, "0.4")
-        m = style.BACKEND_MARK.get(b, "o")
-        ya = [_f(by[(b, l)], "u_max") if (b, l) in by else float("nan")
-              for l in laws]
-        ys = [_f(by[(b, l)], "ns_med") if (b, l) in by else float("nan")
-              for l in laws]
-        # categorical x axis: the faint connector only groups one backend
-        axa.plot(x, ya, marker=m, ms=5.0, color=c, lw=0.5, alpha=0.45,
-                 label=BACKEND_LABEL.get(b, b))
-        axs.plot(x, ys, marker=m, ms=5.0, color=c, lw=0.5, alpha=0.45)
-    for ax, lab in ((axa, "Maximum ULP error"), (axs, "Cost  [ns / element]")):
-        ax.set_yscale("log")
-        ax.set_xticks(x)
-        ax.set_xticklabels([LAW_LABEL.get(l, l) for l in laws],
-                           rotation=35, ha="right")
-        ax.set_ylabel(lab)
-    style.refline(axa, style.ULP_ONE, "1 ULP")
-    axa.set_title(style.panel_title("Accuracy"), pad=4)
-    axs.set_title(style.panel_title("Cost"), pad=4)
-    _top = _title(fig, "Worst-case error and cost by backend"
-                  f"   [{arch}, {FAMILY_LABEL.get(family, family)}]")
-    # the backend labels are long: two columns
-    _foot = style.footer(fig, *axa.get_legend_handles_labels(), ncol=2)
-    fig.tight_layout(rect=(0, _foot, 1, _top))
-    _rows = [r for r in (acc or []) if r.get("family") == family]
-    _facts(_acc_sentence(_rows, laws, "the maximum ULP error"),
-           _cost_sentence(_rows, "median", laws))
-    _caption("Worst-case accuracy and runtime cost of the library backends for "
-             "the %s datasets." % CONV.get(family, family),
-             "The left panel shows the maximum ULP error and the right panel "
-             "the median cost per element, in nanoseconds, for each dataset; both "
-             "vertical axes are logarithmic.",
-             _obtained(arch))
-    return _finish(fig, outdir, f"fig-paper-attribution-{family}", stamp)
-
-
-def fig_worst_case_map(plt, acc, sup, outdir, stamp, family="z_nu", arch=""):
-    """Each row's worst point (`worst_arg`, `worst_nu`), one panel per supplier."""
-    _libbk = lib_backend_for([r for r in acc if r["family"] == family
-                              and scope_of(r) == "call"])
-    rows = [r for r in acc if r["family"] == family and scope_of(r) == "call"
-            and r["backend"] == _libbk]
-    lib = [dict(r, supplier=style.LIB) for r in rows]
-    ext = list(best_assembly([r for r in sup if r["family"] == family
-                              and scope_of(r) == "call"]).values())
-    allr = lib + ext
-    sups = [style.LIB] + sorted({r["supplier"] for r in ext})
-    pts = [(r, _f(r, "worst_arg"), _f(r, "worst_nu"), _f(r, "u_max"))
-           for r in allr]
-    pts = [p for p in pts if _ok(p[1]) and _ok(p[2]) and p[1] > 0 and p[2] > 0]
-    if not pts:
-        return _skip(f"worst-case-map-{family}",
-                     "no row carries a worst-point coordinate "
-                     "(worst_nu / worst_arg) for this family")
-
-    import matplotlib.colors as mcolors
-    norm = mcolors.LogNorm(vmin=1.0, vmax=CATASTROPHIC)
-    # three columns, so that each panel is wide enough at print width; constrained
-    # layout places the shared colour bar.
-    ncol = 3
-    nrow = (len(sups) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 1.95 * nrow + 0.5),
-                             sharex=True, sharey=True, squeeze=False,
-                             layout="constrained")
-    axes = axes.ravel()
-    sc = None
-    worst = []                       # (axes, its worst point), labelled below
-    for ax, s in zip(axes, sups + [None] * (len(axes) - len(sups))):
-        if s is None:
-            fig.delaxes(ax)          # see the note in fig_cost_accuracy_plane
-            continue
-        mine = [p for p in pts if p[0]["supplier"] == s]
-        if mine:
-            sc = ax.scatter([p[1] for p in mine], [p[2] for p in mine],
-                            c=[min(p[3], CATASTROPHIC) for p in mine],
-                            norm=norm, cmap="YlOrRd", s=38,
-                            edgecolors="0.25", linewidths=0.5, zorder=3)
-            # only the panel's worst point is labelled, so labels cover no data
-            worst.append((ax, max(mine, key=lambda p: p[3])))
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_title(s + (" (this library)" if s == style.LIB else ""), pad=3,
-                     fontweight="bold" if s == style.LIB else "normal",
-                     color=style.supplier_color(s) if s == style.LIB else "black")
-    # fewer decades labelled: one label per decade or two is too dense at print
-    # width (the axes are shared, so their tickers are too)
-    from matplotlib.ticker import LogLocator
-    axes[0].xaxis.set_major_locator(LogLocator(numticks=4))
-    axes[0].yaxis.set_major_locator(LogLocator(numticks=4))
-    # Placed once the log scales and limits are final: right of centre the label goes
-    # left of the point, near the top under it, so it stays inside the panel.
-    _x0, _x1 = (math.log10(v) for v in axes[0].get_xlim())
-    _y0, _y1 = (math.log10(v) for v in axes[0].get_ylim())
-    for ax, w in worst:
-        _right = (math.log10(w[1]) - _x0) / (_x1 - _x0) > 0.5
-        _high = (math.log10(w[2]) - _y0) / (_y1 - _y0) > 0.85
-        ax.annotate(LAW_LABEL.get(w[0]["law"], w[0]["law"])
-                    .replace("$", "").replace("\\nu", r"$\nu$"),
-                    (w[1], w[2]), textcoords="offset points",
-                    xytext=(-5 if _right else 5, -4 if _high else 4),
-                    fontsize=style.FS_ANNOT,
-                    ha="right" if _right else "left",
-                    va="top" if _high else "baseline",
-                    color="0.20", fontweight="bold", annotation_clip=False)
-    # `worst_arg` is z for z_nu and h for h_nu_s (s is not stored in the row)
-    _argname = "h" if family == "h_nu_s" else "z"
-    _label_every_panel(axes[:len(sups)])
-    _label_lowest(axes, len(sups), ncol, "$%s$ at the worst point" % _argname)
-    for i in range(0, len(sups), ncol):
-        axes[i].set_ylabel(r"$\nu$ at the worst point")
-    if sc is not None:
-        cb = fig.colorbar(sc, ax=list(axes[:len(sups)]), aspect=40, pad=0.02,
-                          extend="max")
-        cb.set_label(r"ULP error at that point   (clamped at $10^6$)")
-    _top = _title(fig,
-                  "Location of each implementation's worst case in the " +
-                  (r"$(h,\nu)$ plane" if family == "h_nu_s" else r"$(z,\nu)$ plane")
-                  + f"   [{arch}, {FAMILY_LABEL.get(family, family)}]",
-                  reserve=True)
-    _cl = [p[3] for p in pts if _ok(p[3]) and p[3] >= CATASTROPHIC]
-    _foot = style.footer(fig, width=90, note=(
-            "%d of the %d worst points are past the top of the colour scale and "
-            "are drawn in the cap colour, the largest at $10^{%d}$ ULP; the "
-            "remaining %d are coloured by their true value"
-            % (len(_cl), len(pts), round(math.log10(max(_cl))),
-               len(pts) - len(_cl))) if _cl else None)
-    # constrained layout ignores figure text, so rect leaves out the note's strip;
-    # w_pad widens the side margins to make room for savefig's pad.
-    fig.get_layout_engine().set(rect=(0, _foot, 1, _top - _foot), w_pad=0.1)
-    _rows = [r for r in (acc or []) + (sup or []) if r.get("family") == family]
-    _facts(_acc_sentence(_rows, ACC_LAWS, "each marker is the point of maximum "
-                         "ULP error"))
-    _caption("Location of the worst case of each implementation for the %s "
-             "datasets." % CONV.get(family, family),
-             "Each marker is the point of maximum ULP error on one dataset, "
-             "placed in the %s plane and coloured by its ULP error, with the "
-             "colour scale capped at $10^6$ ULP; the largest value of each panel "
-             "is labelled with its dataset."
-             % (r"$(h,\nu)$" if family == "h_nu_s" else r"$(z,\nu)$"),
-             ("The library is shown with its %s backend." % _libbk) if _libbk
-             else "",
-             _obtained(arch))
-    return _finish(fig, outdir, f"fig-paper-worst-case-map-{family}", stamp)
 
 
 def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
@@ -888,8 +695,8 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
     h, lb = axes[0].get_legend_handles_labels()
     _top = _title(fig, "Worst-case error by assembly   "
                   f"[{arch}{where}, {FAMILY_LABEL.get(family, family)}]")
-    # the selection rule; recorded for HARDWARE.md in paper mode
-    _foot = style.footer(fig, h, lb, ncol=3, width=90, note=
+    # the selection rule; recorded for HARDWARE.md
+    _foot = style.footer(fig, h, lb, ncol=3, note=
              "%d of the %d accuracy datasets, at most two in each direction: those "
              "with the largest error ratio in favour of another assembly over "
              "direct, and those with the largest ratio in favour of direct, "
@@ -1028,9 +835,9 @@ def fig_ladder(plt, lad, slad, outdir, stamp, law="size_random",
     style.legend_below(ax, y=-0.17, ncol=3, handles=_lh, labels=_ll)
     ax.set_title(style.fig_title(
                  f"Cost against problem size, {_law_title(law)}"
-                 f"   [{arch}, {FAMILY_LABEL.get(family, family)}]", width=78),
+                 f"   [{arch}, {FAMILY_LABEL.get(family, family)}]"),
                  fontsize=8.8)
-    fig.tight_layout(rect=(0, 0.075 if style.PAPER else 0.115, 1, 1))
+    fig.tight_layout(rect=(0, 0.075, 1, 1))
     _facts(_ladder_phrase([r for r in lad if r.get("law") == law
                            and r.get("family") == family]) + ".",
            "Library: the median over %s of one call, with the workspace built inside "
@@ -1185,7 +992,7 @@ def fig_workspace(plt, lad, outdir, stamp, law="size_random", family="z_nu",
     _top = _title(fig,
                   f"Runtime cost with a new and a reused workspace, and the allocation overhead   [{arch}, "
                   f"{_law_title(law)}, {FAMILY_LABEL.get(family, family)}]")
-    _foot = style.footer(fig, _h, _l, note=_note, ncol=4, width=90)
+    _foot = style.footer(fig, _h, _l, note=_note, ncol=4)
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _lr = [r for r in lad if r.get("law") == law and r.get("family") == family]
     _facts(_ladder_phrase(_lr) + ".",
@@ -1218,76 +1025,6 @@ def fig_workspace(plt, lad, outdir, stamp, law="size_random", family="z_nu",
     return _finish(fig, outdir, f"fig-paper-workspace-{law}-{family}", stamp)
 
 
-def fig_family_delta(plt, acc, outdir, stamp, backend=None, arch="",
-                     require_multi_backend=False):
-    """Maximum ULP and cost per law of one backend, z supplied against z computed."""
-    _pool = [r for r in acc if scope_of(r) == "call"]
-    backend = lib_backend_for(_pool, prefer=backend)
-    if backend is None:
-        return _skip("convention", "no library accuracy rows at call scope")
-    rows = [r for r in _pool if r["backend"] == backend]
-    # set by the driver when the CPU rows are the GPU pipeline's one-backend stage
-    if require_multi_backend and len({r["backend"] for r in acc}) < 2:
-        return _skip("convention",
-                     "the CPU rows of this machine are the GPU pipeline's "
-                     "one-backend CPU stage; the figure is drawn from a "
-                     "machine with the full CPU stage")
-    by = {(r["family"], r["law"]): r for r in rows}
-    laws = [l for l in ACC_LAWS
-            if ("z_nu", l) in by and ("h_nu_s", l) in by]
-    if not laws:
-        return _skip("convention",
-                     "no law carries both argument conventions (z_nu and "
-                     "h_nu_s), which the figure compares")
-    fig, (axa, axb) = plt.subplots(1, 2, figsize=(style.TEXT_W, 3.3))
-    x = list(range(len(laws)))
-    for fam, col in (("z_nu", "#0353a4"), ("h_nu_s", "#c1121f")):
-        axa.plot(x, [_f(by[(fam, l)], "u_max") for l in laws],
-                 marker=style.FAMILY_MARK[fam], ls=style.FAMILY_LS[fam],
-                 color=col, ms=4.6, lw=1.3, label=FAMILY_PLOT_LABEL[fam])
-        axb.plot(x, [_f(by[(fam, l)], "ns_med") for l in laws],
-                 marker=style.FAMILY_MARK[fam], ls=style.FAMILY_LS[fam],
-                 color=col, ms=4.6, lw=1.3)
-    ratio = [_f(by[("h_nu_s", l)], "u_max") / _f(by[("z_nu", l)], "u_max")
-             if _f(by[("z_nu", l)], "u_max") else float("nan") for l in laws]
-    for i, rr in enumerate(ratio):
-        if _ok(rr):
-            # above the higher of the two markers
-            axa.annotate(f"{rr:.1f}x", (i, max(_f(by[("h_nu_s", laws[i])], "u_max"),
-                                               _f(by[("z_nu", laws[i])], "u_max"))),
-                         textcoords="offset points", xytext=(0, 6),
-                         fontsize=style.FS_ANNOT, ha="center", color="0.35")
-    for ax, lab in ((axa, "Maximum ULP error"), (axb, "Cost  [ns / element]")):
-        ax.set_yscale("log")
-        ax.set_xticks(x)
-        ax.set_xticklabels([LAW_LABEL.get(l, l) for l in laws],
-                           rotation=35, ha="right")
-        ax.set_ylabel(lab)
-    style.refline(axa, style.ULP_ONE, "1 ULP")
-    # plain-number tick labels; minor ticks are labelled on a short axis (minor_thresholds)
-    from matplotlib.ticker import LogFormatter
-    axb.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
-    axb.yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False,
-                                               minor_thresholds=(2, 0.5)))
-    axa.set_title(style.panel_title("Accuracy"), pad=4)
-    axb.set_title(style.panel_title("Cost"), pad=4)
-    _top = _title(fig, "The two argument conventions, same backend   "
-                  f"[{arch}, {backend}]")
-    _foot = style.footer(fig, *axa.get_legend_handles_labels())
-    fig.tight_layout(rect=(0, _foot, 1, _top))
-    _rows = [r for r in (acc or []) if r.get("law") in laws]
-    _facts(_acc_sentence(_rows, laws, "the maximum ULP error"),
-           _cost_sentence(_rows, "median", laws))
-    _caption("Effect of the argument convention on the %s backend." % backend,
-             "The left panel shows the maximum ULP error and the right panel "
-             "the median cost per element, in nanoseconds, for each dataset with "
-             r"$(z,\nu)$ supplied and with $(h,\nu,s)$ supplied and $z$ computed; "
-             "the annotations give the ratio of the maximum with $z$ computed "
-             "to that with $z$ supplied.",
-             _obtained(arch))
-    return _finish(fig, outdir, f"fig-paper-convention-{backend}", stamp)
-
-
 def _tukey_glyph(ax, i, c, q1, med, q3, wl, wh):
     """One box at x = `i`: interquartile rectangle, median bar, capped whiskers."""
     from matplotlib.patches import Rectangle
@@ -1301,11 +1038,6 @@ def _tukey_glyph(ax, i, c, q1, med, q3, wl, wh):
     for cap in (wl, wh):
         ax.plot([i - 0.12, i + 0.12], [cap, cap], "-", color=c, lw=0.9,
                 zorder=2)
-
-
-def _nearest_rank(v, p):
-    """Nearest-rank quantile `p` of the sorted list `v`: v[ceil(p * len(v)) - 1]."""
-    return v[max(0, int(math.ceil(p * len(v))) - 1)]
 
 
 def _box_modes_at(ax, rows, modes, n, raw):
@@ -1365,7 +1097,7 @@ def _box_modes_at(ax, rows, modes, n, raw):
     ax.set_xticklabels(modes)
     ax.set_ylabel("Cost  [ns / element]")
     ax.grid(True, axis="y", alpha=0.25, lw=0.5)
-    # box-plot key on the canvas (paper mode moves notes to HARDWARE.md)
+    # box-plot key on the canvas (the notes go to HARDWARE.md)
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     _h = [Patch(facecolor="0.45", alpha=0.55, edgecolor="0.45", lw=0.9),
@@ -1376,164 +1108,6 @@ def _box_modes_at(ax, rows, modes, n, raw):
     _l = ["interquartile range", "median", "whisker (1.5 IQR)", "outlier",
           "off-axis repetitions"]
     style.legend_below(ax, y=-0.2, handles=_h, labels=_l, ncol=3)
-
-
-def fig_gpu_modes_suppliers(plt, gsup, outdir, stamp, family="z_nu", arch=""):
-    """Call cost per device supplier, one box per transfer strategy over the laws."""
-    sup_modes = defaultdict(dict)        # {supplier: {mode: {law: ns}}}
-    law_n = defaultdict(set)
-    # each supplier on each law in the assembly best_assembly selects from the
-    # kernel-scope accuracy rows, as in the device tables
-    chosen = {(s, l): r.get("backend")
-              for (s, _fam, l), r in best_assembly(
-                  [r for r in (gsup or []) if scope_of(r) == "kernel"
-                   and r.get("family") == family]).items()}
-    for r in (gsup or []):
-        if r.get("family") != family or scope_of(r) != "call":
-            continue
-        bk = r.get("backend") or ""
-        if "/" not in bk:
-            continue
-        asm, mode = bk.split("/", 1)
-        want = chosen.get((r["supplier"], r["law"]))
-        if want and asm != want:
-            continue
-        v = _f(r, "ns_med")
-        if not _ok(v):
-            continue
-        cur = sup_modes[r["supplier"]].setdefault(mode, {})
-        k = r["law"]
-        if k not in cur or v < cur[k]:
-            cur[k] = v
-        np_ = _i(r, "ns_points") or _i(r, "n")
-        if np_:
-            law_n[k].add(np_)
-    sup_modes = {k: v for k, v in sup_modes.items() if len(v) > 1}
-    if not sup_modes:
-        return _skip(f"gpu-modes-suppliers-{family}",
-                     "no device supplier rows under more than one transfer "
-                     "strategy at call scope")
-    MODE_ORDER = ["sync", "async-direct", "async-ring", "async-mapped"]
-    snames = sorted(sup_modes, key=lambda k: (style.LIB not in k, k))
-    allm = [m for m in MODE_ORDER if any(m in v for v in sup_modes.values())] \
-        + sorted({m for v in sup_modes.values() for m in v} - set(MODE_ORDER))
-    ncol = min(3, len(snames))
-    nrow = -(-len(snames) // ncol)
-    fig, grid = plt.subplots(nrow, ncol, figsize=(style.TEXT_W, 2.6 * nrow + 0.8),
-                             sharey=True, sharex=True, squeeze=False)
-    flat = [a for row in grid for a in row]
-    for a in flat[len(snames):]:
-        a.set_visible(False)
-    axes = flat[:len(snames)]
-    nl = set()
-    lib_best = None
-    for si, sname in enumerate(snames):
-        ax = axes[si]
-        per = sup_modes[sname]
-        laws_here = set.intersection(*[set(d) for d in per.values()]) \
-            if per else set()
-        nl |= laws_here
-        for mi, m in enumerate(allm):
-            if m not in per:
-                continue
-            pts = [(per[m][l], l) for l in laws_here if l in per[m]]
-            if not pts:
-                continue
-            v = sorted(p[0] for p in pts)
-            q1, med, q3 = (_nearest_rank(v, 0.25), _nearest_rank(v, 0.5),
-                           _nearest_rank(v, 0.75))
-            # fences in log space, matching the logarithmic axis
-            lq1, lq3 = math.log10(q1), math.log10(q3)
-            f_lo = 10 ** (lq1 - 1.5 * (lq3 - lq1))
-            f_hi = 10 ** (lq3 + 1.5 * (lq3 - lq1))
-            inside = [x for x in v if f_lo <= x <= f_hi] or [q1, q3]
-            c = style.mode_color(m)
-            _tukey_glyph(ax, mi, c, q1, med, q3, min(inside), max(inside))
-            srt = sorted(pts)
-            for k, (x, l) in enumerate(srt):
-                dx = (k - (len(srt) - 1) / 2.0) * (0.36 / max(1, len(srt) - 1))
-                out = x < f_lo or x > f_hi
-                ax.plot([mi + dx], [x], ls="none", marker="o",
-                        ms=3.4 if out else 2.2,
-                        mfc="none" if out else "0.15",
-                        mec=c if out else "0.15", mew=0.8,
-                        alpha=1.0 if out else 0.55, zorder=6)
-                if out:
-                    # a high outlier is named above, a low one beside it: under it
-                    # the name would reach into the tick labels
-                    hi_ = x > f_hi
-                    ax.annotate(LAW_LABEL.get(l, l), (mi + dx, x),
-                                textcoords="offset points",
-                                xytext=(0, 4) if hi_ else (5, 0),
-                                ha="center" if hi_ else "left",
-                                va="bottom" if hi_ else "center",
-                                fontsize=style.FS_ANNOT, color="0.25")
-            if style.LIB in sname:
-                lib_best = med if lib_best is None else min(lib_best, med)
-        ax.set_xticks(range(len(allm)))
-        ax.set_xticklabels(allm, rotation=35, ha="right")
-        ax.set_xlim(-0.6, len(allm) - 0.4)
-        ax.set_title(sname, pad=3)
-        ax.grid(True, axis="y", alpha=0.25, lw=0.5, which="both")
-    axes[0].set_yscale("log")
-    # plain-number tick labels; minor ticks are labelled on a short axis (minor_thresholds)
-    from matplotlib.ticker import LogFormatter
-    axes[0].yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
-    axes[0].yaxis.set_minor_formatter(LogFormatter(labelOnlyBase=False,
-                                                   minor_thresholds=(2, 0.5)))
-    for r_ in range(nrow):
-        grid[r_][0].set_ylabel("Cost of one call\n[ns / element]")
-    _label_every_panel(axes)
-    if lib_best is not None:
-        for ax in axes:
-            ax.axhline(lib_best, color=style.supplier_color(style.LIB),
-                       ls="--", lw=0.8, zorder=1)
-    ns = sorted({n for l in nl for n in law_n.get(l, ())})
-    _fmt = lambda n: f"{int(n):,}".replace(",", " ")
-    ntxt = (("$N$ = " + _fmt(ns[0])) if len(ns) == 1 else
-            ("$N$ = %s to %s, one $N$ per dataset" % (_fmt(ns[0]), _fmt(ns[-1]))))
-    from matplotlib.patches import Patch
-    from matplotlib.lines import Line2D
-    _h = [Patch(facecolor="0.45", alpha=0.55, edgecolor="0.45", lw=0.9),
-          Line2D([], [], color="0.10", lw=1.4),
-          Line2D([], [], color="0.45", lw=0.9),
-          Line2D([], [], ls="none", marker="o", ms=2.6, mfc="0.15", mec="0.15",
-                 alpha=0.55),
-          Line2D([], [], ls="none", marker="o", ms=4, mfc="none", mec="0.45"),
-          Line2D([], [], color=style.supplier_color(style.LIB), ls="--",
-                 lw=0.8)]
-    _l = ["interquartile range over the %d datasets" % len(nl), "median",
-          "whisker (1.5 IQR, log scale)", "one dataset", "outlier dataset (named)",
-          f"{style.LIB_CUDA}, best strategy median"]
-    _top = _title(fig, "Transfer strategy per device implementation, whole call   "
-                  f"[{arch}, {FAMILY_LABEL.get(family, family)}]")
-    _foot = style.footer(fig, _h, _l, ncol=2, width=90, note=(
-        "per supplier and strategy: one box over the per-dataset medians of the "
-        "accuracy datasets at one $N$ each (" + ntxt.replace("$N$ = ", "") + "), "
-        "transfers included; not the ladder, whose top rung not every external "
-        "reaches"))
-    fig.tight_layout(rect=(0, _foot, 1, _top))
-    _rows = [r for r in (gsup or []) if r.get("family") == family
-             and scope_of(r) == "call"]
-    _facts("Per dataset, cost is the median over %s of one call on all $N$ "
-           "points of the dataset.  Each box summarises those per-dataset medians "
-           "for one supplier and transfer strategy: box = interquartile "
-           "range (nearest rank), bar = median, whiskers = 1.5 interquartile "
-           "ranges in log space, and every dataset is drawn as a dot, outliers "
-           "named.  The dashed line is the library's lowest median over the "
-           "strategies." % _reps_phrase(_rows))
-    _caption("Effect of the transfer strategy on the GPU call cost of each "
-             "implementation for the %s datasets." % CONV.get(family, family),
-             "Each panel shows one implementation, and each box summarises its "
-             "median cost per element over the datasets, transfers included, "
-             "under one transfer strategy%s." % (
-                 "; the dashed line marks the lowest median of %s over the "
-                 "strategies" % style.LIB_CUDA if lib_best is not None else ""),
-             "Boxes span the interquartile range, bars mark the median, whiskers "
-             "extend to 1.5 interquartile ranges on the logarithmic scale, and "
-             "outlying datasets are named.",
-             _obtained(arch, gpu=True))
-    return _finish(fig, outdir, f"fig-paper-gpu-modes-suppliers-{family}", stamp)
 
 
 def fig_gpu_modes(plt, glad, cpu_lad, outdir, stamp, law="size_random",
@@ -1595,8 +1169,7 @@ def fig_gpu_modes(plt, glad, cpu_lad, outdir, stamp, law="size_random",
     if not cpu_pts:
         style.note_below(fig,
                 "no same-machine CPU ladder for this convention in this run, "
-                "so no CPU curve is drawn",
-                color="#b3261e")
+                "so no CPU curve is drawn")
     if cpu_pts:
         ax.plot([x for x, _ in cpu_pts], [y for _, y in cpu_pts], marker="D",
                 ms=4.0, lw=1.7, color=style.BACKEND_COLOR.get(backs[0], "#c1121f"),
@@ -1659,8 +1232,7 @@ def fig_gpu_modes(plt, glad, cpu_lad, outdir, stamp, law="size_random",
                     if law.startswith("size_half") else "")
             style.note_below(fig,
                     "the CPU cost is below the device cost at every rung of "
-                    "the ladder; the curves do not cross" + _why,
-                    color=style.BACKEND_COLOR.get("avx512", "#c1121f"))
+                    "the ladder; the curves do not cross" + _why)
     # lower panel: the library's strategies at the top rung, boxed
     if axs is not None:
         _box_modes_at(axs, rows, modes, top_n, raw)
@@ -1669,11 +1241,11 @@ def fig_gpu_modes(plt, glad, cpu_lad, outdir, stamp, law="size_random",
         style.note_below(fig,
             "lower: one box per transfer strategy over the repetitions at the "
             "ladder's largest $N$, library only (the externals do not all reach "
-            "that rung; their strategies are compared in a separate figure). "
+            "that rung). "
             "Box = interquartile range, black tick = median, whiskers to the "
             "furthest repetition inside 1.5 IQR, hollow circle = outlier; a "
             "repetition above the axis is a triangle at its top edge, with "
-            "its value", y=0.012)
+            "its value")
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
     ax.set_xlabel("$N$  [elements per call]")
@@ -1684,10 +1256,10 @@ def fig_gpu_modes(plt, glad, cpu_lad, outdir, stamp, law="size_random",
                  "Cost against problem size, device transfer strategies and "
                  "the host CPU   "
                  f"[{arch}, {_law_title(law)}, "
-                 f"{FAMILY_LABEL.get(family, family)}]", width=78))
+                 f"{FAMILY_LABEL.get(family, family)}]"))
     # tight_layout makes room for the keys under each panel but not for the notes
     # (spacing via h_pad: a gridspec given its own hspace is skipped by tight_layout)
-    fig.tight_layout(rect=(0, 0.0 if style.PAPER else 0.12, 1, 1), h_pad=1.5)
+    fig.tight_layout(rect=(0, 0.0, 1, 1), h_pad=1.5)
     _facts("Size ladder: " + _ladder_phrase(rows) + ", dataset " + _law_title(law)
            + "; each point is the median over %s of one call, transfers "
            "included" % _reps_phrase(rows)
@@ -1794,7 +1366,7 @@ def fig_gpu_plane(plt, gsup, outdir, stamp, family="z_nu", arch=""):
     _top = _title(fig, f"Device cost against accuracy, kernel scope   [{arch}, "
                   f"{FAMILY_LABEL.get(family, family)}]")
     _foot = style.footer(fig, [handles[k] for k in order] + _gh,
-                         list(order) + _gl, ncol=3, width=90, note=
+                         list(order) + _gl, ncol=3, note=
              "one panel = one dataset = one $N$:  each kernel sits at a fixed cost, "
              "and the bar is its error distribution --- "
              "filled marker = median ULP, tick = max, "
@@ -1851,10 +1423,8 @@ def fig_gpu_boost_shortcut(plt, rows, outdir, stamp, arch=""):
         return _skip("gpu-boost-shortcut", "no row matches a known device/variant")
     # Three panels: 2 x 2 with the key in the fourth cell; fewer: one row, key below.
     _grid = len(panels) == 3
-    # development mode draws the long note under the panels: more height for it
     fig, grid = plt.subplots(2 if _grid else 1, 2 if _grid else len(panels),
-                             figsize=(style.TEXT_W, (4.9 if _grid else 3.1)
-                                      + (0.0 if style.PAPER else 1.4)),
+                             figsize=(style.TEXT_W, 4.9 if _grid else 3.1),
                              sharex=True, sharey=True, squeeze=False)
     cells = list(grid.ravel())
     axes = cells[:len(panels)]
@@ -1925,7 +1495,7 @@ def fig_gpu_boost_shortcut(plt, rows, outdir, stamp, arch=""):
                    title=r"Offset $\delta=\nu-2.5$",
                    title_fontsize=style.FS_LEGEND)
         _key = (None, None)
-    _foot = style.footer(fig, *_key, ncol=3, width=90, note=
+    _foot = style.footer(fig, *_key, ncol=3, note=
         r"one curve per offset $\delta=\nu-2.5$, scored on $K_\nu$ itself against arb "
         r"($\geq$110 bits; no covariance assembly).  The short-cut switches on once "
         r"$z\gtrsim\delta/(5\cdot10^{-5})$ in double, and the error then falls as "
@@ -2013,11 +1583,11 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
         ax.set_yscale("log")
         ax.set_xlabel(f"{na}   {lab}")
         ax.set_ylabel(f"{nb}   {lab}")
-    # paper mode: the count goes to HARDWARE.md and the panel keeps a plain title
+    # the count goes to HARDWARE.md and the panel keeps a plain title
     _same = (f"accuracy: {same} of {len(keys)} rows identical in every "
              f"accuracy column")
     _facts(_same)
-    axl.set_title(style.panel_title("accuracy" if style.PAPER else _same), pad=4)
+    axl.set_title(style.panel_title("accuracy"), pad=4)
     _note = None
     if differing:
         movers = sorted({c for k in keys if not ident[k]
@@ -2036,7 +1606,7 @@ def fig_machine_independence(plt, runs_acc, outdir, stamp):
         + [("o", True, "differs between the machines")])
     _top = _title(fig, "Worst-case error and cost on two CPU architectures")
     _foot = style.footer(fig, hs + _gh, [h.get_label() for h in hs] + _gl,
-                         ncol=4, width=90, note=_note, note_color="0.25")
+                         ncol=4, note=_note)
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _facts(r"Circles are the $(z,\nu)$ supplied convention, squares the "
            r"$(h,\nu,s)$ convention with $z$ computed; the colour is the "
@@ -2231,11 +1801,6 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch="",
     return _finish(fig, outdir, f"fig-paper-levin-{device}-{backend}-{family}", stamp)
 
 
-# The twin's definition, shared with the fold tables (paper_tables.py).
-FOLD_TWIN_SENTENCE = (
-    "Unfolded twin: the scalar backend with the Mat\\'ern prefactor applied to "
-    "$K_\\nu(z)$ outside the kernels, directly or through exp-log.")
-
 # The twin in detail, for HARDWARE.md and the fold tables' README sections; the math
 # uses only constructs that paper_tables._demath turns into plain text.
 _FOLD_TWIN_DETAIL = (
@@ -2259,7 +1824,8 @@ def fig_fold(plt, fold, outdir, stamp, arch="", family="z_nu"):
     sub = [r for r in rows if r.get("family") == family]
     if not sub:
         return _skip(name, f"no {family} rows in the prefactor-fold stage")
-    # the control (folded source built as the twin) is not drawn; see tab-fold-cpu
+    # the control (folded source built as the twin) is not drawn; it is the run's
+    # fold_xcheck (run_benchmark.sh)
     arms =[a for a in style.FOLD_ARMS if a != "scalar-control"
             and any(r.get("backend") == a for r in sub)]
     METRICS = (("u_med", "Median error (ULP)"),
@@ -2342,33 +1908,6 @@ def fig_fold(plt, fold, outdir, stamp, arch="", family="z_nu"):
              "drawn in the hatched band.",
              _obtained(arch))
     return _finish(fig, outdir, f"fig-paper-fold-{family}", stamp)
-
-
-def fig_fold_ecdf(plt, fold, outdir, stamp, family="z_nu", arch=""):
-    """`_accuracy_ecdf` for the folded scalar backend and its twins (not the control)."""
-    # The control is not drawn: its ULP histogram equals the scalar backend's.
-    rows = [r for r in fold if r.get("family") == family
-            and (r.get("device") or "cpu").strip() == "cpu"]
-    names, bylaw = [], {}
-    for a in ("scalar", "scalar-unfolded-direct", "scalar-unfolded-explog"):
-        got = {r["law"]: r for r in rows if r.get("backend") == a
-               and r.get("law") in ACC_LAWS}
-        if got:
-            names.append(style.FOLD_LABEL[a])
-            for law, r in got.items():
-                bylaw.setdefault(law, {})[style.FOLD_LABEL[a]] = r
-    stem = f"fold-ecdf-{family}"
-    if style.FOLD_LABEL["scalar"] not in names or len(names) < 2:
-        return _skip(stem, f"no prefactor-fold rows for family {family} with the "
-                           "scalar backend and a twin")
-    return _accuracy_ecdf(
-        plt, names, bylaw, outdir, f"fig-paper-fold-ecdf-{family}",
-        f"Prefactor folded or applied outside: share of points at or above each "
-        f"ULP error, by dataset, {FAMILY_LABEL.get(family, family)}"
-        f"   [{arch}, scalar backend]", stamp, lead=style.FOLD_LABEL["scalar"],
-        cap_of=("scalar backend with the Mat\\'ern prefactor folded into the "
-                "kernels and for its unfolded twins, which apply the prefactor "
-                "directly and through exp-log,", family, arch, False))
 
 
 def thread_integrity(thr, family=None):
@@ -2563,9 +2102,9 @@ def fig_threads_combined(plt, thr, outdir, stamp, arch="", family="z_nu"):
                  "these rows do not carry"))
     if key is not None:
         _key_cell(key, _h, _l, ncol=2)
-        _foot = style.footer(fig, width=90, note=_note)
+        _foot = style.footer(fig, note=_note)
     else:
-        _foot = style.footer(fig, _h, _l, ncol=4, width=90, note=_note)
+        _foot = style.footer(fig, _h, _l, ncol=4, note=_note)
     fig.tight_layout(rect=(0, _foot, 1, _top))
     _npt = sorted({_i(r, "n_per_thread") for r in fam_rows if _i(r, "n_per_thread")})
     _tl = sorted({r.get("law") for r in fam_rows if r.get("law")})
@@ -2738,10 +2277,6 @@ def _dist_yaxis(ax, names):
     ax.set_yticklabels([names[len(names) - 1 - k] for k in range(len(names))])
 
 
-# left edge of the offset axis, below any expected interquartile range
-_OFFSET_FLOOR = 1e-4
-
-
 def _widest_band_gap(ends):
     """Largest ratio between adjacent cost bands of `ends` ({series: values per second at
     the largest thread count}); None with fewer than three series or two bands."""
@@ -2776,12 +2311,6 @@ def _cost_clusters(order, cost, gap=0.5, span=1.0):
             out.append((start, i - 1, lo, hi))
             start = i
     return out
-
-
-def _fmt_ns(v):
-    if v >= 1000.0:
-        return "%.1f us" % (v / 1000.0)
-    return "%.0f ns" % v if v >= 10 else "%.1f ns" % v
 
 
 def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
@@ -2869,7 +2398,7 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
            "99th percentile", "99.9th percentile",
            "Maximum", "Non-finite on some points", "1 ULP"]
     _top = _title(fig, title)
-    _foot = style.footer(fig, _gh, _gl, ncol=3, width=90, note=
+    _foot = style.footer(fig, _gh, _gl, ncol=3, note=
              "the outlier reach is drawn only where points fell past the fence; "
              "a percentile at or above $10^{6}$ ULP is not drawn")
     fig.tight_layout(rect=(0, _foot, 1, _top))
@@ -2899,213 +2428,6 @@ def _accuracy_distribution(plt, names, bylaw, outdir, stem, title, stamp,
     return _finish(fig, outdir, stem, stamp)
 
 
-def _timing_distribution(plt, names, bylaw, reps, outdir, stem, title, stamp,
-                         device="cpu", lead=style.LIB, mode="absolute",
-                         cap_of=None):
-    """Cost over the timed repetitions per row, host and device: box from `ns_q1`,
-    `ns_med`, `ns_q3`; whiskers and outliers from `timing_raw.*` (BENCH_TIMING_RAW) if present."""
-    laws = _dist_laws(bylaw)
-    # one row order for all panels (shared y axis): median cost over the laws
-    med_cost = {}
-    for nm in names:
-        v = [_f(bylaw[l][nm], "ns_med") for l in laws
-             if nm in bylaw[l] and _ok(_f(bylaw[l][nm], "ns_med"))]
-        if v:
-            med_cost[nm] = sorted(v)[len(v) // 2]
-    names = sorted(names, key=lambda n: med_cost.get(n, float("inf")))
-    clusters = _cost_clusters(names, med_cost)
-    # one x scale per panel, so an outlier on one law does not compress the others
-    fig, axes = _dist_axes(plt, names, laws, sharex=False)
-    n_raw = 0
-    # one magnification factor for the whole figure, so spreads compare across panels
-    _figK = 10.0 if mode == "magnified" else 1.0
-    for ax, law in zip(axes, laws):
-        hi = 0.0
-        lo_seen = []
-        magK = _figK
-        for i, name in enumerate(names):
-            r = bylaw[law].get(name)
-            if r is None:
-                continue
-            y = len(names) - 1 - i
-            c = style.supplier_color(name)
-            is_lead = name == lead
-            z = 5 if is_lead else 3
-            mn, q1 = _f(r, "ns_min"), _f(r, "ns_q1")
-            med, q3 = _f(r, "ns_med"), _f(r, "ns_q3")
-            mx = _f(r, "ns_max")
-            if not (_ok(med) and _ok(mn) and mn > 0):
-                continue
-            # keyed on `ns_points` (not `n`) and on `_run`, see _reps_index
-            key =(r.get("_run"), (r.get("supplier") or "-"), law,
-                   r.get("backend"), _i(r, "ns_points"))
-            got = sorted(reps.get(key, []))
-
-            # x coordinate of a cost: "absolute" the cost, "percent" per cent and
-            # "offset" (log axis) the excess over the row's minimum, "magnified"
-            # the log distance from the median scaled by magK for every row
-            def _rel(v):
-                if mode == "absolute":
-                    return v
-                if mode == "percent":
-                    return 100.0 * (v / mn - 1.0)
-                if mode == "magnified":
-                    return med * math.exp(magK * math.log(v / med)) if (
-                        v > 0 and med > 0) else v
-                return max(v - mn, _OFFSET_FLOOR)
-
-            # Tukey: whiskers to the extreme samples inside q1 -/+ 1.5*IQR, the
-            # rest are outliers
-            iqr = (q3 - q1) if (_ok(q1) and _ok(q3)) else 0.0
-            f_lo, f_hi = (q1 - 1.5 * iqr), (q3 + 1.5 * iqr)
-            samples = [v for _, v in got] if got else []
-            if samples:
-                inside = [v for v in samples if f_lo <= v <= f_hi] or samples
-                w_lo, w_hi = min(inside), max(inside)
-                outliers = [v for v in samples if v < f_lo or v > f_hi]
-            else:
-                # no per-repetition file: the summary extremes clipped to the
-                # fences, a bound on the true whisker
-                w_lo = max(mn, f_lo) if _ok(mn) else q1
-                w_hi = min(mx, f_hi) if _ok(mx) else q3
-                outliers = [v for v in (mn, mx)
-                            if _ok(v) and (v < f_lo or v > f_hi)]
-            if _ok(w_lo) and _ok(w_hi) and w_hi > w_lo:
-                hi = max(hi, _rel(w_hi))
-                ax.plot([_rel(w_lo), _rel(w_hi)], [y, y], "-", color=c, lw=0.9,
-                        alpha=0.8, solid_capstyle="butt", zorder=z)
-                for cap in (w_lo, w_hi):
-                    ax.plot([_rel(cap)] * 2, [y - 0.16, y + 0.16], "-",
-                            color=c, lw=0.9, alpha=0.8, zorder=z)
-            # outliers are not magnified, which would move them off the axis
-            for v in outliers:
-                hi = max(hi, v)
-                ax.plot([v], [y], marker="o", ms=2.6, mfc="none", mec=c,
-                        mew=0.7, ls="none", zorder=z + 1)
-            # the interquartile range as a filled box in the row's colour
-            if _ok(q1) and _ok(q3):
-                from matplotlib.patches import Rectangle as _Rect
-                x0, x1 = _rel(q1), _rel(q3)
-                ax.add_patch(_Rect((x0, y - 0.22), max(x1 - x0, 0.0), 0.44,
-                                   facecolor=c, alpha=0.55, edgecolor=c,
-                                   lw=0.8, zorder=z))
-                lo_seen += [v for v in (x0, x1) if v > _OFFSET_FLOOR]
-            ax.plot([_rel(med)] * 2, [y - 0.30, y + 0.30], "-", color=c,
-                    lw=1.6, zorder=z + 2)
-            if got:
-                n_raw += 1
-        # log axis except in "percent" mode
-        if mode in ("absolute", "offset", "magnified"):
-            ax.set_xscale("log")
-            if mode == "offset":
-                # a zero offset sits at _OFFSET_FLOOR; the axis starts below
-                # the smallest box in the panel
-                ax.set_xlim(left=(min(lo_seen) / 3.0) if lo_seen
-                            else _OFFSET_FLOOR)
-            # minor tick labels overlap at this width and are suppressed; the major ticks
-            # are the first set that puts two ticks in view (decades, then 1 and 3, then
-            # 1, 2, 3, 4 and 6 times a decade: the coefficients the formatter labels)
-            import matplotlib.ticker as _tk
-            _lo, _hi = ax.get_xlim()
-            _dec = range(math.floor(math.log10(_lo)), math.ceil(math.log10(_hi)) + 1)
-            for _subs in ((1.0,), (1.0, 3.0), (1.0, 2.0, 3.0, 4.0, 6.0)):
-                if sum(_lo <= m * 10.0 ** e <= _hi for e in _dec for m in _subs) >= 2:
-                    if len(_subs) > 1:
-                        ax.xaxis.set_major_locator(_tk.LogLocator(subs=_subs))
-                    ax.xaxis.set_minor_formatter(_tk.NullFormatter())
-                    break
-            else:
-                # no set puts two ticks in view (a range of less than about half a
-                # decade): a few evenly spaced ticks, labelled as plain numbers
-                _vals = [v for v in _tk.MaxNLocator(nbins=4, steps=[1, 2, 5, 10])
-                         .tick_values(_lo, _hi) if _lo <= v <= _hi]
-                ax.xaxis.set_major_locator(_tk.FixedLocator(_vals))
-                ax.xaxis.set_major_formatter(
-                    _tk.FuncFormatter(lambda v, _pos: "%g" % v))
-                ax.xaxis.set_minor_formatter(_tk.NullFormatter())
-        else:
-            ax.set_xlim(left=0.0)
-            ax.axvline(0.0, color="0.35", lw=0.8, ls=(0, (4, 3)), zorder=1)
-        # cost clusters are named in the note, not shaded like a box
-        _dist_yaxis(ax, names)
-        # the panel title names the law only; the axis label names the mode
-        ax.set_title(LAW_LABEL.get(law, law), pad=3)
-        ax.grid(True, which="major", axis="x", alpha=0.30)
-    _label_every_panel(axes[:len(laws)])
-    # every panel has its own cost axis; the label is the same, so it is set under
-    # the lowest panel of each column
-    _label_lowest(axes, len(laws), 2,
-                  {"absolute": "Cost  [ns / element]",
-                   "magnified": "Cost  [ns / element]",
-                   "percent": "Per cent above that row's own minimum"}.get(
-                      mode, "ns / element above that row's own minimum"))
-    _OFFSET = mode == "offset"
-    _band_caption = " | ".join(
-        (_fmt_ns(lo) if i0 == i1 else "%s-%s" % (_fmt_ns(lo), _fmt_ns(hi)))
-        for i0, i1, lo, hi in clusters)
-    # glyph key: box, median, whisker and outlier
-    from matplotlib.lines import Line2D as _L2D
-    _sfx = ("  ($\\times$%g)" % _figK) if (mode == "magnified" and _figK > 1) else ""
-    from matplotlib.patches import Patch as _Patch
-    _gh = [_Patch(facecolor="0.45", alpha=0.55, edgecolor="0.45", lw=0.8),
-           _L2D([], [], color="0.45", lw=1.6),
-           _L2D([], [], color="0.45", lw=0.9),
-           _L2D([], [], ls="none", marker="o", mfc="none", mec="0.45", ms=5)]
-    # the factor labels the glyphs it scales; positions stay absolute
-    _gl = ["Interquartile range" + _sfx, "Median", "Whisker" + _sfx,
-           "Outlier, drawn where it occurred"]
-    _top = _title(fig, title)
-    # the note states the axis mode and the cost clusters
-    _foot = style.footer(fig, _gh, _gl, ncol=2, width=90, note=
-             ({"magnified": "spread scaled about each row's median by the factor "
-                            "in the legend; one factor for the whole figure, so "
-                            "spreads compare across rows and panels alike",
-               "offset":    "ns/element above each row's own minimum, its left "
-                            "edge",
-               "absolute": "absolute cost on one axis for every row; the "
-                           "spread is not scaled",
-               }.get(mode, "each row scaled to its own minimum"))
-             + ".  Rows ordered by cost; cost groups (rows within a decade "
-               "of each other): " + _band_caption
-             + ("" if n_raw else
-                ".  No per-repetition file in this run, so the whiskers are the "
-                "reported extremes clipped to the fences, a bound on the true "
-                "whisker"))
-    fig.tight_layout(rect=(0, _foot, 1, _top))
-    _rows = [r for l in bylaw for r in bylaw[l].values()]
-    _facts(_cost_sentence(_rows, "distribution (box, whiskers, outliers)",
-                          laws, show_n=True))
-    # An optional fifth element names the library backend shown.
-    who, fam, arch, gpu, *lib_bk = cap_of or ("tested implementations", "", "",
-                                              False)
-    _caption("Distribution of the runtime cost per element over the timed "
-             "repetitions for the %s across the %s datasets."
-             % (who, CONV.get(fam, fam)),
-             "Each panel shows one dataset on its own cost axis, with the "
-             "implementations ordered by cost; boxes span the interquartile "
-             "range, bars mark the median, %s, and circles mark outliers."
-             % ("whiskers extend to the furthest repetition within 1.5 "
-                "interquartile ranges" if n_raw else
-                "whiskers extend to the recorded minimum and maximum, clipped "
-                "to 1.5 interquartile ranges"),
-             ("The library is shown with its %s backend." % lib_bk[0])
-             if lib_bk and lib_bk[0] else "",
-             _obtained(arch, gpu))
-    return _finish(fig, outdir, stem, stamp)
-
-
-def _reps_index(raw, family, device):
-    """{(run, supplier, law, backend, points): [(rep, ns)]} for one device."""
-    reps = defaultdict(list)
-    for r in (raw or []):
-        if r.get("device") != device or r.get("family") != family:
-            continue
-        key = (r.get("_run"), r.get("supplier") or "-", r.get("law"),
-               r.get("backend"), _i(r, "n"))
-        reps[key].append((_i(r, "rep"), _f(r, "ns_per_elem")))
-    return reps
-
-
 def fig_accuracy_distribution(plt, acc, sup, outdir, stamp, family="z_nu",
                               lib_backend="avx512", scope="call", arch=""):
     """ULP distribution per implementation on the host, one panel per accuracy law."""
@@ -3129,30 +2451,6 @@ def fig_accuracy_distribution(plt, acc, sup, outdir, stamp, family="z_nu",
                 _lib_shown(bylaw, lib_backend)))
 
 
-def fig_timing_distribution(plt, acc, sup, raw, outdir, stamp, family="z_nu",
-                            lib_backend="avx512", scope="call", arch=""):
-    """Cost distribution over the repetitions per implementation on the host."""
-    names, bylaw, lib_backend = _dist_inputs_cpu(acc, sup, family, scope,
-                                                 lib_backend)
-    if not _dist_laws(bylaw):
-        return _skip(f"timing-distribution-{family}",
-                     f"no library or supplier timing rows for family {family}")
-    # a single implementation (the device host's one-backend CPU stage) is skipped
-    if len(names) < 2:
-        return _skip(f"timing-distribution-{family}",
-                     "only one implementation on this machine (%s)"
-                     % (names[0] if names else "none"))
-
-    return _timing_distribution(
-        plt, names, bylaw, _reps_index(raw, family, "cpu"), outdir,
-        f"fig-paper-timing-distribution-{family}",
-        f"Distribution of the cost over the timed repetitions, "
-        f"{FAMILY_LABEL.get(family, family)}"
-        f"   [{arch}, {scope} scope, library = {lib_backend}]", stamp,
-        cap_of=("tested implementations", family, arch, False,
-                _lib_shown(bylaw, lib_backend)))
-
-
 def fig_gpu_accuracy_distribution(plt, gsup, outdir, stamp, family="z_nu",
                                   arch=""):
     """`fig_accuracy_distribution` on the device, kernel scope."""
@@ -3170,178 +2468,7 @@ def fig_gpu_accuracy_distribution(plt, gsup, outdir, stamp, family="z_nu",
         cap_of=("tested GPU implementations", family, arch, True))
 
 
-def fig_gpu_timing_distribution(plt, gsup, raw, outdir, stamp, family="z_nu",
-                                arch=""):
-    """`fig_timing_distribution` on the device, kernel scope."""
-    names, bylaw = _dist_inputs_gpu(gsup, family)
-    if not _dist_laws(bylaw):
-        return _skip(f"gpu-timing-distribution-{family}",
-                     "no GPU supplier rows at kernel scope")
-    return _timing_distribution(
-        plt, names, bylaw, _reps_index(raw, family, "cuda"), outdir,
-        f"fig-paper-gpu-timing-distribution-{family}",
-        f"Distribution of the cost over the timed repetitions, device kernels, "
-        f"{FAMILY_LABEL.get(family, family)}   [{arch}, kernel scope]", stamp,
-        device="cuda", lead=next((n for n in names if style.LIB in n), None),
-        cap_of=("tested GPU implementations", family, arch, True))
-
-
 # (stem, name, law, why) of every curve not drawn: runs.detail_for refuses a
 # histogram whose total differs from the row's `n_scored`; the driver prints them.
 SERIES_SKIPPED = []
 
-# dash patterns beside the colour, for similar hues; the library is always solid
-_ECDF_DASHES = ["-", (0, (5.0, 1.6)), (0, (1.4, 1.3)), (0, (6.0, 1.6, 1.4, 1.6)),
-                (0, (3.0, 1.4))]
-
-# right edge: one octave past the histogram's last finite edge (2^10 ulp), for the
-# overflow strip
-_ECDF_XMAX = 2.0 ** 11
-
-
-def _accuracy_ecdf(plt, names, bylaw, outdir, stem, title, stamp,
-                   lead=style.LIB, cap_of=None):
-    """Share of the scored points with |ulp| >= x per law, from the recorded histogram:
-    exact at the bin edges, held between them; the overflow share is marked at the right."""
-    import runs as mp
-    from matplotlib.lines import Line2D as _L2D
-    laws = _dist_laws(bylaw)
-    fig, axes = _dist_axes(plt, names, laws,
-                           height=1.6 * -(-len(laws) // 2) + 1.7)
-    style_of = {}
-    k = 0
-    for name in names:
-        if name == lead:
-            style_of[name] = ("-", 1.7, 6)
-        else:
-            style_of[name] = (_ECDF_DASHES[k % len(_ECDF_DASHES)], 1.0, 4)
-            k += 1
-    xlo = 2.0 ** mp.HIST_LO_LOG
-    xover = 2.0 ** mp.HIST_HI_LOG
-    nmax, drawn, skipped = 1, set(), []
-    curves = []                                  # (ax, name, [(x, share)])
-    for ax, law in zip(axes, laws):
-        for name in names:
-            r = bylaw[law].get(name)
-            if r is None:
-                continue
-            e, why = mp.detail_for(r)
-            if e is None:
-                skipped.append((name, law, why))
-                SERIES_SKIPPED.append((stem, name, law, why))
-                print(f"   !! {stem}: {name} on {law} not drawn -- {why}")
-                continue
-            nmax = max(nmax, e["total"])
-            curves.append((ax, name, mp.hist_tail(e)))
-            drawn.add(name)
-    ybot = 0.5 / nmax
-    for ax, name, tail in curves:
-        c = style.supplier_color(name)
-        ls, lw, z = style_of[name]
-        # `tail` ends with the overflow share; the share is non-increasing, so
-        # the edges with a non-zero share below 2^10 form a prefix
-        over = tail[-1][1]
-        head = [(x, g) for x, g in tail[:-1] if g > 0]
-        m = len(head)
-        if m:
-            # held to the next edge, then down to the overflow share or the axis floor
-            xs = [x for x, _g in head] + [tail[m][0]]
-            ys = [g for _x, g in head] + [over if over > 0 else ybot]
-            ax.plot(xs, ys, drawstyle="steps-post", color=c, ls=ls, lw=lw,
-                    zorder=z, solid_capstyle="butt")
-        if over > 0:
-            ax.plot([math.sqrt(xover * _ECDF_XMAX)], [over], marker=">",
-                    ms=4.2, mfc=c, mec=c, ls="none", zorder=z + 1)
-    for ax, law in zip(axes, laws):
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlim(xlo, _ECDF_XMAX)
-        ax.set_ylim(ybot, 1.6)
-        ax.axvspan(xover, _ECDF_XMAX, facecolor="0.93", edgecolor="none",
-                   zorder=0)
-        ax.axvline(style.ULP_ONE, color="0.35", lw=0.8, ls=(0, (4, 3)), zorder=1)
-        for yv, lab in ((1e-2, "$p_{99}$"), (1e-3, "$p_{99.9}$")):
-            ax.axhline(yv, color="0.55", lw=0.6, ls=(0, (1, 2)), zorder=1)
-            ax.text(xlo * 1.25, yv * 1.12, lab, fontsize=style.FS_ANNOT,
-                    color="0.40", ha="left", va="bottom", zorder=2)
-        ax.set_title(LAW_LABEL.get(law, law), pad=3)
-        ax.grid(True, which="major", alpha=0.30)
-    _label_every_panel(axes[:len(laws)])
-    _label_lowest(axes, len(laws), 2, "ULP error $x$")
-    # one label for the column: it is longer than a panel is high
-    fig.supylabel("Share of points with error $\\geq x$", fontsize=style.FS_LABEL,
-                  x=0.015)
-    _sh = [(_L2D([], [], color=style.supplier_color(n), ls=style_of[n][0],
-                 lw=style_of[n][1]), n) for n in names if n in drawn]
-    _gh = [_L2D([], [], color="0.35", lw=0.8, ls=(0, (4, 3))),
-           _L2D([], [], ls="none", marker=">", ms=4.2, color="0.45")]
-    _gl = ["1 ULP", "Share at or above $2^{10}$ ULP (not resolved)"]
-    _top = _title(fig, title)
-    note = ("each curve is the share of the scored points whose ULP error is "
-            "at least $x$, from the histogram recorded with each accuracy row "
-            "(48 log-spaced bins over [$2^{-10}$, $2^{10}$) ULP, one overflow bin "
-            "above); exact at the bin edges and held constant between them, so "
-            "it crosses the dotted lines at $10^{-2}$ and $10^{-3}$ within one "
-            "bin of the 99th and 99.9th percentiles; a curve drops to the axis "
-            "floor at the upper edge of the bin holding its maximum, and the "
-            "share at or above $2^{10}$ ULP is marked in the grey strip")
-    if skipped:
-        note += ("; not drawn, because the histogram was absent or did not "
-                 "cover exactly the scored points: " + ", ".join(
-                     "%s on %s" % (n, LAW_LABEL.get(l, l)) for n, l, _w in skipped))
-    _foot = style.footer(fig, [h for h, _n in _sh] + _gh,
-                         [n for _h, n in _sh] + _gl, ncol=3, width=90, note=note)
-    fig.tight_layout(rect=(0.02, _foot, 1, _top))
-    _rows = [r for l in bylaw for r in bylaw[l].values()]
-    _facts(_acc_sentence(_rows, laws))
-    # An optional fifth element names the library backend shown.
-    who, fam, arch, gpu, *lib_bk = cap_of or ("tested implementations", "", "",
-                                              False)
-    _caption("Share of points with a ULP error of at least $x$ for the %s "
-             "across the %s datasets." % (who, CONV.get(fam, fam)),
-             "Each panel shows one dataset; both axes are logarithmic.",
-             "The dashed vertical line marks 1 ULP.",
-             "The dotted lines at $10^{-2}$ and $10^{-3}$ cross each curve within "
-             "one histogram bin of its 99th and 99.9th percentiles, and the share "
-             "at or above $2^{%d}$ ULP is marked in the grey strip."
-             % round(mp.HIST_HI_LOG),
-             ("The library is shown with its %s backend." % lib_bk[0])
-             if lib_bk and lib_bk[0] else "",
-             _obtained(arch, gpu))
-    return _finish(fig, outdir, stem, stamp)
-
-
-def fig_accuracy_ecdf(plt, acc, sup, outdir, stamp, family="z_nu",
-                      lib_backend="avx512", scope="call", arch=""):
-    """`_accuracy_ecdf` for the host rows of `fig_accuracy_distribution`."""
-    names, bylaw, lib_backend = _dist_inputs_cpu(acc, sup, family, scope,
-                                                 lib_backend)
-    if not _dist_laws(bylaw):
-        return _skip(f"accuracy-ecdf-{family}",
-                     f"no library or supplier accuracy rows for family {family}")
-    if len(names) < 2:
-        return _skip(f"accuracy-ecdf-{family}",
-                     "only one implementation on this machine (%s)"
-                     % (names[0] if names else "none"))
-    return _accuracy_ecdf(
-        plt, names, bylaw, outdir, f"fig-paper-accuracy-ecdf-{family}",
-        f"Share of points at or above each ULP error, by dataset, "
-        f"{FAMILY_LABEL.get(family, family)}"
-        f"   [{arch}, {scope} scope, library = {lib_backend}]", stamp,
-        cap_of=("tested implementations", family, arch, False,
-                _lib_shown(bylaw, lib_backend)))
-
-
-def fig_gpu_accuracy_ecdf(plt, gsup, outdir, stamp, family="z_nu", arch=""):
-    """`_accuracy_ecdf` on the device, kernel scope."""
-    names, bylaw = _dist_inputs_gpu(gsup, family)
-    if not _dist_laws(bylaw):
-        return _skip(f"gpu-accuracy-ecdf-{family}",
-                     "no GPU supplier rows at kernel scope "
-                     "(needs a CUDA device and the device-side externals)")
-    return _accuracy_ecdf(
-        plt, names, bylaw, outdir, f"fig-paper-gpu-accuracy-ecdf-{family}",
-        f"Share of points at or above each ULP error, by dataset, device "
-        f"kernels, {FAMILY_LABEL.get(family, family)}   [{arch}, kernel scope]",
-        stamp, lead=next((n for n in names if style.LIB in n), None),
-        cap_of=("tested GPU implementations", family, arch, True))

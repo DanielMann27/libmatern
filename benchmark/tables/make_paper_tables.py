@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""make_paper_tables.py -- builds the paper table set into benchmark/tables/paper/; needs
-pdflatex unless --no-preview.  By default only the paper set is built
-(make_paper_figures.PAPER_TABLES); --full builds every table.  Runs are loaded and
-grouped by make_paper_figures; the tables come from paper_tables.  Exit status: 1 for no
-runs, a refused input or a LaTeX error in a preview; 2 for no pdflatex, or under --strict
-an incomplete run or a refused input."""
+"""make_paper_tables.py -- builds the paper's tables (make_paper_figures.PAPER_TABLES) into
+benchmark/tables/paper/; needs pdflatex unless --no-preview.  Runs are loaded and grouped
+by make_paper_figures; the tables come from paper_tables.  Exit status: 1 for no runs, a
+refused input or a LaTeX error in a preview; 2 for no pdflatex, or under --strict an
+incomplete run or a refused input."""
 import argparse, os, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,9 +34,6 @@ def main():
     ap.add_argument("--no-preview", action="store_true",
                     help="write preview.tex but do not run pdflatex, and do "
                          "not fit tables to the column")
-    ap.add_argument("--full", action="store_true",
-                    help="build every table, not only the paper set "
-                         "(make_paper_figures.PAPER_TABLES)")
     ap.add_argument("--cpu-machine", default="",
                     help="the machine the paper set takes its CPU tables from first, "
                          "the machine-independent ones included (default: machines "
@@ -46,10 +42,10 @@ def main():
     args = ap.parse_args()
 
     if not args.list and not args.no_preview and not shutil.which("pdflatex"):
-        print("paper-tables: needs pdflatex (column fitting, previews); not built --\n"
-              "              add a TeX distribution with pdflatex (TeX Live; "
+        print("tables: needs pdflatex (column fitting, previews); not built --\n"
+              "        add a TeX distribution with pdflatex (TeX Live; "
               "make requirements names the package for this system),\n"
-              "              or `make paper-tables ARGS=--no-preview` to write them "
+              "        or `make tables ARGS=--no-preview` to write them "
               "unfitted to the column")
         return 2
 
@@ -86,11 +82,8 @@ def main():
         print("!!", msg, "-- the README.md of the tables will say so")
 
     order = mpf.cpu_order(bymach, args.cpu_machine)
-    if args.full:
-        print("table set: every table (--full)")
-    else:
-        print(f"table set: the sources of the paper's tables (--full for every table); "
-              f"CPU tables from {mpf.cpu_sources_line(bymach, order)}")
+    print(f"table set: the sources of the paper's tables; "
+          f"CPU tables from {mpf.cpu_sources_line(bymach, order)}")
     cur = None              # the machine being built; None for the tree root
 
     def want(stem, *kinds, any_role=False):
@@ -99,13 +92,11 @@ def main():
         for the skipped-stage notes, whose stems are joined lists)."""
         if args.only and args.only not in stem:
             return False
-        if args.full:
-            return True
         roles = None if any_role else mpf.machine_roles(cur, bymach, order, kinds)
         names = [x.strip().replace("tab-", "", 1) for x in stem.split(" / ")]
         return any(mpf.in_paper_set(mpf.PAPER_TABLES, x, roles) for x in names)
 
-    ACC, LAD = ("accuracy", "suppliers"), ("ladder", "sup_ladder")
+    LAD = ("ladder", "sup_ladder")
 
     n = 0
 
@@ -119,20 +110,12 @@ def main():
     # (mpf.machine_order); machine_agreement checks every field across machines.
     cpu = [(m, rs) for m, rs in bymach.items() if mpf.is_cpu_machine(rs)]
     # The paper set's root tables come from the first CPU machine in its order.
-    if not args.full:
-        cpu.sort(key=lambda mr: order.index(mr[0]))
+    cpu.sort(key=lambda mr: order.index(mr[0]))
     cpu_acc = [(m, mpf.merge(rs, "accuracy")) for m, rs in cpu]
     cpu_sup = [(m, mpf.merge(rs, "suppliers")) for m, rs in cpu]
-    cpu_arch = [mp.cpu_arch_key(rs[0].get("arch_short")) or m for m, rs in cpu]
     agreement = (pt.machine_agreement([(lab, a + b) for (lab, a), (_, b)
                                        in zip(cpu_acc, cpu_sup)])
                  if len(cpu_acc) > 1 else None)
-
-    q_agreement = {fam: (pt.quantile_agreement(
-                             [(lab, a, b) for (lab, a), (_, b)
-                              in zip(cpu_acc, cpu_sup)], fam)
-                         if len(cpu_acc) > 1 else None)
-                   for fam in ("z_nu", "h_nu_s")}
 
     all_runs = sorted((r for rs in bymach.values() for r in rs),
                       key=lambda r: r["id"])
@@ -154,68 +137,23 @@ def main():
             check = "one CPU machine; agreement across machines not checked"
         print(f"== shared ({check})")
         for fam in ("z_nu", "h_nu_s"):
-            if want(f"tab-accuracy-{fam}"):
-                emit(pt.tab_accuracy(acc, sup, out, root_note, family=fam,
-                                     agreement=agreement, arch=arch0),
-                     f"tab-accuracy-{fam}")
-            if want(f"tab-median-{fam}"):
-                emit(pt.tab_median(acc, sup, out, root_note, family=fam,
-                                   arch=arch0),
-                     f"tab-median-{fam}")
             if want(f"tab-medmax-{fam}"):
                 emit(pt.tab_medmax(acc, sup, out, root_note, family=fam,
                                    arch=arch0),
                      f"tab-medmax-{fam}")
-            if want(f"tab-distribution-{fam}"):
-                emit(pt.tab_distribution(acc, out, root_note, family=fam,
-                                         arch=arch0),
-                     f"tab-distribution-{fam}")
-            if want(f"tab-quantiles-{fam}"):
-                emit(pt.tab_quantiles(acc, sup, out, root_note, family=fam,
-                                      agreement=q_agreement[fam], arch=arch0),
-                     f"tab-quantiles-{fam}")
             if want(f"tab-exclusions-{fam}"):
                 emit(pt.tab_exclusions(acc, sup, out, root_note, family=fam,
                                        arch=arch0),
                      f"tab-exclusions-{fam}")
-            if want(f"tab-assembly-{fam}"):
-                emit(pt.tab_assembly(sup, out, root_note, family=fam),
-                     f"tab-assembly-{fam}")
         if want("tab-datasets"):
             emit(pt.tab_datasets(acc, out, root_note), "tab-datasets")
         if want("tab-references"):
             emit(pt.tab_references(acc, sup, out, root_note), "tab-references")
-        if want("tab-machine-independence"):
-            emit(pt.tab_machine_independence(
-                [r for _, r in cpu_acc], [r for _, r in cpu_sup], out,
-                root_note, cpu_arch), "tab-machine-independence")
     else:
         pt.SKIPPED.append((
-            "tab-accuracy / tab-quantiles / tab-exclusions / tab-datasets",
+            "tab-medmax / tab-exclusions / tab-datasets / tab-references",
             "no CPU run carries accuracy rows -- these tables are the accuracy "
             "stage and there is nothing to read"))
-        pt.SKIPPED.append((
-            "tab-machine-independence",
-            "needs 2 CPU machines with accuracy rows, found 0"))
-
-    # Fold quantiles at the root as well; machines are selected by their fold rows, since a
-    # fold run has no accuracy rows (which is_cpu_machine reads).
-    fold_mach = [(m, rs) for m, rs in bymach.items()
-                 if any(r["fold"] and not r.get("gpu_pipeline") for r in rs)]
-    cpu_fold = [(m, mpf.merge(rs, "fold")) for m, rs in fold_mach]
-    if cpu_fold:
-        fold_runs = sorted((r for _, rs in fold_mach for r in rs if r["fold"]),
-                           key=lambda r: r["id"])
-        for fam in ("z_nu", "h_nu_s"):
-            if want(f"tab-fold-quantiles-{fam}"):
-                fagree = (pt.fold_agreement(cpu_fold, fam)
-                          if len(cpu_fold) > 1 else None)
-                emit(pt.tab_fold_quantiles(cpu_fold[0][1], out,
-                                           _runs_note(fold_runs), family=fam,
-                                           agreement=fagree,
-                                           arch=_arch(mpf.source_runs(
-                                               fold_mach[0][1], "fold"))),
-                     f"tab-fold-quantiles-{fam}")
 
     if want("tab-environment"):
         # One column per machine class (runs.arch_label short tag, `+GPU` with a device).
@@ -248,13 +186,9 @@ def main():
             return _arch(mpf.source_runs(rs, *kinds))
 
         own = mpf.kind_owner(rs)
-        acc, sup = mpf.merge(rs, "accuracy"), mpf.merge(rs, "suppliers")
+        sup = mpf.merge(rs, "suppliers")
         lad, slad = mpf.merge(rs, "ladder"), mpf.merge(rs, "sup_ladder")
-        gsup, glad = mpf.merge(rs, "gpu_sup"), mpf.merge(rs, "gpu_ladder")
-        gklad = mpf.merge(rs, "gpu_klad")
-        lev, glev = mpf.merge(rs, "levin"), mpf.merge(rs, "gpu_levin")
-        thr = mpf.merge(rs, "threads")
-        fold = mpf.merge(rs, "fold")
+        gsup = mpf.merge(rs, "gpu_sup")
         print(f"== {mach}  {mpf.machine_pretty(rs)}")
         cur = mach
         # Labels carry the machine until cleared, so two machines' tables do not collide.
@@ -270,19 +204,6 @@ def main():
         garch = garch0 if (not dev or dev in garch0) else f"{dev} on {garch0}"
 
         for fam in ("z_nu", "h_nu_s"):
-            if acc and want(f"tab-cost-{fam}", *ACC):
-                emit(pt.tab_cost(acc, sup, sub, note_of("accuracy", "suppliers"),
-                                 arch_of("accuracy", "suppliers"), family=fam),
-                     f"{mach}/tab-cost-{fam}")
-            if acc and want(f"tab-attribution-{fam}", *ACC):
-                emit(pt.tab_attribution(acc, sub, note_of("accuracy"),
-                                        arch_of("accuracy"), family=fam),
-                     f"{mach}/tab-attribution-{fam}")
-        if acc and want("tab-convention", *ACC):
-            emit(pt.tab_convention(acc, sub, note_of("accuracy"),
-                                   arch_of("accuracy")),
-                 f"{mach}/tab-convention")
-        for fam in ("z_nu", "h_nu_s"):
             if lad and want(f"tab-throughput-{fam}", *LAD):
                 # Assemblies from the family's supplier accuracy rows (for z_nu,
                 # those of the ladder figure).
@@ -296,15 +217,10 @@ def main():
                                                                      family=fam)),
                      f"{mach}/tab-throughput-{fam}")
         for fam in ("z_nu", "h_nu_s"):
-            for metric in ("accuracy", "cost"):
-                if gsup and want(f"tab-gpu-{metric}-{fam}"):
-                    emit(pt.tab_gpu(gsup, sub, note_of("gpu_sup"), garch,
-                                    family=fam, metric=metric),
-                         f"{mach}/tab-gpu-{metric}-{fam}")
-            if gsup and want(f"tab-gpu-quantiles-{fam}"):
-                emit(pt.tab_gpu_quantiles(gsup, sub, note_of("gpu_sup"), garch,
-                                          family=fam),
-                     f"{mach}/tab-gpu-quantiles-{fam}")
+            if gsup and want(f"tab-gpu-cost-{fam}"):
+                emit(pt.tab_gpu_cost(gsup, sub, note_of("gpu_sup"), garch,
+                                     family=fam),
+                     f"{mach}/tab-gpu-cost-{fam}")
             if gsup and want(f"tab-gpu-exclusions-{fam}"):
                 emit(pt.tab_gpu_exclusions(gsup, sub, note_of("gpu_sup"), garch,
                                            family=fam),
@@ -313,76 +229,21 @@ def main():
                 emit(pt.tab_gpu_medmax(gsup, sub, note_of("gpu_sup"), garch,
                                        family=fam),
                      f"{mach}/tab-gpu-medmax-{fam}")
-            if gsup and want(f"tab-gpu-assembly-{fam}"):
-                emit(pt.tab_assembly(gsup, sub, note_of("gpu_sup"), family=fam,
-                                     scope="kernel",
-                                     stem_prefix="tab-gpu-assembly",
-                                     lib_supplier=style.LIB_CUDA, arch=garch),
-                     f"{mach}/tab-gpu-assembly-{fam}")
         for fam in ("z_nu", "h_nu_s"):
             if gsup and want(f"tab-gpu-call-{fam}"):
                 emit(pt.tab_gpu_call(
                          gsup, sub, note_of("gpu_sup"), garch, family=fam),
                      f"{mach}/tab-gpu-call-{fam}")
-        for fam in ("z_nu", "h_nu_s"):
-            if gklad and want(f"tab-gpu-throughput-{fam}"):
-                emit(pt.tab_gpu_throughput(
-                         gklad, sub, note_of("gpu_klad", "gpu_sup"), garch,
-                         family=fam,
-                         asm_of=mpf.preferred_assembly(gsup, family=fam,
-                                                       scope="kernel")),
-                     f"{mach}/tab-gpu-throughput-{fam}")
-        if glad and want("tab-gpu-modes"):
-            emit(pt.tab_gpu_modes(glad, sub, note_of("gpu_ladder"), garch),
-                 f"{mach}/tab-gpu-modes")
-        if lev:
-            for bk in [b for b in ("avx512", "avx2", "matched_fma", "matched", "scalar")
-                       if any(r.get("backend") == b for r in lev)]:
-                if want(f"tab-levin-cpu-{bk}", "levin"):
-                    emit(pt.tab_levin(lev, sub, note_of("levin"),
-                                      arch_of("levin"), device="cpu", backend=bk),
-                         f"{mach}/tab-levin-cpu-{bk}")
-        if glev and want("tab-levin-cuda"):
-            # On the device `backend` is the transfer mode; the band does not depend on it, so
-            # one mode is shown, the default async-direct when present.
-            have = {r.get("backend") for r in glev}
-            gbk = "async-direct" if "async-direct" in have else \
-                  (sorted(h for h in have if h) or [""])[0]
-            emit(pt.tab_levin(glev, sub, note_of("gpu_levin"), garch,
-                              device="cuda", backend=gbk),
-                 f"{mach}/tab-levin-cuda")
-        if fold and want("tab-fold-cpu", "fold"):
-            emit(pt.tab_fold_cpu(fold, sub, note_of("fold"), arch_of("fold")),
-                 f"{mach}/tab-fold-cpu")
-        if thr and want("tab-threads", "threads"):
-            emit(pt.tab_threads(thr, sub, note_of("threads"), arch_of("threads")),
-                 f"{mach}/tab-threads")
-        if thr and want("tab-threads-throughput", "threads"):
-            emit(pt.tab_threads_throughput(thr, sub, note_of("threads"),
-                                           arch_of("threads")),
-                 f"{mach}/tab-threads-throughput")
         pt.LABEL_SUFFIX = ""
 
     # A table whose stage no run carries is never attempted; it is listed as skipped here.
     for key, stems, why in (
-        ("gpu_sup", "tab-gpu-accuracy / tab-gpu-cost / tab-gpu-call / "
-                    "tab-gpu-quantiles / tab-gpu-medmax",
+        ("gpu_sup", "tab-gpu-cost / tab-gpu-call / tab-gpu-medmax / "
+                    "tab-gpu-exclusions",
          "no run carries device kernel rows -- the GPU stage needs a machine "
          "with a CUDA device and the externals built for it"),
-        ("gpu_ladder", "tab-gpu-modes",
-         "no run carries a device ladder, so there are no transfer strategies "
-         "to compare"),
         ("ladder", "tab-throughput-*",
          "no run carries a ladder -- throughput is quoted at a ladder rung"),
-        ("threads", "tab-threads",
-         "no run carries thread rows; the thread stage is opt-in at run time "
-         "and was not run"),
-        ("levin", "tab-levin-cpu-*",
-         "no run carries the Levin A/B, which is opt-in at run time"),
-        ("fold", "tab-fold-quantiles-* / tab-fold-cpu",
-         "no run carries the prefactor-fold stage, which is opt-in at run time"),
-        ("gpu_levin", "tab-levin-cuda",
-         "no run carries the device Levin A/B, which is opt-in at run time"),
     ):
         if (not any(r[key] for rs in bymach.values() for r in rs)
                 and want(stems, any_role=True)):
@@ -493,7 +354,7 @@ def main():
         return 2 if args.strict else 1
     # A preview stopped by a LaTeX error leaves its directory's tables unchecked.
     if latex_errors:
-        print(f"\npaper-tables: the preview of {latex_errors} director"
+        print(f"\ntables: the preview of {latex_errors} director"
               f"{'y' if latex_errors == 1 else 'ies'} stopped on a LaTeX error (above) "
               f"-- the tables are written, but not all of them were fitted to the column")
         return 1
@@ -533,7 +394,7 @@ def write_index(out, bymach, runs_, pdflatex):
     fitted form, the runs, per table its runs and facts (paper_tables.MOVED), generators."""
     lines = [
         "# `benchmark/tables/paper/` -- the generated table set", "",
-        "Written by `make paper-tables`.  No value here is measured by the",
+        "Written by `make tables`.  No value here is measured by the",
         "generator: every value is parsed from the CSV files of the runs",
         "(`<id>/*.csv` under `benchmark/runs/`, unless `--runs` named another",
         "root), so this directory can be deleted and rebuilt from the runs.", "",
@@ -572,14 +433,6 @@ def write_index(out, bymach, runs_, pdflatex):
         rel = "" if d == out else os.path.basename(d) + "/"
         for fn, size, rot in pt.forms(d):
             lines.append(f"| `{rel}{fn}` | `\\{size}` | {'yes' if rot else ''} |")
-    lines += ["", "## Alternative forms", "",
-              "`tab-medmax-*` combines `tab-accuracy-*` and `tab-median-*` into",
-              "one table, `median / maximum` per cell.  The two forms carry the",
-              "same measurements; a document includes either the pair or the",
-              "combined table.  On the device, `<machine>/tab-gpu-medmax-*`",
-              "adds the median to `<machine>/tab-gpu-accuracy-*` the same way",
-              "(and its `finite` column and closing rows); a document includes",
-              "one or the other.", ""]
     lines += ["", "## Runs behind this build", "",
               "Each run is named by its stamp and stage, with its machine.", ""]
     for r in runs_:
@@ -605,7 +458,7 @@ def write_index(out, bymach, runs_, pdflatex):
               "", "| program | version |", "|---|---|"]
     lines += [f"| {name} | {ver} |" for name, ver in mp.generator_versions()]
     lines.append(f"| pdflatex | {pdflatex} |")
-    lines += ["", "Regenerate with `make paper-tables`; `make paper-tables "
+    lines += ["", "Regenerate with `make tables`; `make tables "
               "ARGS=--list` prints what it would use and writes nothing."]
     open(os.path.join(out, "README.md"), "w").write("\n".join(lines) + "\n")
 

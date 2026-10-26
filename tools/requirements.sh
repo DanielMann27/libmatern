@@ -328,7 +328,7 @@ suppliers() {
 }
 
 generators() {
-    section "figure and table generators (make paper-figures, paper-tables, paper-tables-check)"
+    section "figure and table generators (make figures, tables, tables-check)"
     local chosen=${PYTHON:-} p sel=""
     for p in $PYTHON_CANDIDATES; do
         local why
@@ -379,12 +379,12 @@ generators() {
         fi
         if [ $user = yes ]; then
             row MISSING "NumPy, Matplotlib" "$what (PYTHON, set on the ${PYTHON_ORIGIN})" \
-                "figures and tables; without them make paper-figures and make paper-tables stop" \
+                "figures and tables; without them make figures and make tables stop" \
                 "unset PYTHON, then make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
         else
             row MISSING "NumPy, Matplotlib" "$what$([ -z "$sel" ] && echo " (no candidate has both at or above the tested minimum)")" \
-                "figures and tables; without them make paper-figures and make paper-tables stop" \
+                "figures and tables; without them make figures and make tables stop" \
                 "make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
             mods=""; [ $stack_rc -eq 1 ] || mods=$(hint pymods "$first")
@@ -406,14 +406,14 @@ generators() {
         fi
         if [ -z "$miss" ]; then
             row found "pdflatex" "$(version_of pdflatex --version)" \
-                "the tables: widths fitted to the column, preview PDFs; make paper-tables-check"
+                "the tables: widths fitted to the column, preview PDFs; make tables-check"
         else
             row MISSING "LaTeX packages" "pdflatex found, missing:$miss" \
-                "the tables (column fitting, previews) and make paper-tables-check; without them both fail on a LaTeX error" "$(hint pdflatex)" pdflatex
+                "the tables (column fitting, previews) and make tables-check; without them both fail on a LaTeX error" "$(hint pdflatex)" pdflatex
         fi
     else
         row MISSING "pdflatex" "not found" \
-            "the tables (column fitting, previews) and make paper-tables-check; without it both stop (make paper-tables ARGS=--no-preview writes the tables unfitted)" \
+            "the tables (column fitting, previews) and make tables-check; without it both stop (make tables ARGS=--no-preview writes the tables unfitted)" \
             "$(hint pdflatex)" pdflatex
     fi
 }

@@ -183,21 +183,6 @@ def marker_note(rows, keys=("u_max",)):
     return out + dagger_note(rows)
 
 
-def comparison_note(quantity, dashed):
-    """The legend of the two comparison rows; `quantity` is "maximum" or "cost",
-    `dashed` whether a cell of them shows `--`."""
-    return (r"\emph{Lowest external}: the external implementation with the "
-            r"lowest " + quantity + r" among those with a finite result at "
-            r"every point of the dataset and a maximum below $10^{6}$ ULP; "
-            r"\emph{Advantage factor}: the ratio of the "
-            r"larger to the smaller of its value and this library's, labelled "
-            r"with the implementation it favours (\texttt{" + LIB_SHORT
-            + r"}: this library)"
-            + (r"; --: no such implementation or, in the Advantage factor row, "
-               r"no ratio because a value is missing or zero. "
-               if dashed else ". "))
-
-
 def dashed_cells(*rows):
     """Whether a cell of the comparison rows (label cell excluded) shows `--`."""
     return any(c is DASH or "--" in c.md for r in rows for c in r[1:])
@@ -484,46 +469,6 @@ def score_cells(by_law, laws):
     return [text(f"{b}/{len(laws)}")]
 
 
-def advantage(better_name, factor):
-    """A factor >= 1, labelled with the implementation it favours."""
-    t = sig(factor, 3)
-    if t[0] is None:
-        return DASH
-    return Cell(style.Raw(esc(better_name) + "~" + t[0] + r"$\times$"),
-                f"{better_name} {t[1]}x", repr(factor))
-
-
-def comparison_rows(series, lib_by, laws, key):
-    """(near, adv, incomplete): the Lowest external and Advantage factor rows for
-    `key` (lower is better), without the caller's trailing columns."""
-    near = [raw("Lowest external", "Lowest external")]
-    adv = [raw("Advantage factor", "Advantage factor")]
-    incomplete = 0
-    for l in laws:
-        others = [(n, b[l]) for n, b in series
-                  if not n.startswith(LIB) and l in b and comparable(b[l], key)]
-        base = lib_by.get(l)
-        bv = _f(base, key) if base is not None else float("nan")
-        if not others:
-            incomplete += 1
-            near.append(DASH)
-            adv.append(DASH)
-            continue
-        name, row = min(others, key=lambda o: _f(o[1], key))
-        v = _f(row, key)
-        c = ulp(row) if key == "u_max" else num(v)
-        sn = short_impl(name)
-        near.append(Cell(style.Raw(esc(sn) + "~" + c.tex), sn + " " + c.md,
-                         c.csv))
-        if not (_ok(bv) and bv > 0 and _ok(v) and v > 0):
-            adv.append(DASH)
-            continue
-        r = v / bv
-        adv.append(advantage(sn, 1.0 / r) if r < 1
-                   else advantage(LIB_SHORT, r))
-    return near, adv, incomplete
-
-
 def medmax_comparison_rows(series, lib_by, laws):
     """(lowest, adv, incomplete): the closing rows of the median/maximum tables, one
     median/maximum pair per cell.  The median half ranks every external with a
@@ -615,127 +560,6 @@ def medmax_comparison_note(dashed, rows):
                if dashed else ". "))
 
 
-# Accuracy: maximum ULP by law and implementation
-def tab_accuracy(acc, sup, outdir, runs_note, family="z_nu", backend=None,
-                 agreement=None, arch=""):
-    """Maximum ULP per law and implementation (externals at their best assembly),
-    a `finite` column and the two comparison rows."""
-    stem = f"tab-accuracy-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows -- the accuracy stage did not run")
-    backend = backend or lib_backend_for(acc, family=family)
-    laws = laws_present(acc)
-    if not laws:
-        return _skip(stem, "no rows on any of the paper's accuracy laws")
-    series = _impl_series(acc, sup, family, backend)
-    if len(series) < 2:
-        return _skip(stem, "only the library is present -- a comparison table "
-                           "with one implementation compares the library with "
-                           "itself; build the externals to get this table")
-
-    head = (["implementation"] + [LAW_HEAD.get(l, l) for l in laws]
-            + ["finite"])
-    t = Table(stem,
-              _caption("Maximum ULP error over all scored points for "
-                       + _sets(family) + ", by implementation.",
-                       BEST_ASSEMBLY,
-                       _obtained(arch)),
-              f"tab:accuracy-{family.replace('_', '-')}",
-              head, align=wrapcol("2.6cm") + "r" * len(laws) + "rr")
-    for name, by_law in series:
-        cells = [text(name)]
-        for l in laws:
-            cells.append(ulp(by_law[l]) if l in by_law else DASH)
-        cells += score_cells(by_law, laws)
-        t.add(cells)
-        if name.startswith(LIB):
-            t.rule_here()
-
-    lib_by = dict(series[0][1]) if series[0][0].startswith(LIB) else {}
-    incomplete, dashed = 0, False
-    if lib_by and len(series) > 1:
-        near, adv, incomplete = comparison_rows(series, lib_by, laws, "u_max")
-        dashed = dashed_cells(near, adv)
-        # `finite` is empty on the comparison rows.
-        t.rules.add(len(t.rows) - 1)
-        t.add(near + [DASH])
-        t.add(adv + [DASH])
-
-    nf = sum(1 for _, b in series for r in b.values() if _i(r, "nonfinite") > 0)
-    shown = [b[l] for _, b in series for l in laws if l in b]
-
-    t.note = _note(marker_note(shown) + FINITE_NOTE
-                   + (comparison_note("maximum", dashed)
-                      if lib_by and len(series) > 1 else ""))
-    t.provenance(
-        runs_note,
-        r"Each cell is the maximum ULP error over every scored point of the "
-        r"dataset. `\textit{Cap}' marks a maximum at or above the $10^{6}$~ULP cap; the "
-        r"measured value is in the accompanying \texttt{.csv}.",
-        (r"A dagger marks a maximum taken over a \emph{reduced} population "
-         r"because the implementation returned a non-finite result somewhere "
-         r"on that dataset; those counts are in \texttt{tab-exclusions-%s}."
-         % esc(family)) if nf else "",
-        r"\emph{finite} is computed identically for every row, and a daggered "
-        r"cell does not count.",
-        r"The last two rows compare with the most precise external that "
-        r"returned a finite number at every point of that dataset and a maximum "
-        r"below $10^{6}$~ULP; the advantage factor is at least one.",
-        (f"`--' marks the {incomplete} dataset(s) on which no external returned a "
-         r"finite number at every point and a maximum below "
-         r"$10^{6}$~ULP.") if incomplete else "",
-        _relerr_phrase(series, laws),
-        _agreement_phrase(agreement),
-        _machine(arch))
-    return t.write(outdir)
-
-
-def _relerr_phrase(series, laws):
-    """README.md sentence on why relative error is not tabulated, with the
-    library's largest relative maximum and the others' range on that law."""
-    if not series:
-        return ""
-    lib_by = series[0][1] if series[0][0].startswith(LIB) else {}
-    best = None
-    for l in laws:
-        v = _f(lib_by[l], "rel_max") if l in lib_by else float("nan")
-        if _ok(v) and (best is None or v > best[1]):
-            best = (l, v)
-    if best is None or best[1] <= 0:
-        return (r"Relative error is not tabulated, because it is undefined at a "
-                r"zero reference and the corpus contains references at and near "
-                r"zero; it is in the \texttt{.csv}. ")
-    law, lv = best
-    others = [_f(b[law], "rel_max") for n, b in series[1:] if law in b]
-    others = [v for v in others if _ok(v) and v > 0]
-    out = (r"Relative error is not tabulated, because it is undefined at a zero "
-           r"reference and the corpus contains references at and near zero. On "
-           r"\texttt{" + esc(law) + r"} the maximum relative error of this "
-           r"library is " + (sig(lv, 2)[0] or "--")
-           + r", at a reference near the bottom of the double range")
-    if others:
-        out += (r", and the other implementations on the same dataset spread from "
-                + (sig(min(others), 2)[0] or "--") + r" to "
-                + (sig(max(others), 2)[0] or "--"))
-    out += (r". The relative error is in the \texttt{.csv}. ")
-    return out
-
-
-def _agreement_phrase(agreement):
-    """The result of `machine_agreement` as a README.md sentence, or ""."""
-    if not agreement:
-        return ""
-    n, bad, who = agreement
-    if not n:
-        return ""
-    if not bad:
-        return (f"All {n:,} accuracy fields agree between the two "
-                f"machines. ")
-    return (f"{n - bad:,} of {n:,} accuracy fields agree between the two "
-            f"machines; the differing rows are "
-            f"{', '.join(esc(w) for w in who)}. ")
-
-
 def esc(t):
     """Escape a data-derived string: notes and captions are emitted raw
     (`note_raw=True`), so every CSV, provenance or run-id string passes here."""
@@ -776,68 +600,10 @@ def _note(tex, md=None):
     return n
 
 
-# Median ULP by law and implementation
-def tab_median(acc, sup, outdir, runs_note, family="z_nu", backend=None,
-               arch=""):
-    """Median ULP per law, rows and order of `tab_accuracy`; `tab_medmax` combines
-    the two, and a document uses one form or the other."""
-    stem = f"tab-median-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows -- the accuracy stage did not run")
-    backend = backend or lib_backend_for(acc, family=family)
-    laws = laws_present(acc)
-    if not laws:
-        return _skip(stem, "no rows on any of the paper's accuracy laws")
-    series = _impl_series(acc, sup, family, backend)
-    if len(series) < 2:
-        return _skip(stem, "only the library is present")
-
-    head = ["implementation"] + [LAW_HEAD.get(l, l) for l in laws]
-    t = Table(stem,
-              _caption("Median ULP error over all scored points for "
-                       + _sets(family) + ", by implementation.",
-                       BEST_ASSEMBLY,
-                       _obtained(arch)),
-              f"tab:median-{family.replace('_', '-')}",
-              head, align=wrapcol("2.6cm") + "r" * len(laws))
-    for name, by_law in series:
-        cells = [text(name)]
-        for l in laws:
-            cells.append(num(_f(by_law[l], "u_med")) if l in by_law else DASH)
-        t.add(cells)
-        if name.startswith(LIB):
-            t.rule_here()
-
-    # The library's largest max/median ratio, for the README.md.
-    lib_by = dict(series[0][1]) if series[0][0].startswith(LIB) else {}
-    worst = None
-    for l in laws:
-        if l not in lib_by:
-            continue
-        m, x = _f(lib_by[l], "u_med"), _f(lib_by[l], "u_max")
-        if _ok(m) and _ok(x) and m > 0 and (worst is None or x / m > worst[1]):
-            worst = (l, x / m)
-
-    t.provenance(
-        runs_note,
-        r"Each cell is the median ULP error over every scored point, the "
-        r"same population as the maximum in \texttt{tab-accuracy-%s}, with the "
-        r"same rows in the same order. The `\textit{Cap}' and dagger markers "
-        r"apply to maxima and are not used here." % esc(family),
-        (r"The largest ratio of maximum to median for this library is "
-         r"$%.0f\times$, on \texttt{%s}." % (worst[1], esc(worst[0]))
-         if worst else ""),
-        r"Quantiles are nearest-rank on the exact sorted sample, so every "
-        r"value here occurred.",
-        _machine(arch))
-    return t.write(outdir)
-
-
 # Median and maximum in one cell
 def tab_medmax(acc, sup, outdir, runs_note, family="z_nu", backend=None,
                arch=""):
-    """`median / maximum` per cell: `tab_accuracy` and `tab_median` in one table;
-    the markers apply to the maximum only."""
+    """`median / maximum` per cell; the markers apply to the maximum only."""
     stem = f"tab-medmax-{family}"
     if not acc:
         return _skip(stem, "no accuracy rows -- the accuracy stage did not run")
@@ -889,396 +655,14 @@ def tab_medmax(acc, sup, outdir, runs_note, family="z_nu", backend=None,
     t.provenance(
         runs_note,
         r"Each cell is the median\,/\,maximum ULP error over the scored "
-        r"points of the dataset. The maximum and its markers are those of "
-        r"\texttt{tab-accuracy-%s}, which this table combines with "
-        r"\texttt{tab-median-%s}; the `\textit{Cap}' and dagger markers apply "
+        r"points of the dataset; the `\textit{Cap}' and dagger markers apply "
         r"to the maximum only. The two closing rows compare the median and the "
-        r"maximum separately; their maximum half is the comparison of "
-        r"\texttt{tab-accuracy-%s}." % (esc(family), esc(family), esc(family)),
+        r"maximum separately.",
         r"Quantiles are nearest-rank on the sorted sample. The \texttt{.csv} "
-        r"writes the cell as \texttt{median/maximum} at full precision; the "
-        r"two quantities are also in the \texttt{.csv} of each combined "
-        r"table, one per field.",
+        r"writes the cell as \texttt{median/maximum} at full precision.",
         (f"`--' marks the {incomplete} dataset(s) on which no external returned a "
          r"finite number at every point and a maximum below "
          r"$10^{6}$~ULP.") if incomplete else "",
-        _machine(arch))
-    return t.write(outdir)
-
-
-# Library ULP distribution per law and location of the maximum
-def tab_distribution(acc, outdir, runs_note, family="z_nu", backend=None,
-                     arch=""):
-    """The library's ULP quantiles per law and the point (`worst_arg`, `worst_nu`)
-    of the ULP maximum."""
-    stem = f"tab-distribution-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows -- the accuracy stage did not run")
-    backend = backend or lib_backend_for(acc, family=family)
-    laws = laws_present(acc)
-    by_law = lib_rows(acc, family, backend)
-    laws = [l for l in laws if l in by_law]
-    if not laws:
-        return _skip(stem, f"no library rows on backend {backend}")
-
-    argname = "z" if family == "z_nu" else "h"
-    head = ["dataset", r"$q_1$", "median", r"$q_3$", r"$p_{99}$",
-            r"$p_{99.9}$", "max", r"max $/$ med",
-            rf"${argname}^{{\ast}}$", r"$\nu^{\ast}$"]
-    t = Table(stem,
-              _caption(r"ULP error quantiles of the \texttt{" + esc(backend)
-                       + r"} backend for " + _sets(family) + r", and the point "
-                       r"$(" + argname + r"^{\ast}, \nu^{\ast})$ at which the "
-                       r"maximum is attained.", _obtained(arch)),
-              f"tab:distribution-{family.replace('_', '-')}",
-              head, align=wrapcol("2.2cm") + "r" * 9)
-    for l in laws:
-        r = by_law[l]
-        med, mx = _f(r, "u_med"), _f(r, "u_max")
-        # Maximum through `ulp`, other quantiles through `qcell`, as elsewhere.
-        t.add([raw(LAW_HEAD.get(l, l), l),
-               qcell(r, "u_q1"), qcell(r, "u_med"), qcell(r, "u_q3"),
-               qcell(r, "u_p99"), qcell(r, "u_p999"), ulp(r),
-               ratio(mx / med) if (_ok(med) and _ok(mx) and med > 0) else DASH,
-               num(_f(r, "worst_arg"), 4), num(_f(r, "worst_nu"), 4)])
-
-    t.note = _note(
-        r"$q_1$, $q_3$: first and third quartiles; $p_{99}$, $p_{99.9}$: 99th "
-        r"and 99.9th percentiles; max $/$ med: ratio of the maximum to the "
-        r"median. "
-        + marker_note([by_law[l] for l in laws],
-                      keys=("u_q1", "u_med", "u_q3", "u_p99", "u_p999", "u_max")))
-    t.provenance(
-        runs_note,
-        r"Quantiles of the ULP error over the scored points of each dataset "
-        r"(nearest-rank), and the $(" + argname + r", \nu)$ at which the "
-        r"maximum is attained; the maximum can be reproduced by evaluating "
-        r"that one point. A large \emph{max / med} means that the maximum is "
-        r"attained in a small part of the dataset.",
-        _machine(arch))
-    return t.write(outdir)
-
-
-# ULP distribution of every implementation, by law
-# The quantiles are the harness's own (benchmark/common/bench_metrics.h, nearest
-# rank), read from the CSV row; the share below 1 ulp is summed from the detail
-# histogram (runs.detail_for), refused when its total differs from `n_scored`.
-QUANTILE_COLS = [("u_min", "min"), ("u_q1", r"$q_1$"), ("u_med", "median"),
-                 ("u_q3", r"$q_3$"), ("u_p99", r"$p_{99}$"),
-                 ("u_p999", r"$p_{99.9}$"), ("u_max", "max"),
-                 ("u_mean", "mean")]
-
-# Rows per float, law headings included; a taller table is split between laws
-# (fit_to_column does not split).  This many rows, with caption and note, fit the
-# text height at the smallest upright size.
-QUANTILE_ROWS_PER_FLOAT = 44
-
-
-class GroupedTable(Table):
-    """A `Table` whose first column (group key in its CSV form) names groups of
-    rows: a spanning heading row per group in the `.tex`; in the `.md` filled on a
-    group's first row, in the `.csv` on every row.  `breaks` starts new floats
-    (labels `-2`, `-3`, ...), all set at one size; `cont_captions` holds one caption
-    per break and grows with `breaks` (`_write_tex` reads `cont_captions[k - 1]`)."""
-
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        self.breaks = []
-        self.cont_captions = []
-
-    def _write_tex(self, path):
-        size, colsep, env = SIZE_LADDER[min(self.level, len(SIZE_LADDER) - 1)]
-        need = "booktabs, array" + (", rotating" if env != "table" else "")
-        ncol = len(self.header) - 1
-        cuts = [0] + list(self.breaks) + [len(self.rows)]
-        parts = []
-        for k in range(len(cuts) - 1):
-            a, b = cuts[k], cuts[k + 1]
-            body, rules, prev = [], set(), None
-            for i in range(a, b):
-                r = self.rows[i]
-                if r[0].csv != prev:
-                    # A one-element row is emitted as that cell alone.
-                    body.append([style.Raw(r"\multicolumn{%d}{l}{\textit{%s}}"
-                                           % (ncol, r[0].tex))])
-                    prev = r[0].csv
-                body.append([c.tex for c in r[1:]])
-                if i in self.rules:
-                    rules.add(len(body) - 1)
-            if k == 0:
-                cap, lab, note = self.caption, self.label, self.note
-            else:
-                cap = self.cont_captions[k - 1]
-                lab = f"{self.label}-{k + 1}"
-                note = r"Continued from Table~\ref{%s}." % self.label
-            tmp = path + ".part"
-            style.booktabs(
-                tmp, cap, lab, self.header[1:], body,
-                align=self.align, note=note, note_raw=True,
-                rules_after=rules, preamble_note=need, size=size,
-                colsep=colsep, env=env,
-                placement=None if env != "table" else "t")
-            parts.append(open(tmp).read())
-            os.remove(tmp)
-        open(path, "w").write("\n".join(parts))
-
-
-def qcell(row, key):
-    """A ULP statistic other than the maximum: the value, or `Cap` at or above
-    CATASTROPHIC; the row's dagger is carried by its maximum."""
-    v = _f(row, key)
-    if not _ok(v):
-        return DASH
-    if v >= CATASTROPHIC:
-        return Cell(style.Raw(r"\textit{Cap}"), "Cap", repr(v))
-    return num(v)
-
-
-def pct_below(share):
-    """A share in [0, 1] as a percentage, one decimal; 0 and 100 only when exact."""
-    if not _ok(share):
-        return DASH
-    p = 100.0 * share
-    if share == 1.0:
-        s = "100"
-    elif share == 0.0:
-        s = "0"
-    else:
-        s = f"{p:.1f}"
-        if s == "100.0":
-            s = ">99.9"
-        elif s == "0.0":
-            s = "<0.1"
-    tex = s.replace(">", "$>$").replace("<", "$<$")
-    return Cell(style.Raw(tex), s, repr(p))
-
-
-QUANTILE_FIELDS = tuple(k for k, _h in QUANTILE_COLS) + ("n_scored", "nonfinite")
-
-
-def quantile_agreement(per_machine, family):
-    """`machine_agreement` over the rows and fields `tab_quantiles` shows;
-    `per_machine` is [(label, acc, sup)]."""
-    shown = []
-    for lab, acc, sup in per_machine:
-        backend = lib_backend_for(acc, family=family)
-        rows = [r for _n, b in _impl_series(acc, sup, family, backend)
-                for l, r in b.items() if l in ACC_LAWS]
-        shown.append((lab, rows))
-    return machine_agreement(shown, fields=QUANTILE_FIELDS)
-
-
-def _quantile_table(stem, caption, label, series, laws, rowhead, share=True):
-    """(table, missing): the quantile table, one block per law; `missing` lists
-    (name, law, reason) with no share below 1 ulp (printed `--`)."""
-    head = (["dataset", rowhead] + [h for _k, h in QUANTILE_COLS]
-            + ([r"$<1$ ULP (\%)"] if share else []))
-    # `align` omits the law column, a heading row in the .tex.
-    t = GroupedTable(stem, caption, label, head,
-                     align=wrapcol("2.6cm") + "r" * (len(QUANTILE_COLS)
-                                                    + (1 if share else 0)))
-    missing = []
-    starts = []                      # (first row index, law) of each block
-    for l in laws:
-        block = [(n, b[l]) for n, b in series if l in b]
-        if not block:
-            continue
-        starts.append((len(t.rows), l))
-        lab = LAW_LABEL.get(l, l)
-        for i, (name, r) in enumerate(block):
-            cells = [Cell(style.Raw(lab), _demath(lab) if i == 0 else "", l),
-                     text(name)]
-            for k, _h in QUANTILE_COLS:
-                cells.append(ulp(r, k) if k == "u_max" else qcell(r, k))
-            if not share:
-                t.add(cells)
-                continue
-            e, why = runs.detail_for(r)
-            if e is None:
-                missing.append((name, l, why))
-                print(f"    !! {stem}: {name} on {l}: no share below 1 ulp -- "
-                      f"{why}")
-                cells.append(DASH)
-            else:
-                cells.append(pct_below(runs.hist_share_below(e, 0.0)))
-            t.add(cells)
-        t.rule_here()
-    # Split between laws within the row budget (one heading row per law).
-    n = len(t.rows) + len(starts)
-    if n > QUANTILE_ROWS_PER_FLOAT and len(starts) > 1:
-        k = -(-n // QUANTILE_ROWS_PER_FLOAT)            # floats needed
-        per = -(-len(starts) // k)                       # laws per float
-        for j in range(per, len(starts), per):
-            t.breaks.append(starts[j][0])
-            t.cont_captions.append(
-                caption.split(". ")[0].rstrip(".")
-                + " (continued): " + ", ".join(
-                    LAW_LABEL.get(s[1], s[1])
-                    for s in starts[j:j + per]) + ".")
-    return t, missing
-
-
-def _quantile_note(series, laws, missing, share=True):
-    """The note of the quantile tables; `share=False` without the share column."""
-    return (
-        r"$q_1$, $q_3$: first and third quartiles; $p_{99}$, $p_{99.9}$: 99th "
-        r"and 99.9th percentiles. "
-        + ((r"$<1$ ULP: share of the scored points with a ULP error below 1"
-            + (r"; --: not available. " if missing else ". ")) if share else "")
-        + marker_note([b[l] for _, b in series for l in laws if l in b],
-                      keys=[k for k, _h in QUANTILE_COLS]))
-
-
-def _quantile_facts(missing, nf, share=True):
-    """The README facts of the quantile tables (see `_quantile_note`)."""
-    return [
-        r"Each row is the distribution of the ULP error over the scored "
-        r"points of one dataset: the minimum, the quartiles ($q_1$, median, $q_3$), "
-        r"the 99th and 99.9th percentiles, the maximum and the mean. The "
-        r"quantiles are the benchmark's own, nearest-rank on the exact sorted "
-        r"sample, so every value except the mean occurred.",
-        r"Every statistic of a row with a dagger is taken over the same finite "
-        r"points." if nf else "",
-        (r"The last column is the share of the scored points whose ULP "
-         r"error is below 1, computed from the histogram of the ULP "
-         r"error the benchmark records beside each row (log-spaced bins "
-         r"with an edge at 1~ULP), not from the sorted sample; an error "
-         r"within about $10^{-15}$ below 1~ULP falls in the bin above the "
-         r"edge and is counted as not below.") if share else "",
-        (r"`--' in that column marks %d row(s) whose histogram was absent or "
-         r"did not cover exactly the scored points: %s."
-         % (len(missing), "; ".join(r"%s on \texttt{%s} (%s)"
-                                    % (esc(n), esc(l), esc(w))
-                                    for n, l, w in missing)))
-        if missing and share else ""]
-
-
-def tab_quantiles(acc, sup, outdir, runs_note, family="z_nu", backend=None,
-                  agreement=None, arch=""):
-    """The ULP distribution of every `tab_accuracy` row, law by law, with the
-    share below 1 ulp."""
-    stem = f"tab-quantiles-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows -- the accuracy stage did not run")
-    backend = backend or lib_backend_for(acc, family=family)
-    laws = laws_present(acc)
-    if not laws:
-        return _skip(stem, "no rows on any of the paper's accuracy laws")
-    series = _impl_series(acc, sup, family, backend)
-    if len(series) < 2:
-        return _skip(stem, "only the library is present -- the table compares "
-                           "implementations; build the externals to get it")
-    t, missing = _quantile_table(
-        stem,
-        _caption("Distribution of the ULP error over all scored points for "
-                 + _sets(family) + ", by implementation.",
-                 BEST_ASSEMBLY,
-                 _obtained(arch)),
-        f"tab:quantiles-{family.replace('_', '-')}", series, laws,
-        "implementation")
-    nf = sum(1 for _, b in series for l, r in b.items()
-             if l in laws and _i(r, "nonfinite") > 0)
-    t.note = _note(_quantile_note(series, laws, missing))
-    t.provenance(runs_note, *_quantile_facts(missing, nf),
-                 _agreement_phrase(agreement), _machine(arch))
-    return t.write(outdir)
-
-
-def tab_gpu_quantiles(gsup, outdir, runs_note, arch, family="z_nu",
-                      scope="kernel"):
-    """`tab_quantiles` for the device kernels of `tab_gpu` (kernel scope)."""
-    stem = f"tab-gpu-quantiles-{family}"
-    if not gsup:
-        return _skip(stem, "no device supplier rows -- the GPU stage did not "
-                           "run, or ran on a host with no CUDA device")
-    rows = [r for r in gsup if scope_of(r) == scope and r.get("family") == family]
-    if not rows:
-        return _skip(stem, f"the device rows carry no {scope}-scope "
-                           f"measurement for {family}")
-    laws = laws_present(rows)
-    best = best_assembly(rows)
-    names = sorted({r["supplier"] for r in rows})
-    names.sort(key=lambda s: (0 if s.startswith(LIB) else 1, s))
-    if not laws or len(names) < 2:
-        return _skip(stem, "needs the device library and at least one external "
-                           "kernel on a shared law")
-    series = [(s, {l: r for (sn, f, l), r in best.items()
-                   if sn == s and f == family}) for s in names]
-    t, missing = _quantile_table(
-        stem,
-        _caption("Distribution of the ULP error over all scored points of the "
-                 "GPU kernels for " + _sets(family) + ".",
-                 BEST_ASSEMBLY,
-                 _obtained(arch, gpu=True)),
-        f"tab:gpu-quantiles-{family.replace('_', '-')}", series, laws, "kernel")
-    nf = sum(1 for _, b in series for r in b.values() if _i(r, "nonfinite") > 0)
-    t.note = _note(_quantile_note(series, laws, missing))
-    t.provenance(runs_note, *_quantile_facts(missing, nf), _machine(arch))
-    return t.write(outdir)
-
-
-# Cost by law and implementation
-def tab_cost(acc, sup, outdir, runs_note, arch, family="z_nu", backend=None):
-    """`ns_med` (as in fig_cost_accuracy_plane) per law and implementation, in the
-    layout of `tab_accuracy`."""
-    stem = f"tab-cost-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows -- costs are recorded on them")
-    backend = backend or lib_backend_for(acc, family=family)
-    laws = laws_present(acc)
-    series = _impl_series(acc, sup, family, backend)
-    if not laws or len(series) < 2:
-        return _skip(stem, "needs the library and at least one external on a "
-                           "shared law")
-    head = (["implementation"] + [LAW_HEAD.get(l, l) for l in laws]
-            + [r"worst spread"])
-    t = Table(stem,
-              _caption("Single-threaded runtime cost in nanoseconds per element "
-                       "for " + _sets(family) + ", by implementation.",
-                       MEDIAN_COST, BEST_ASSEMBLY,
-                       _obtained(arch)),
-              f"tab:cost-{family.replace('_', '-')}",
-              head, align=wrapcol("2.6cm") + "r" * len(laws) + "r")
-    lib_by = None
-    worst_spread = {}
-    for name, by_law in series:
-        cells = [text(name)]
-        for l in laws:
-            cells.append(num(_f(by_law[l], "ns_med")) if l in by_law else DASH)
-        # Worst spread: max/min over the repetitions, worst over the laws shown.
-        sp = [_f(by_law[l], "ns_spread") for l in laws if l in by_law]
-        sp = [v for v in sp if _ok(v) and v > 0]
-        worst_spread[name] = max(sp) if sp else float("nan")
-        cells.append(ratio(worst_spread[name]) if sp else DASH)
-        t.add(cells)
-        if name.startswith(LIB):
-            lib_by = by_law
-            t.rule_here()
-    incomplete, dashed = 0, False
-    if lib_by and len(series) > 1:
-        near, adv, incomplete = comparison_rows(series, lib_by, laws, "ns_med")
-        dashed = dashed_cells(near, adv)
-        t.rules.add(len(t.rows) - 1)
-        t.add(near + [DASH])
-        t.add(adv + [DASH])
-    t.note = _note(
-        r"\emph{worst spread}: largest ratio of the slowest to the fastest "
-        r"repetition over the datasets of the row. "
-        + (comparison_note("cost", dashed)
-           if lib_by and len(series) > 1 else ""))
-    t.provenance(
-        runs_note,
-        r"Each cell is the median over repetitions of a single-threaded call "
-        r"on the whole array, including the bucketing this library performs "
-        r"inside the call. Same rows and same order as the accuracy table.",
-        r"The last two rows compare with the fastest external that returned a "
-        r"finite number at every point of that dataset and a maximum below "
-        r"$10^{6}$~ULP; the advantage factor is at least one.",
-        (f"`--' marks the {incomplete} dataset(s) on which no external returned a "
-         r"finite number at every point and a maximum below "
-         r"$10^{6}$~ULP.") if incomplete else "",
-        r"The \emph{worst spread} is largest on the cheapest cells, where one "
-        r"interruption is a large multiple of the measured time.",
         _machine(arch))
     return t.write(outdir)
 
@@ -1287,7 +671,7 @@ def tab_cost(acc, sup, outdir, runs_note, arch, family="z_nu", backend=None):
 def tab_exclusions(acc, sup, outdir, runs_note, family="z_nu", backend=None,
                    arch=""):
     """Non-finite counts per law; a non-zero cell means a daggered maximum in
-    `tab_accuracy`."""
+    `tab_medmax`."""
     stem = f"tab-exclusions-{family}"
     if not acc:
         return _skip(stem, "no accuracy rows")
@@ -1330,122 +714,10 @@ def tab_exclusions(acc, sup, outdir, runs_note, family="z_nu", backend=None,
         runs_note,
         r"Each cell is a count of points, not a rate. A zero row is an "
         r"implementation that returned a finite double at every point of every "
-        r"dataset; for a non-zero cell the maximum in \texttt{tab-accuracy-%s} is "
+        r"dataset; for a non-zero cell the maximum in \texttt{tab-medmax-%s} is "
         r"taken over fewer points and carries a dagger there, also where it "
         r"reads `\textit{Cap}'." % esc(family),
         r"%d of %d measured cells are zero." % (clean, tot),
-        _machine(arch))
-    return t.write(outdir)
-
-
-# Assembly selected for each external
-def tab_assembly(sup, outdir, runs_note, family="z_nu", scope="call",
-                 stem_prefix="tab-assembly", lib_supplier=None, arch=""):
-    """The assembly `best_assembly` selects per external and law (`direct`,
-    `logtrick`, and `scaled` where a scaled $K$ is published)."""
-    stem = f"{stem_prefix}-{family}"
-    if not sup:
-        return _skip(stem, "no external supplier rows -- nothing to choose "
-                           "between")
-    # The device variant drops the library row, which has a single assembly.
-    rows = [r for r in sup if scope_of(r) == scope and r.get("family") == family]
-    if lib_supplier:
-        rows = [r for r in rows if r.get("supplier") != lib_supplier]
-    laws = laws_present(rows)
-    names = suppliers_present(rows, family, scope=scope)
-    if not laws or not names:
-        return _skip(stem, f"no external carries a {family} accuracy row")
-    best = external_rows(rows, family, scope=scope)
-    # Only suppliers with more than one assembly are listed.
-    multi = [s for s in names
-             if len({r.get("backend") for r in rows if r["supplier"] == s}) > 1]
-    if not multi:
-        return _skip(stem, "every external was measured in a single assembly, "
-                           "so there is no choice to record")
-    head = ["external"] + [LAW_HEAD.get(l, l) for l in laws]
-    t = Table(stem,
-              _caption("Assembly selected for each external implementation "
-                       "across the %s %s datasets."
-                       % (pf.CONV.get(family, esc(family)),
-                          "GPU" if scope == "kernel" else "CPU"),
-                       "The assembly is selected by the caller rather than by "
-                       "the external implementation; each implementation is "
-                       "evaluated in its best assembly, " + BEST_RULE + ".",
-                       _obtained(arch, gpu=scope == "kernel")),
-              f"tab:{stem_prefix.replace('tab-', '')}-{family.replace('_', '-')}",
-              head, align=wrapcol("2.3cm") + "l" * len(laws))
-    for sname in multi:
-        cells = [text(sname)]
-        for l in laws:
-            r = best.get((sname, l))
-            cells.append(text(pf.asm_label(r.get("backend"))) if r else DASH)
-        t.add(cells)
-    scaled = any(r.get("backend") == "scaled" for r in rows)
-    t.note = _note(
-        r"\texttt{direct}: $2^{1-\nu}\Gamma(\nu)^{-1}z^{\nu}K_{\nu}(z)$ as "
-        r"written; \texttt{exp-log}: the whole prefactor through a logarithm"
-        + (r"; \texttt{scaled}: from a published $K_{\nu}(z)e^{z}$. " if scaled
-           else ". "))
-    t.provenance(
-        runs_note,
-        r"No supplier here publishes a scaled $K_{\nu}(z)e^{z}$, so the "
-        r"choice is two-way." if not scaled else "",
-        r"The selection rule is the one the figures use: a row that returns "
-        r"a finite number at every point is preferred to one that does not, "
-        r"then the larger scored population, then the smaller worst case.")
-    return t.write(outdir)
-
-
-# Attribution across backends
-def tab_attribution(acc, outdir, runs_note, arch, family="z_nu"):
-    """Maximum ULP and cost per law for each library backend, scalar to widest."""
-    stem = f"tab-attribution-{family}"
-    if not acc:
-        return _skip(stem, "no accuracy rows")
-    backends = [b for b in BACKEND_ORDER
-                if any(r.get("backend") == b and r.get("family") == family
-                       for r in acc)]
-    if len(backends) < 2:
-        return _skip(stem, f"{len(backends)} library backend(s) built "
-                           f"({', '.join(backends) or 'none'}) --- the "
-                           f"attribution chain needs at least two to be a "
-                           f"difference")
-    laws = laws_present(acc)
-    if not laws:
-        return _skip(stem, "no rows on the paper's accuracy laws")
-    by = {(r["backend"], r["law"]): r for r in acc
-          if r.get("family") == family and scope_of(r) == "call"}
-    head = ["dataset"] + [esc(b) for b in backends] * 2
-    n = len(backends)
-    _count = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}.get(n, str(n))
-    t = Table(stem,
-              _caption("Maximum ULP error and runtime cost per element of the "
-                       "library backends for " + _sets(family) + ".",
-                       MEDIAN_COST, _obtained(arch)),
-              f"tab:attribution-{family.replace('_', '-')}",
-              head, align="l" + "r" * (2 * n),
-              header_groups=[(2, 1 + n, "max ULP error"),
-                             (2 + n, 1 + 2 * n, "ns / element")])
-    for l in laws:
-        cells = [raw(LAW_HEAD.get(l, l), _demath(LAW_HEAD.get(l, l)))]
-        for b in backends:
-            cells.append(ulp(by[(b, l)]) if (b, l) in by else DASH)
-        for b in backends:
-            cells.append(num(_f(by[(b, l)], "ns_med")) if (b, l) in by else DASH)
-        t.add(cells)
-    t.note = _note(marker_note(
-        [by[(b, l)] for l in laws for b in backends if (b, l) in by]))
-    t.provenance(
-        runs_note,
-        r"The %s objects of the library backends are built from one "
-        r"source." % _count,
-        r"\texttt{scalar} is the direct formula without the double-double "
-        r"arithmetic and argument corrections, so the difference between it "
-        r"and \texttt{matched} is the effect of those; \texttt{matched} is the "
-        r"vector algorithm compiled at width one, so the difference between it "
-        r"and the vector backends is the effect of the vector units. On a "
-        r"machine with neither AVX2 nor AVX-512, \texttt{matched} is the "
-        r"backend the library selects.",
         _machine(arch))
     return t.write(outdir)
 
@@ -1582,170 +854,6 @@ def tab_throughput(lad, slad, outdir, runs_note, arch, family="z_nu",
         r"stops when a rung exceeds its wall-clock budget, so the comparison "
         r"covers $N$ up to this value.",
         pf.pooled_rule() + ".",
-        _machine(arch))
-    return t.write(outdir)
-
-
-def tab_gpu_throughput(gklad, outdir, runs_note, arch, family="z_nu",
-                       asm_of=None, lib_supplier=LIB_CUDA):
-    """`tab_throughput` for the device kernels at kernel scope (no transfers, no
-    workspace), the device library first."""
-    stem = f"tab-gpu-throughput-{family}"
-    if not gklad:
-        return _skip(stem, "no device kernel-ladder rows -- the GPU "
-                           "kernels-ladder stage did not run")
-    rows = [r for r in gklad if r.get("family") == family
-            and scope_of(r) == "kernel"]
-    laws = [l for l in LADDER_LAWS if any(r.get("law") == l for r in rows)]
-    if not laws:
-        return _skip(stem, f"the device kernel ladder carries no {family} "
-                           "rows on a ladder law")
-    names = sorted({r["supplier"] for r in rows})
-    if lib_supplier not in names or len(names) < 2:
-        return _skip(stem, "needs the device library and at least one "
-                           "external kernel on the kernel ladder")
-    names = [lib_supplier] + [n for n in names if n != lib_supplier]
-    asm_of = asm_of or {}
-
-    def sel_of(s):
-        want = asm_of.get(s) if s != lib_supplier else None
-        return {"supplier": s, **({"backend": want} if want else {})}
-
-    def ns_at(rs, key, want_n, **sel):
-        for r in rs:
-            if all(r.get(k) == v for k, v in sel.items()) and _i(r, "n") == want_n:
-                return _f(r, key)
-        return float("nan")
-
-    rungs = None
-    for s in names:
-        for l in laws:
-            got = {_i(r, "n") for r in rows if r.get("law") == l
-                   and all(r.get(k) == v for k, v in sel_of(s).items())}
-            rungs = got if rungs is None else (rungs & got)
-    if not rungs:
-        return _skip(stem, "the device kernels share no ladder rung -- every "
-                           "row would be quoted at a different N")
-    N = max(rungs)
-    top = max(_i(r, "n") for r in rows)
-
-    # Column heads without the corpus size; N is given in the caption.
-    lhead = {"size_random_large": "Size / rand.", "size_half_large": "Size / half"}
-    head = ["kernel"] + [lhead.get(l, LAW_HEAD.get(l, l)) for l in laws] \
-           + [lhead.get(l, LAW_HEAD.get(l, l)) for l in laws] + [r"med$-$min"]
-    nl = len(laws)
-    reach = ("the top of the device kernel ladder, which every row reached"
-             if N == top else
-             "the largest rung every row reached; the ladder itself "
-             f"went to ${_grouped(top)}$")
-    t = Table(stem,
-              _caption(f"Per-element runtime of the GPU kernels at "
-                       f"$N={_grouped(N)}$ for the size-scaling datasets "
-                       + pf.CONV_SUPPLIED.get(family, esc(family)) + ".",
-                       "The cost columns give the kernel cost in nanoseconds "
-                       "per element for the "
-                       + pf._and(pf._size_set(l) for l in laws)
-                       + " datasets; the ratio columns give the speedup of "
-                       + esc(lib_supplier) + " over each external "
-                       "implementation, computed from the corresponding kernel "
-                       "costs.", MEDIAN_COST, _obtained(arch, gpu=True)),
-              f"tab:gpu-throughput-{family.replace('_', '-')}", head,
-              align=wrapcol("3.4cm") + "r" * (2 * nl + 1),
-              header_groups=[(2, 1 + nl, "ns / element"),
-                             (2 + nl, 1 + 2 * nl, r"$\times$ this library")])
-    base = {}
-    for s in names:
-        want = sel_of(s).get("backend")
-        cells = [text(s + (f" ({pf.asm_label(want)})" if want else ""))]
-        vals = [ns_at(rows, "ns_med", N, law=l, **sel_of(s)) for l in laws]
-        cells += [num(v) for v in vals]
-        if s == lib_supplier:
-            base = dict(zip(laws, vals))
-            cells += [DASH] * nl
-        else:
-            for l, v in zip(laws, vals):
-                b = base.get(l)
-                cells.append(ratio(v / b) if _ok(v) and _ok(b) and b > 0
-                             else DASH)
-        cells.append(_spread_pct(ns_at, rows, "ns_min", "ns_med", N, laws,
-                                 **sel_of(s)))
-        t.add(cells)
-        if s == lib_supplier:
-            t.rule_here()
-    # `--` outside the library row's ratio columns marks a missing value.
-    _gap = any(c is DASH for i, r in enumerate(t.rows) for j, c in enumerate(r)
-               if not (i == 0 and 1 + nl <= j <= 2 * nl))
-    t.note = _note(
-        r"\emph{med$-$min}: largest excess of the median over the fastest "
-        r"repetition over the datasets of the row, in per cent. "
-        + (r"--: not applicable or not measured. " if _gap
-           else r"--: not applicable. "))
-    t.provenance(
-        runs_note,
-        r"$N$ is " + reach + ".",
-        r"Each cell is the median over the timed repetitions of the elapsed "
-        r"device time of the kernel alone; the ratio is the external's cost "
-        r"divided by \texttt{" + esc(lib_supplier) + r"}'s. Kernel scope "
-        r"excludes the host-device transfers, which are the same for every "
-        r"row and are compared in the transfer-strategy table.",
-        pf.pooled_rule(device=True) + ".",
-        _machine(arch))
-    return t.write(outdir)
-
-
-# The two argument conventions
-def tab_convention(acc, outdir, runs_note, arch, backend=None):
-    """Maximum ULP and cost per law with $(z,\\nu)$ supplied and with $z$ derived
-    from $(h,\\nu,s)$, and their ratios."""
-    stem = "tab-convention"
-    fams = [f for f in ("z_nu", "h_nu_s")
-            if any(r.get("family") == f for r in acc)]
-    if len(fams) < 2:
-        return _skip(stem, f"{len(fams)} argument convention(s) measured "
-                           f"({', '.join(fams) or 'none'}) --- the comparison "
-                           f"needs both")
-    backend = backend or lib_backend_for(acc)
-    laws = laws_present(acc)
-    if not laws:
-        return _skip(stem, "no rows on the paper's accuracy laws")
-    by = {(r["family"], r["law"]): r for r in acc
-          if r.get("backend") == backend and scope_of(r) == "call"}
-    head = ["dataset", r"$(z,\nu)$", r"$(h,\nu,s)$", "ratio",
-            r"$(z,\nu)$", r"$(h,\nu,s)$", "ratio"]
-    t = Table(stem,
-              _caption(r"Maximum ULP error and runtime cost per element of the "
-                       r"\texttt{" + esc(backend) + r"} backend with $z$ "
-                       r"supplied, $(z,\nu)$, and with $z$ computed from "
-                       r"$(h,\nu,s)$, by dataset.", MEDIAN_COST,
-                       _obtained(arch)),
-              "tab:convention", head, align="lrrrrrr",
-              header_groups=[(2, 4, "max ULP error"), (5, 7, "ns / element")])
-    for l in laws:
-        a, b = by.get(("z_nu", l)), by.get(("h_nu_s", l))
-        if not (a and b):
-            continue
-        ua, ub = _f(a, "u_max"), _f(b, "u_max")
-        ca, cb = _f(a, "ns_med"), _f(b, "ns_med")
-        t.add([raw(LAW_HEAD.get(l, l), _demath(LAW_HEAD.get(l, l))),
-               ulp(a), ulp(b),
-               ratio(ub / ua) if _ok(ua) and ua > 0 and _ok(ub) else DASH,
-               num(ca), num(cb),
-               ratio(cb / ca) if _ok(ca) and ca > 0 and _ok(cb) else DASH])
-    if not t.rows:
-        return _skip(stem, "no law carries both conventions")
-    t.note = _note(
-        r"ratio: the $(h,\nu,s)$ value divided by the $(z,\nu)$ value. "
-        + marker_note([r for l in laws
-                       if by.get(("z_nu", l)) and by.get(("h_nu_s", l))
-                       for r in (by[("z_nu", l)], by[("h_nu_s", l)])]))
-    t.provenance(
-        runs_note,
-        r"Computing $z$ from $(h,\nu,s)$ in double precision has an error of "
-        r"about $z$ times the machine epsilon, and since $M(h)$ decays like "
-        r"$e^{-z}$, that absolute error in $z$ reaches the result as a "
-        r"relative error of the same size.",
-        r"$z$ is derived in the router, before any backend-specific kernel, "
-        r"in the same way for every backend; one backend therefore suffices.",
         _machine(arch))
     return t.write(outdir)
 
@@ -2313,60 +1421,10 @@ def tab_references(acc, sup, outdir, runs_note):
     return t.write(outdir)
 
 
-# Machine independence of accuracy
-def tab_machine_independence(per_machine_acc, per_machine_sup, outdir,
-                             runs_note, labels):
-    """Per implementation, the accuracy fields equal across CPU architectures."""
-    stem = "tab-machine-independence"
-    # Two CPU architectures, not two labels: one model agrees by construction.
-    import runs as _mp
-    archs = sorted({_mp.cpu_arch_key(l) for l in labels})
-    if len(archs) < 2:
-        return _skip(stem, f"needs 2 CPU architectures, found {len(archs)} "
-                           f"({', '.join(archs) or 'none'}) across "
-                           f"{len(labels)} machine(s); runs with the same CPU "
-                           f"model are one machine and are not compared")
-    head = ["implementation", "fields compared", "differing", "verdict"]
-    t = Table(stem,
-              "Accuracy statistics of each implementation compared between "
-              "the " + pf._and(esc(a) for a in archs) + " CPUs.",
-              "tab:machine-independence", head, align="lrrl")
-    groups = []
-    if all(per_machine_acc):
-        groups.append((LIB, per_machine_acc))
-    sups = sorted({r["supplier"] for rows in per_machine_sup for r in rows
-                   if (r.get("supplier") or "-") != "-"})
-    for s in sups:
-        groups.append((s, [[r for r in rows if r.get("supplier") == s]
-                           for rows in per_machine_sup]))
-    for name, rowsets in groups:
-        if not all(rowsets):
-            continue
-        n, bad, _ = machine_agreement(list(zip(labels, rowsets)))
-        if not n:
-            continue
-        t.add([text(name), count(n), count(bad),
-               raw(r"bit-identical" if not bad else
-                   r"\emph{differs}", "bit-identical" if not bad else "differs")])
-    if not t.rows:
-        return _skip(stem, "the machines share no comparable accuracy cell")
-    t.note = _note(
-        r"Compared: the maximum, median, 99th and 99.9th percentile ULP error, "
-        r"the scored and non-finite counts and the maximum relative error of "
-        r"every argument convention, dataset and backend both machines "
-        r"measured. ")
-    t.provenance(
-        runs_note,
-        r"Each compared statistic is a deterministic function of the returned "
-        r"doubles, so a difference is a difference in the returned values.")
-    return t.write(outdir)
-
-
 # Device accuracy and cost at kernel scope
-def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
-            metric="accuracy"):
-    r"""The accuracy or cost table (`metric`) of the device kernels."""
-    stem = f"tab-gpu-{metric}-{family}"
+def tab_gpu_cost(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel"):
+    r"""The cost table of the device kernels."""
+    stem = f"tab-gpu-cost-{family}"
     if not gsup:
         return _skip(stem, "no device supplier rows -- the GPU stage did not "
                            "run, or ran on a host with no CUDA device")
@@ -2381,14 +1439,8 @@ def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
     if not laws or len(names) < 2:
         return _skip(stem, "needs the device library and at least one external "
                            "kernel on a shared law")
-    acc = metric == "accuracy"
     head = ["kernel"] + [LAW_HEAD.get(l, l) for l in laws]
     t = Table(stem,
-              _caption("Maximum ULP error over all scored points of the GPU "
-                       "kernels for " + _sets(family) + ".",
-                       BEST_ASSEMBLY,
-                       _obtained(arch, gpu=True))
-              if acc else
               _caption("GPU kernel execution cost for " + _sets(family) + ".",
                        "Entries give the kernel cost in nanoseconds per element "
                        "for each implementation and dataset; the final row "
@@ -2397,17 +1449,16 @@ def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
                        + " relative to the fastest external implementation for "
                        "each dataset.", BEST_ASSEMBLY, MEDIAN_COST,
                        _obtained(arch, gpu=True)),
-              f"tab:gpu-{metric}-{family.replace('_', '-')}",
+              f"tab:gpu-cost-{family.replace('_', '-')}",
               head, align=wrapcol("2.6cm") + "r" * len(laws))
-    # Cost table, first row: the points timed per law (`ns_points`).
-    if not acc:
-        npts = {}
-        for (sn, f, l), r in best.items():
-            if f == family and _i(r, "ns_points") > 0:
-                npts.setdefault(l, set()).add(_i(r, "ns_points"))
-        t.add([raw(r"$N$ (points timed)", "N (points timed)", "N (points timed)")]
-              + [count(max(npts[l])) if l in npts else DASH for l in laws])
-        t.rule_here()
+    # First row: the points timed per law (`ns_points`).
+    npts = {}
+    for (sn, f, l), r in best.items():
+        if f == family and _i(r, "ns_points") > 0:
+            npts.setdefault(l, set()).add(_i(r, "ns_points"))
+    t.add([raw(r"$N$ (points timed)", "N (points timed)", "N (points timed)")]
+          + [count(max(npts[l])) if l in npts else DASH for l in laws])
+    t.rule_here()
     med = {}                                   # {supplier: {law: ns_med}}
     for sname in names:
         by = {l: r for (sn, f, l), r in best.items()
@@ -2416,8 +1467,6 @@ def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
         for l in laws:
             if l not in by:
                 cells.append(DASH)
-            elif acc:
-                cells.append(ulp(by[l]))
             else:
                 v = _f(by[l], "ns_med")
                 med.setdefault(sname, {})[l] = v
@@ -2425,36 +1474,33 @@ def tab_gpu(gsup, outdir, runs_note, arch, family="z_nu", scope="kernel",
         t.add(cells)
         if sname.startswith(LIB):
             t.rule_here()
-    # Cost table, last row: fastest external cost / library cost, per law.
-    if not acc:
-        lib = next((n for n in names if n.startswith(LIB)), None)
-        cells = [text("%s speed-up vs fastest external" % (lib or LIB))]
-        for l in laws:
-            a = med.get(lib, {}).get(l)
-            ext = [med[n][l] for n in names if n != lib and l in med.get(n, {})
-                   and _ok(med[n][l]) and med[n][l] > 0]
-            cells.append(ratio(min(ext) / a) if (ext and a and _ok(a) and a > 0)
-                         else DASH)
-        t.rule_here()
-        t.add(cells)
-    shown = [r for (sn, f, l), r in best.items() if f == family and l in laws]
-    t.note = _note(marker_note(shown) if acc else "")
+    # Last row: fastest external cost / library cost, per law.
+    lib = next((n for n in names if n.startswith(LIB)), None)
+    cells = [text("%s speed-up vs fastest external" % (lib or LIB))]
+    for l in laws:
+        a = med.get(lib, {}).get(l)
+        ext = [med[n][l] for n in names if n != lib and l in med.get(n, {})
+               and _ok(med[n][l]) and med[n][l] > 0]
+        cells.append(ratio(min(ext) / a) if (ext and a and _ok(a) and a > 0)
+                     else DASH)
+    t.rule_here()
+    t.add(cells)
+    t.note = _note("")
     t.provenance(
         runs_note,
-        r"Each cell is the maximum ULP error over every scored point."
-        if acc else
         r"Each cell is the median over the timed repetitions of the elapsed "
         r"device time of the kernel alone, on the $N$ points stated per "
         r"column; the last row is the fastest external's cost divided by the "
         r"library's, per dataset. Kernel scope excludes the host-device "
-        r"transfers, which are the same for every row and are compared in "
-        r"the transfer-strategy table.",
+        r"transfers, which are the same for every row; \texttt{tab-gpu-call-%s} "
+        r"gives the cost with them." % esc(family),
         _machine(arch))
     return t.write(outdir)
 
 
 def tab_gpu_exclusions(gsup, outdir, runs_note, arch, family="z_nu"):
-    """`tab_exclusions` for the rows of the device accuracy table (kernel scope)."""
+    """`tab_exclusions` for the rows of the device median/maximum table (kernel
+    scope)."""
     stem = f"tab-gpu-exclusions-{family}"
     if not gsup:
         return _skip(stem, "no device supplier rows -- the GPU stage did not "
@@ -2503,7 +1549,7 @@ def tab_gpu_exclusions(gsup, outdir, runs_note, arch, family="z_nu"):
         runs_note,
         r"Each cell is a count of points, not a rate; the first row is the size "
         r"of each dataset. For a non-zero cell the maximum in "
-        r"\texttt{tab-gpu-accuracy-%s} is taken over fewer points and carries "
+        r"\texttt{tab-gpu-medmax-%s} is taken over fewer points and carries "
         r"a dagger there, also where it reads `\textit{Cap}'." % esc(family),
         r"As in that table, each external is shown on each dataset in its "
         r"best assembly, " + BEST_RULE + ".",
@@ -2514,8 +1560,8 @@ def tab_gpu_exclusions(gsup, outdir, runs_note, arch, family="z_nu"):
 
 def tab_gpu_medmax(gsup, outdir, runs_note, arch, family="z_nu",
                    scope="kernel"):
-    """`tab_medmax` for the device kernels of `tab_gpu`, with the `finite` column
-    and the comparison rows."""
+    """`tab_medmax` for the device kernels, with the `finite` column and the
+    comparison rows."""
     stem = f"tab-gpu-medmax-{family}"
     if not gsup:
         return _skip(stem, "no device supplier rows -- the GPU stage did not "
@@ -2573,11 +1619,9 @@ def tab_gpu_medmax(gsup, outdir, runs_note, arch, family="z_nu",
     t.provenance(
         runs_note,
         r"Each cell is the median\,/\,maximum ULP error over the scored "
-        r"points of the dataset, kernel scope. The maximum and its markers are "
-        r"those of the device accuracy table, which this table extends with "
-        r"the median; `\textit{Cap}' and the dagger apply to the maximum "
-        r"only. The closing rows compare the median and the maximum "
-        r"separately, as in the host table.",
+        r"points of the dataset, kernel scope; `\textit{Cap}' and the dagger "
+        r"apply to the maximum only. The closing rows compare the median and "
+        r"the maximum separately, as in the host table.",
         r"Quantiles are nearest-rank on the sorted sample. The \texttt{.csv} "
         r"writes the cell as \texttt{median/maximum} at full precision.",
         (f"`--' marks the {incomplete} dataset(s) on which no external returned a "
@@ -2591,7 +1635,8 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu",
                  lib_supplier=LIB_CUDA):
     """Call-scope device cost (transfers included): each row at its fastest
     transfer strategy, each external on each dataset in the assembly best_assembly
-    selects from its kernel-scope accuracy rows, as in the device accuracy table."""
+    selects from its kernel-scope accuracy rows, as in the device median/maximum
+    table."""
     stem = f"tab-gpu-call-{family}"
     if not gsup:
         return _skip(stem, "no device supplier rows -- the GPU stage did not "
@@ -2602,7 +1647,7 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu",
         return _skip(stem, f"the device rows carry no call-scope measurement "
                            f"for {family}")
     # The assembly of each external on each dataset, chosen from the accuracy rows of
-    # the same kernels (kernel scope) by the rule of the device accuracy table.
+    # the same kernels (kernel scope) by the rule of the device median/maximum table.
     chosen = {(s, l): r.get("backend")
               for (s, _fam, l), r in best_assembly(
                   [r for r in gsup if scope_of(r) == "kernel"
@@ -2733,486 +1778,6 @@ def tab_gpu_call(gsup, outdir, runs_note, arch, family="z_nu",
         r"ratios are smaller than the kernel-scope ones of the device cost "
         r"table. The last row is the fastest external's cost on that dataset "
         r"divided by the library's. " + BEST_ASSEMBLY,
-        _machine(arch))
-    return t.write(outdir)
-
-
-# Device transfer strategies
-def tab_gpu_modes(glad, outdir, runs_note, arch):
-    """Call cost of each transfer strategy at the largest common rung (cost only:
-    the strategies return bit-identical results)."""
-    stem = "tab-gpu-modes"
-    if not glad:
-        return _skip(stem, "no device ladder rows")
-    modes = sorted({r["backend"] for r in glad if r.get("backend")})
-    pairs = sorted({(r["family"], r["law"]) for r in glad})
-    if len(modes) < 2 or not pairs:
-        return _skip(stem, f"{len(modes)} transfer mode(s) measured -- the "
-                           f"comparison needs at least two")
-    rungs = None
-    for m in modes:
-        got = {_i(r, "n") for r in glad if r.get("backend") == m}
-        rungs = got if rungs is None else (rungs & got)
-    if not rungs:
-        return _skip(stem, "the transfer modes share no ladder rung")
-    N = max(rungs)
-    # One column per (convention, law), the convention as a spanning header.
-    fams = sorted({f for f, _ in pairs})
-    pairs = [(f, l) for f in fams for _, l in
-             sorted({p for p in pairs if p[0] == f})]
-    head = ["transfer strategy"] + [LAW_HEAD.get(l, l) for _, l in pairs]
-    groups, col = [], 2
-    for f in fams:
-        k = sum(1 for pf_, _ in pairs if pf_ == f)
-        if k:
-            groups.append((col, col + k - 1, FAMILY_LABEL.get(f, f)))
-            col += k
-    t = Table(stem,
-              _caption(f"GPU call cost in nanoseconds per element of "
-                       f"{esc(LIB_CUDA)} under each transfer strategy at "
-                       f"$N={_grouped(N)}$, host-device transfers included.",
-                       "The rows give the transfer strategies and the columns "
-                       "the size-scaling datasets of each argument convention.",
-                       MEDIAN_COST, _obtained(arch, gpu=True)),
-              "tab:gpu-modes", head,
-              align=wrapcol("2.8cm") + "r" * len(pairs),
-              header_groups=groups)
-    for m in modes:
-        cells = [text(m)]
-        for f, l in pairs:
-            v = [_f(r, "ns_med") for r in glad if r.get("backend") == m
-                 and r.get("family") == f and r.get("law") == l
-                 and _i(r, "n") == N]
-            cells.append(num(v[0]) if v else DASH)
-        t.add(cells)
-    t.provenance(
-        runs_note,
-        r"Cost only: the %d strategies return bit-identical results, which the "
-        r"benchmark verifies. Call scope, so the numbers include the "
-        r"host-device transfers." % len(modes),
-        _machine(arch))
-    return t.write(outdir)
-
-
-# Levin band routing
-def tab_levin(lev, outdir, runs_note, arch, device="cpu", backend="avx512"):
-    """Maximum ULP and `ns_med` with the Levin band included and excluded, on one
-    backend (the scalar and vector routers gate the band differently)."""
-    stem = f"tab-levin-{device}-{backend}" if device == "cpu" else \
-           f"tab-levin-{device}"
-    if not lev:
-        return _skip(stem, "no Levin A/B rows -- that stage is opt-in at run "
-                           "time and was not run")
-    # `lev` is levin.csv or gpu_levin.csv; `backend` is a library backend or a
-    # transfer mode accordingly.
-    rows = [r for r in lev if r.get("backend") == backend]
-    on = {(r["family"], r["law"]): r for r in rows if r.get("variant") == "levin_on"}
-    off = {(r["family"], r["law"]): r for r in rows if r.get("variant") == "levin_off"}
-    both = sorted(set(on) & set(off))
-    if not both:
-        return _skip(stem, f"no (law, convention) cell carries both arms on "
-                           f"backend {backend}")
-    # Only the datasets on which an accuracy column differs (pf.levin_reaches).
-    keys = [k for k in both if pf.levin_reaches(on[k], off[k])]
-    omitted = [k for k in both if k not in keys]
-    if not keys:
-        return _skip(stem, f"no dataset differs between the arms in an accuracy "
-                           f"column on backend {backend}")
-    shipped = {r.get("variant") for r in rows if r.get("shipped") == "yes"}
-    ship = "included" if "levin_on" in shipped else \
-           ("excluded" if "levin_off" in shipped else "unrecorded")
-    head = ["convention / dataset", "included", "excluded", "ratio",
-            "included", "excluded", "ratio"]
-    on_what = (r"the \texttt{" + esc(backend) + r"} backend" if device == "cpu"
-               else r"the CUDA backend with the \texttt{" + esc(backend)
-               + r"} transfer strategy")
-    t = Table(stem,
-              _caption("Maximum ULP error and runtime cost per element with the "
-                       "Levin band included and excluded, on " + on_what
-                       + ", by argument convention, for the datasets on which "
-                       "the two builds differ in an accuracy statistic.",
-                       ("In the default build of this backend the band is %s."
-                        % ship) if ship != "unrecorded" else "",
-                       "Costs are medians over the timed repetitions and "
-                       "include the host-device transfers."
-                       if device != "cpu" and all(scope_of(r) == "call"
-                                                  for r in rows) else MEDIAN_COST,
-                       _obtained(arch, gpu=device != "cpu")),
-              f"tab:levin-{device}-{backend}".replace("_", "-"),
-              head, align=wrapcol("3.0cm") + "rrrrrr",
-              header_groups=[(2, 4, "max ULP error"), (5, 7, "ns / element")])
-    moved = 0
-    for f, l in keys:
-        a, b = on[(f, l)], off[(f, l)]
-        ua, ub = _f(a, "u_max"), _f(b, "u_max")
-        ca, cb = _f(a, "ns_med"), _f(b, "ns_med")
-        if _ok(ua) and _ok(ub) and ua != ub:
-            moved += 1
-        t.add([raw(f"{FAMILY_LABEL.get(f, f)} / {LAW_HEAD.get(l, l)}",
-                   f"{f} / {l}"),
-               ulp(a), ulp(b),
-               ratio(ub / ua) if _ok(ua) and ua > 0 and _ok(ub) else DASH,
-               num(ca), num(cb),
-               ratio(cb / ca) if _ok(ca) and ca > 0 and _ok(cb) else DASH])
-    t.note = _note(
-        r"ratio: the excluded value divided by the included value. "
-        + marker_note([on[k] for k in keys] + [off[k] for k in keys]))
-    t.provenance(
-        runs_note,
-        r"A ratio above one favours including the band.",
-        (r"Omitted, with every accuracy statistic identical in both builds: "
-         + ", ".join(f"{esc(f)} / {esc(l)}" for f, l in omitted) + ".")
-        if omitted else "",
-        (f"The worst case differs on {moved} of {len(keys)} datasets.")
-        if moved < len(keys) else "",
-        r"Costs are medians over repetitions.",
-        _machine(arch))
-    return t.write(outdir)
-
-
-# The prefactor folded into the kernels or applied outside
-FOLD_SHOWN = ("scalar", "scalar-unfolded-direct", "scalar-unfolded-explog")
-
-
-def fold_agreement(per_machine, family):
-    """`machine_agreement` over the fold rows `tab_fold_quantiles` shows, named
-    by backend; `per_machine` is [(label, fold rows)]."""
-    shown = []
-    for lab, rows in per_machine:
-        sel = [dict(r, supplier=r.get("backend")) for r in rows
-               if r.get("family") == family and r.get("backend") in FOLD_SHOWN
-               and r.get("law") in ACC_LAWS]
-        shown.append((lab, sel))
-    return machine_agreement(shown, fields=QUANTILE_FIELDS)
-
-
-def tab_fold_quantiles(fold, outdir, runs_note, family="z_nu", agreement=None,
-                       arch=""):
-    """`tab_quantiles` for the folded scalar backend and its unfolded twin,
-    without the share below 1 ulp."""
-    stem = f"tab-fold-quantiles-{family}"
-    rows = [r for r in fold if r.get("family") == family]
-    if not rows:
-        return _skip(stem, "no prefactor-fold rows -- that stage is opt-in at "
-                           "run time and was not run")
-    laws = laws_present(rows)
-    series = [(style.FOLD_LABEL[a], {r["law"]: r for r in rows
-                                     if r.get("backend") == a})
-              for a in FOLD_SHOWN if any(r.get("backend") == a for r in rows)]
-    if not laws or len(series) < 2 or series[0][0] != style.FOLD_LABEL["scalar"]:
-        return _skip(stem, "needs the folded scalar backend and a twin on a "
-                           "shared law")
-    t, missing = _quantile_table(
-        stem,
-        _caption("Distribution of the ULP error over all scored points of the "
-                 "scalar backend with the Mat\\'ern prefactor folded into the "
-                 "kernels and of its unfolded twin, for " + _sets(family) + ".",
-                 _obtained(arch)),
-        f"tab:fold-quantiles-{family.replace('_', '-')}", series, laws,
-        "backend", share=False)
-    nf = sum(1 for _, b in series for l, r in b.items()
-             if l in laws and _i(r, "nonfinite") > 0)
-    t.note = _note(_quantile_note(series, laws, missing, share=False)
-                   + pf.FOLD_TWIN_SENTENCE)
-    t.provenance(
-        runs_note, *_quantile_facts(missing, nf, share=False),
-        r"The control backend of the stage is not shown: its accuracy equals "
-        r"the scalar backend's, which the stage checks. Measured; no bound is "
-        r"implied.",
-        pf._FOLD_TWIN_DETAIL,
-        _agreement_phrase(agreement), _machine(arch))
-    return t.write(outdir)
-
-
-def tab_fold_cpu(fold, outdir, runs_note, arch):
-    """Maximum ULP and `ns_med` per law of the folded scalar backend, its unfolded
-    twin and the control; cost ratios divide by the folded backend's."""
-    stem = "tab-fold-cpu"
-    if not fold:
-        return _skip(stem, "no prefactor-fold rows -- that stage is opt-in at "
-                           "run time and was not run")
-    by = {(r.get("family"), r.get("law"), r.get("backend")): r for r in fold}
-    keys = []
-    for f in ("z_nu", "h_nu_s"):
-        laws = [l for l in ACC_LAWS if (f, l, "scalar") in by]
-        laws += sorted({l for (ff, l, b) in by if ff == f and b == "scalar"}
-                       - set(laws))
-        keys += [(f, l) for l in laws]
-    if not keys:
-        return _skip(stem, "no prefactor-fold rows of the scalar backend")
-    head = ["convention / dataset", "folded", "direct", "exp-log",
-            "folded", "direct", "exp-log", "control"]
-    t = Table(stem,
-              # The statistic is in the first sentence: the float is near the page height.
-              _caption("Maximum ULP error and median cost per element of the "
-                       "scalar backend with the Mat\\'ern prefactor folded into "
-                       "the kernels, of its unfolded twin and of the control "
-                       "build, by argument convention and dataset.",
-                       _obtained(arch)),
-              "tab:fold-cpu", head, align=wrapcol("3.0cm") + "rrrrrrr",
-              header_groups=[(2, 4, "max ULP error"),
-                             (5, 8, "ns / element; twins and control as ratio")])
-    shown = []
-    for f, l in keys:
-        a = by[(f, l, "scalar")]
-        d = by.get((f, l, "scalar-unfolded-direct"))
-        e = by.get((f, l, "scalar-unfolded-explog"))
-        c = by.get((f, l, "scalar-control"))
-        shown += [x for x in (a, d, e) if x]
-        ca = _f(a, "ns_med")
-
-        def rat(x):
-            v = _f(x, "ns_med") if x else float("nan")
-            return ratio(v / ca) if _ok(v) and _ok(ca) and ca > 0 else DASH
-
-        t.add([raw(f"{FAMILY_LABEL.get(f, f)} / {LAW_HEAD.get(l, l)}",
-                   f"{f} / {l}"),
-               ulp(a), ulp(d) if d else DASH, ulp(e) if e else DASH,
-               num(ca), rat(d), rat(e), rat(c)])
-    t.note = _note(
-        r"Cost ratios: cost divided by that of the folded backend. Control: "
-        r"the folded source built like the twin. " + pf.FOLD_TWIN_SENTENCE + " "
-        + marker_note(shown))
-    t.provenance(
-        runs_note,
-        r"The cost ratios divide each backend's median cost by the folded "
-        r"backend's on the same dataset, so a ratio above one means slower than "
-        r"the folded backend. The control is the shipped scalar source built "
-        r"the way the twin is; its ratio shows how far the build and the code "
-        r"placement alone move a cost.",
-        pf._FOLD_TWIN_DETAIL,
-        r"Costs are medians over repetitions.",
-        _machine(arch))
-    return t.write(outdir)
-
-
-# Thread scaling
-def _why_no_suppliers(thr, family):
-    """README sentence on why the externals are not in the efficiency table,
-    with the run's efficiency ranges."""
-    rows = [r for r in (thr or []) if r.get("family") == family
-            and _i(r, "threads") > 1 and _ok(_f(r, "efficiency"))]
-    if not rows:
-        return ""
-    sup = [r for r in rows if (r.get("supplier") or "-") != "-"]
-    lib = [r for r in rows if (r.get("supplier") or "-") == "-"]
-    if not sup or not lib:
-        return ""
-    se = [100.0 * _f(r, "efficiency") for r in sup]
-    le = [100.0 * _f(r, "efficiency") for r in lib]
-    worst = min(lib, key=lambda r: _f(r, "efficiency"))
-    if min(le) > min(se):          # the premise does not hold on this run
-        return (r"The external suppliers are timed in this stage but are not "
-                r"listed here, because efficiency is a ratio against each row's "
-                r"own one-thread cost; their throughput is in "
-                r"\texttt{tab-threads-throughput}.")
-    return (r"The external suppliers are timed in this stage but are not listed "
-            r"here, because efficiency is a ratio against each row's own "
-            r"one-thread cost, which is higher for a slower row. On this run the "
-            r"externals span %.1f--%.1f\,\%% and this library spans "
-            r"%.1f--%.1f\,\%%; the lowest efficiency is this library's "
-            r"\texttt{%s} at %.1f\,\%%%s. The throughput of all rows is in "
-            r"\texttt{tab-threads-throughput}."
-            % (min(se), max(se), min(le), max(le),
-               esc(worst.get("backend", "?")), min(le),
-               _clock_clause(thr, worst, family)))
-
-
-def _clock_clause(thr, worst, family):
-    """The clock drop (`mhz_end`) from the one-thread step to `worst`, or '' unless
-    it is at least half the efficiency loss."""
-    def same(r):
-        return (r.get("family") == family
-                and (r.get("supplier") or "-") == (worst.get("supplier") or "-")
-                and r.get("backend") == worst.get("backend"))
-    one = [r for r in (thr or []) if same(r) and _i(r, "threads") == 1]
-    if not one:
-        return ""
-    a, b = _f(one[0], "mhz_end"), _f(worst, "mhz_end")
-    eff = _f(worst, "efficiency")
-    if not (_ok(a) and _ok(b) and _ok(eff)) or a <= 0 or b <= 0 or b >= a:
-        return ""
-    drop, loss = 1.0 - b / a, 1.0 - eff
-    if loss <= 0 or drop < 0.5 * loss:
-        return ""
-    return (r"; over the same steps the recorded clock of its cores fell "
-            r"from %.0f to %.0f\,MHz (one reading per step), which alone "
-            r"accounts for a %.1f\,\%% cost increase of the %.1f\,\%% measured"
-            % (a, b, 100.0 * (a / b - 1.0), 100.0 * (1.0 / eff - 1.0)))
-
-
-def tab_threads(thr, outdir, runs_note, arch, family="z_nu"):
-    """Cost and parallel efficiency of the library backends against pinned
-    thread count; the externals are in `tab_threads_throughput`."""
-    stem = "tab-threads"
-    if not thr:
-        return _skip(stem, "no thread rows -- the scaling stage did not run")
-    # Median over repetitions; a run without medians is not tabulated.
-    thr, _thr_med = pf.threads_median(thr)
-    if not _thr_med:
-        return _skip(stem, pf.THREADS_NO_MEDIAN)
-    # Library rows only; supplier rows carry the assembly in `backend`.
-    rows = [r for r in thr if r.get("family") == family
-            and (r.get("supplier") or "-") == "-"]
-    if not rows:
-        return _skip(stem, f"the scaling stage carries no {family} library rows")
-    backends = [b for b in BACKEND_ORDER
-                if any(r.get("backend") == b for r in rows)]
-    counts = sorted({_i(r, "threads") for r in rows if _i(r, "threads")})
-    if not backends or len(counts) < 2:
-        return _skip(stem, f"{len(counts)} thread count(s) measured -- scaling "
-                           f"needs at least two")
-    by = {(r["backend"], _i(r, "threads")): r for r in rows}
-    nb = len(backends)
-    # One cost group: `ns_per_elem` includes workspace creation on avx512 and avx2
-    # (threads_cpu.c).
-    ng = 2
-    head = ["threads"] + [esc(b) for b in backends] * ng
-    groups = [(2, 1 + nb, "ns / element"),
-              (2 + nb, 1 + 2 * nb, "efficiency")]
-    t = Table(stem,
-              _caption("Runtime cost per element and parallel efficiency of the "
-                       "library backends against the number of pinned threads "
-                       "(weak scaling), with " + pf.CONV.get(family, esc(family))
-                       + " supplied.", _obtained(arch)),
-              "tab:threads", head, align="r" + "r" * (ng * nb),
-              header_groups=groups)
-    for c in counts:
-        cells = [count(c)]
-        for b in backends:
-            r = by.get((b, c))
-            cells.append(num(_f(r, "ns_per_elem")) if r else DASH)
-        for b in backends:
-            r = by.get((b, c))
-            e = _f(r, "efficiency") if r else float("nan")
-            cells.append(Cell(style.Raw(f"{e * 100:.0f}\\%"), f"{e * 100:.0f}%",
-                              repr(e)) if _ok(e) else DASH)
-        t.add(cells)
-    t.provenance(
-        runs_note,
-        r"Each thread evaluates its own array of the same size, so a perfectly "
-        r"scaling implementation holds the cost per element flat and the "
-        r"efficiency at 100\%. Cost is the median over repetitions of the "
-        r"slowest thread's time in each (repetitions start together on a "
-        r"barrier).",
-        # Result identity and ULP invariance across thread counts.
-        pf.thread_integrity(thr, family)[0].strip(),
-        r"On the \texttt{avx512} and \texttt{avx2} backends the cost includes the "
-        r"workspace: every thread creates and destroys its own inside the timed "
-        r"region on every repetition, and all threads allocate at the same time, "
-        r"so the cost includes allocator contention. The other backends and the "
-        r"external suppliers allocate no workspace.",
-        _why_no_suppliers(thr, family),
-        _machine(arch))
-    return t.write(outdir)
-
-
-def tab_threads_throughput(thr, outdir, runs_note, arch, family="z_nu"):
-    """Values per second summed over the threads against thread count, library
-    and suppliers (the reciprocal of the aggregate `ns_per_elem`)."""
-    stem = "tab-threads-throughput"
-    if not thr:
-        return _skip(stem, "no thread rows -- the scaling stage did not run")
-    # Median over repetitions; a run without medians is not tabulated.
-    thr, _thr_med = pf.threads_median(thr)
-    if not _thr_med:
-        return _skip(stem, pf.THREADS_NO_MEDIAN)
-    rows = [r for r in thr if r.get("family") == family
-            and _ok(_f(r, "values_per_s"))]
-    if not rows:
-        return _skip(stem, "the scaling stage predates the values_per_s column; "
-                           "re-run it to get this table")
-    counts = sorted({_i(r, "threads") for r in rows if _i(r, "threads")})
-    if len(counts) < 2:
-        return _skip(stem, "scaling needs at least two thread counts")
-
-    # One column per library backend or supplier.
-    def key(r):
-        sup = r.get("supplier") or "-"
-        return f"{LIB} ({r.get('backend')})" if sup == "-" else sup
-    series, seen = [], set()
-    for b in BACKEND_ORDER:                       # the library first, in order
-        k = f"{LIB} ({b})"
-        if any(key(r) == k for r in rows) and k not in seen:
-            series.append(k); seen.add(k)
-    for k in sorted({key(r) for r in rows} - seen):
-        series.append(k)
-    if len(series) < 2:
-        return _skip(stem, "only one row present -- nothing to compare")
-
-    by = {(key(r), _i(r, "threads")): r for r in rows}
-
-    # Spanning headers `libmatern` and `external`; heads name backend or supplier.
-    lib_s = [k for k in series if k.startswith(LIB + " (")]
-    ext_s = [k for k in series if k not in lib_s]
-    short = {k: k[len(LIB) + 2:-1] for k in lib_s}      # "libmatern (avx512)" -> "avx512"
-    # External headings drop the version suffix; the note gives the full names.
-    for k in ext_s:
-        short[k] = {"std-cyl_bessel_k": "std"}.get(k, k.rsplit("-", 1)[0]
-                                                   if k.rsplit("-", 1)[-1][:1].isdigit() else k)
-    head = ["$T$"] + [esc(short.get(k, k)) for k in lib_s + ext_s]
-    series = lib_s + ext_s
-    groups = []
-    if lib_s:
-        groups.append((2, 1 + len(lib_s), LIB))
-    if ext_s:
-        groups.append((2 + len(lib_s), 1 + len(series), "external"))
-    t = Table(stem,
-              _caption("Covariance values per second summed over the threads, "
-                       "against the number of pinned threads, with "
-                       + pf.CONV.get(family, esc(family)) + " supplied.",
-                       _obtained(arch)),
-              "tab:threads-throughput", head,
-              align="r" + "r" * len(series),
-              header_groups=groups)
-    for c in counts:
-        cells = [count(c)]
-        for k in series:
-            r = by.get((k, c))
-            cells.append(num(_f(r, "values_per_s"), 3) if r else DASH)
-        t.add(cells)
-
-    # Last row: ratios at the widest thread count to the fastest library backend.
-    top = counts[-1]
-    ref, base = None, float("nan")
-    for k in [k for k in series if k.startswith(LIB)]:
-        v = _f(by.get((k, top)), "values_per_s") if (k, top) in by else float("nan")
-        if _ok(v) and (not _ok(base) or v > base): ref, base = k, v
-    if ref and _ok(base) and base > 0:
-        cells = [raw(r"$\times$ " + esc(ref), "x " + ref)]
-        for k in series:
-            v = _f(by.get((k, top)), "values_per_s") if (k, top) in by else float("nan")
-            cells.append(ratio(base / v) if (_ok(v) and v > 0) else DASH)
-        t.add(cells)
-        t.rules.add(len(t.rows) - 2)
-
-    # Map the shortened headings back to the full supplier names.
-    _named = ", ".join(r"\texttt{%s}: \texttt{%s}" % (esc(short[k]), esc(k))
-                       for k in ext_s if short[k] != k)
-    t.note = _note(
-        r"$T$: number of pinned threads. "
-        + ((r"Last row: the values per second of " + esc(ref)
-            + r" at the largest $T$ divided by those of each column. ")
-           if ref and _ok(base) and base > 0 else "")
-        + ((r"Shortened headings: " + _named + ". ") if _named else ""))
-    t.provenance(
-        runs_note,
-        r"Each cell is the number of values per second summed over the "
-        r"threads, so a row that scales perfectly doubles when the thread "
-        r"count doubles. The time is the median over repetitions of the "
-        r"slowest thread's time in each (repetitions start together on a "
-        r"barrier).",
-        r"Parallel efficiency (\texttt{tab-threads}) is measured against each "
-        r"row's own one-thread cost, so a row that is slower per element asks "
-        r"less of the shared hardware and can reach a higher efficiency at a "
-        r"lower throughput.",
-        r"Every external is timed in the \texttt{direct} assembly here, the one "
-        r"every supplier supports, unlike the throughput table, where each "
-        r"supplier is shown in the assembly the accuracy rule selects over its "
-        r"accuracy datasets taken together.",
-        r"The reference of the last row is the fastest library backend at the "
-        r"widest thread count (\texttt{scalar} is never selected "
-        r"automatically).",
         _machine(arch))
     return t.write(outdir)
 

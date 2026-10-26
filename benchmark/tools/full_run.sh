@@ -77,7 +77,7 @@ text_commands() {
   in the published run, run make reproduce on one Intel machine with an NVIDIA GPU and
   on one AMD machine, copy the run directories of the second (benchmark/runs/<run id>/,
   not latest) into benchmark/runs/ of the first, and write the figures and tables
-  again there with make paper-figures-final and make paper-tables.  The generators
+  again there with make figures and make tables.  The generators
   read every run in benchmark/runs/ and take each kind of result from the newest run
   of the machine that has it, so an earlier run there can supply a stage; the CPU
   results come from a machine without GPU data, here the AMD one

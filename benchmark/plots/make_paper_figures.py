@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""make_paper_figures.py -- builds the paper figure set from the recorded runs in
-benchmark/runs/ and measures nothing.  Runs from hosts of one CPU model are pooled into one
-machine, and each kind of result comes from that machine's newest run that has it;
---paper writes into plots/paper-final/ with captions.tex.  By default only the paper set
-is drawn (PAPER_FIGURES); --full draws every figure."""
+"""make_paper_figures.py -- draws the paper's figures (PAPER_FIGURES) from the recorded
+runs in benchmark/runs/ and measures nothing: PDF into plots/paper-final/, the captions into
+captions.tex beside them and the run details into HARDWARE.md.  Runs from hosts of one CPU
+model are pooled into one machine, and each kind of result comes from that machine's newest
+run that has it."""
 import argparse, csv, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH = os.path.dirname(HERE)
 RUNS = os.path.join(BENCH, "runs")
-OUT = os.path.join(BENCH, "plots", "paper")
+OUT = os.path.join(BENCH, "plots", "paper-final")
 sys.path.insert(0, HERE)
 
 import runs as mp
@@ -252,7 +252,7 @@ def _hardware_value(key, v):
 
 def write_hardware(runs, outdir, prov=None):
     """Write HARDWARE.md: generator versions, then per machine and run its PROVENANCE keys;
-    with `prov` (style.caption_finalise, paper mode) a section per directory and figure."""
+    with `prov` (style.caption_finalise) a section per directory and figure."""
     order = []
     for r in runs:
         if machine_of(r) not in order:
@@ -335,8 +335,7 @@ def write_hardware(runs, outdir, prov=None):
     else:
         paths = ["paths are shortened to the file name, and"]
     lines = ["# Environment, generated from the runs behind the figures", "",
-             "Written by `make paper-figures%s`.  The first table names the Python,"
-             % ("-final" if style.PAPER else ""),
+             "Written by `make figures`.  The first table names the Python,",
              "NumPy and Matplotlib that drew the figures.  Every table value after it is a",
              "key in that run's `PROVENANCE.txt`, in the run's directory (under",
              "`benchmark/runs/` unless `--runs` named another root); the key is",
@@ -459,15 +458,13 @@ def is_cpu_machine(rs):
     return any(r["accuracy"] and not r.get("gpu_pipeline") for r in rs)
 
 
-# The paper set: the figures and tables the paper uses, drawn by default; --full draws
-# every one.  Names are stems without the fig-paper- / tab- prefix,
-# as fnmatch patterns, by the machine they come from: "cpu" the machine that cpu_source
-# picks for the CPU data the result is drawn from, "gpu" a machine with GPU data, "every"
-# each machine, "shared" the tree root (tables) or cross-machine/ (figures).
-# levin-cpu-vector-<family> is the vector router's Levin figure, whichever backend
-# carries it.  Both argument conventions, (z,nu) beside the paper's (h,nu,s); the ladder
-# is drawn for (z,nu) only.  fold-* would also take the fold ECDFs, so the fold figures
-# are named.
+# The paper set: the figures and tables the paper uses, the only ones drawn.  Names are
+# stems without the fig-paper- / tab- prefix, as fnmatch patterns, by the machine they come
+# from: "cpu" the machine that cpu_source picks for the CPU data the result is drawn from,
+# "gpu" a machine with GPU data, "every" each machine, "shared" the tree root (tables) or
+# cross-machine/ (figures).  levin-cpu-vector-<family> is the vector router's Levin figure,
+# whichever backend carries it.  Both argument conventions, (z,nu) beside the paper's
+# (h,nu,s); the ladder is drawn for (z,nu) only.
 PAPER_FIGURES = {
     "cpu": ("cost-accuracy-*", "accuracy-distribution-*", "assembly-*", "fold-z_nu",
             "fold-h_nu_s", "ladder-*", "workspace-*", "levin-cpu-vector-*"),
@@ -562,34 +559,20 @@ def main():
                     help="print the runs and row counts, draw nothing")
     ap.add_argument("--strict", action="store_true",
                     help="refuse to draw from a run whose STATUS is not complete")
-    ap.add_argument("--paper", action="store_true",
-                    help="publication output: no on-canvas titles, notes or run "
-                         "stamp; the captions are written to captions.tex and "
-                         "the other details to HARDWARE.md")
     ap.add_argument("--runs", default="",
                     help="read runs from this directory instead of "
                          "benchmark/runs")
-    ap.add_argument("--full", action="store_true",
-                    help="draw every figure, not only the paper set (PAPER_FIGURES), "
-                         "and PNG beside PDF in paper mode")
     ap.add_argument("--cpu-machine", default="",
                     help="the machine the paper set takes its CPU figures from first "
                          "(default: machines without GPU data first; a stage this "
                          "machine lacks comes from the next machine that has it)")
     args = ap.parse_args()
 
-    global OUT, RUNS
+    global RUNS
     if args.runs:
         RUNS = os.path.abspath(args.runs)
-    # style.PAPER is read at draw time, so it is set before any figure is drawn.
-    if args.paper:
-        style.PAPER = True
-        OUT = os.path.join(BENCH, "plots", "paper-final")
-        # the manuscript includes the PDF; the full set keeps a PNG beside it
-        if not args.full:
-            style.FORMATS = ("pdf",)
     # captions.tex is appended to, so every existing one in the tree is removed first.
-    if style.PAPER and os.path.isdir(OUT):
+    if os.path.isdir(OUT):
         for _root, _d, _f in os.walk(OUT):
             if "captions.tex" in _f:
                 os.remove(os.path.join(_root, "captions.tex"))
@@ -636,18 +619,14 @@ def main():
             written.append(stem)
 
     order = cpu_order(bymach, args.cpu_machine)
-    if args.full:
-        print("figure set: every figure (--full)")
-    else:
-        print(f"figure set: the paper set (--full for every figure); CPU figures from "
-              f"{cpu_sources_line(bymach, order)}")
+    print(f"figure set: the paper set; CPU figures from "
+          f"{cpu_sources_line(bymach, order)}")
     cur = None                       # the machine being drawn; None for cross-machine/
 
     def want(name, *kinds):
         """Whether figure `name` (its stem without fig-paper-) is drawn for the current
         machine; `kinds`, the CPU run kinds it is drawn from, place a CPU figure."""
-        return args.full or in_paper_set(
-            PAPER_FIGURES, name, machine_roles(cur, bymach, order, kinds))
+        return in_paper_set(PAPER_FIGURES, name, machine_roles(cur, bymach, order, kinds))
 
     ACC, LAD = ("accuracy", "suppliers"), ("ladder", "sup_ladder")
     for mach, rs in bymach.items():
@@ -660,7 +639,7 @@ def main():
         own = kind_owner(rs)
         acc, sup = merge(rs, "accuracy"), merge(rs, "suppliers")
         lad, slad = merge(rs, "ladder"), merge(rs, "sup_ladder")
-        gpu, gsup = merge(rs, "gpu"), merge(rs, "gpu_sup")
+        gsup = merge(rs, "gpu_sup")
         glad = merge(rs, "gpu_ladder")
         lev, glev = merge(rs, "levin"), merge(rs, "gpu_levin")
         thr, gthr = merge(rs, "threads"), merge(rs, "gpu_threads")
@@ -680,45 +659,18 @@ def main():
                          f"{mach}/cost-accuracy-{fam}")
         if acc or sup:
             stamp = stamp_of("accuracy", "suppliers")
-            raw = merge(rs, "raw")
             for fam in ("z_nu", "h_nu_s"):
                 if want(f"accuracy-distribution-{fam}", *ACC):
                     note(pf.fig_accuracy_distribution(plt, acc, sup, sub, stamp,
                                                       family=fam, arch=arch),
                          f"{mach}/accuracy-distribution-{fam}")
-                if want(f"accuracy-ecdf-{fam}", *ACC):
-                    note(pf.fig_accuracy_ecdf(plt, acc, sup, sub, stamp,
-                                              family=fam, arch=arch),
-                         f"{mach}/accuracy-ecdf-{fam}")
-                if want(f"timing-distribution-{fam}", *ACC):
-                    note(pf.fig_timing_distribution(plt, acc, sup, raw, sub, stamp,
-                                                    family=fam, arch=arch),
-                         f"{mach}/timing-distribution-{fam}")
-        if acc:
-            stamp = stamp_of("accuracy")
-            for fam in ("z_nu", "h_nu_s"):
-                if want(f"attribution-{fam}", *ACC):
-                    note(pf.fig_attribution(plt, acc, sub, stamp, family=fam,
-                                            arch=arch),
-                         f"{mach}/attribution-{fam}")
         if acc and sup:
             stamp = stamp_of("accuracy", "suppliers")
             for fam in ("z_nu", "h_nu_s"):
-                if want(f"worst-case-map-{fam}", *ACC):
-                    note(pf.fig_worst_case_map(plt, acc, sup, sub, stamp,
-                                               family=fam, arch=arch),
-                         f"{mach}/worst-case-map-{fam}")
                 if want(f"assembly-{fam}", *ACC):
                     note(pf.fig_assembly(plt, sup, acc, sub, stamp, family=fam,
                                          arch=arch),
                          f"{mach}/assembly-{fam}")
-        if acc and want("convention", *ACC):
-            # Only a GPU-pipeline run's single-backend rows require several backends.
-            note(pf.fig_family_delta(plt, acc, sub, stamp_of("accuracy"), arch=arch,
-                                     require_multi_backend=any(
-                                         x.get("gpu_pipeline")
-                                         for x in source_runs(rs, "accuracy"))),
-                 f"{mach}/convention")
         if lad or slad:
             # Ladder files carry no accuracy; assemblies come from the supplier accuracy rows.
             asm = preferred_assembly(sup)
@@ -760,11 +712,6 @@ def main():
         if gsup:
             stamp = stamp_of("gpu_sup")
             for fam in ("z_nu", "h_nu_s"):
-                if want(f"gpu-modes-suppliers-{fam}"):
-                    note(pf.fig_gpu_modes_suppliers(plt, gsup, sub, stamp,
-                                                    family=fam, arch=garch),
-                         f"{mach}/gpu-modes-suppliers-{fam}")
-            for fam in ("z_nu", "h_nu_s"):
                 if want(f"gpu-plane-{fam}"):
                     note(pf.fig_gpu_plane(plt, gsup, sub, stamp, family=fam,
                                           arch=garch), f"{mach}/gpu-plane-{fam}")
@@ -772,14 +719,6 @@ def main():
                     note(pf.fig_gpu_accuracy_distribution(plt, gsup, sub, stamp,
                                                           family=fam, arch=garch),
                          f"{mach}/gpu-accuracy-distribution-{fam}")
-                if want(f"gpu-accuracy-ecdf-{fam}"):
-                    note(pf.fig_gpu_accuracy_ecdf(plt, gsup, sub, stamp,
-                                                  family=fam, arch=garch),
-                         f"{mach}/gpu-accuracy-ecdf-{fam}")
-                if want(f"gpu-timing-distribution-{fam}"):
-                    note(pf.fig_gpu_timing_distribution(plt, gsup, raw, sub, stamp,
-                                                        family=fam, arch=garch),
-                         f"{mach}/gpu-timing-distribution-{fam}")
                 if want(f"gpu-assembly-{fam}"):
                     note(pf.fig_gpu_assembly(plt, gsup, sub, stamp, family=fam,
                                              arch=garch),
@@ -790,20 +729,17 @@ def main():
                                            arch=garch),
                  f"{mach}/gpu-boost-shortcut")
 
-        # Levin: per device and per backend; the scalar and vector routers gate the band
-        # behind different macros.
+        # Levin: the vector router per device (the paper does not show the scalar one).
         if lev:
             # The vector router by the best vector backend present (pf.BACKEND_PREFERENCE).
             _vec = pf.lib_backend_for([r for r in lev if (r.get("device") or "cpu").strip() == "cpu"
                                        and r.get("backend") != "scalar"]) or "avx512"
-            for bk in (_vec, "scalar"):
-                for fam in families(lev):
-                    if want(f"levin-cpu-vector-{fam}" if bk == _vec
-                            else f"levin-cpu-{bk}-{fam}", "levin"):
-                        note(pf.fig_levin(plt, lev, sub, stamp_of("levin"),
-                                          device="cpu", backend=bk, arch=arch,
-                                          family=fam),
-                             f"{mach}/levin-cpu-{bk}-{fam}")
+            for fam in families(lev):
+                if want(f"levin-cpu-vector-{fam}", "levin"):
+                    note(pf.fig_levin(plt, lev, sub, stamp_of("levin"),
+                                      device="cpu", backend=_vec, arch=arch,
+                                      family=fam),
+                         f"{mach}/levin-cpu-{_vec}-{fam}")
         if glev:
             # On the device `backend` is the transfer mode; the band does not depend on it, so
             # one mode is shown, the default async-direct when present.
@@ -823,11 +759,6 @@ def main():
                     note(pf.fig_fold(plt, fold, sub, stamp_of("fold"), arch=arch,
                                      family=fam),
                          f"{mach}/fold-{fam}")
-            for fam in ("z_nu", "h_nu_s"):
-                if want(f"fold-ecdf-{fam}", "fold"):
-                    note(pf.fig_fold_ecdf(plt, fold, sub, stamp_of("fold"),
-                                          family=fam, arch=arch),
-                         f"{mach}/fold-ecdf-{fam}")
         for fam in families(thr):
             if want(f"threads-{fam}", "threads"):
                 note(pf.fig_threads_combined(plt, thr, sub, stamp_of("threads"),
@@ -841,13 +772,10 @@ def main():
     pf.SKIP_PREFIX = ""
     cur = None
 
-    def _disp(mach, rs):
-        short = mp.cpu_arch_key(rs[0].get("arch_short")) or mach
-        return short if style.PAPER else f"{short} ({mach})"
-
     _cpu_m = [(m, rs) for m, rs in bymach.items() if is_cpu_machine(rs)]
-    cpu_acc = [(_disp(m, rs), merge(rs, "accuracy")) for m, rs in _cpu_m]
-    # From the short label: the display label carries the machine in development mode.
+    # Each machine is shown by its CPU architecture (runs.cpu_arch_key).
+    cpu_acc = [(mp.cpu_arch_key(rs[0].get("arch_short")) or m, merge(rs, "accuracy"))
+               for m, rs in _cpu_m]
     _keys = [mp.cpu_arch_key(rs[0].get("arch_short") or m) for m, rs in _cpu_m]
     _arch = sorted(set(_keys))
     if len(_arch) < 2:
@@ -891,19 +819,17 @@ def main():
             print(f"     ... and {len(stale) - 20} more")
         print("   Remove them, or regenerate into a clean directory.")
 
-    prov = None
-    if style.PAPER:
-        prov = style.caption_finalise()
-        _n = _files = 0
-        for _root, _d, _f in os.walk(OUT):
-            if "captions.tex" in _f:
-                _files += 1
-                # Each figure environment starts with a "% ----" marker line.
-                _n += sum(1 for l in open(os.path.join(_root, "captions.tex"))
-                          if l.startswith("% ----"))
-        if _files:
-            print(f"\ncaptions -> {_files} captions.tex beside the figures, "
-                  f"{_n} figure environments")
+    prov = style.caption_finalise()
+    _n = _files = 0
+    for _root, _d, _f in os.walk(OUT):
+        if "captions.tex" in _f:
+            _files += 1
+            # Each figure environment starts with a "% ----" marker line.
+            _n += sum(1 for l in open(os.path.join(_root, "captions.tex"))
+                      if l.startswith("% ----"))
+    if _files:
+        print(f"\ncaptions -> {_files} captions.tex beside the figures, "
+              f"{_n} figure environments")
 
     hw = write_hardware([r for rs in bymach.values() for r in rs], OUT, prov)
     if hw:

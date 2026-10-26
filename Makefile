@@ -53,12 +53,10 @@
 #                         of benchmark-build, not build/suppliers
 #   make benchmark-test   the benchmark's test suite: unit tests and reduced runs of
 #                         run_benchmark.sh (20+ min; needs the whole corpus)
-#   make paper-figures | paper-figures-final | paper-tables
-#                         the paper set: the figures the paper includes and the tables
-#                         its own tables are taken from; FULL=yes writes every figure
-#                         and table
-#   make paper-tables-check
-#                         compiles every generated table in one document (needs pdflatex)
+#   make figures | tables the paper's figures (benchmark/plots/paper-final/, with
+#                         captions.tex) and the tables its own tables are taken from
+#                         (benchmark/tables/paper/)
+#   make tables-check     compiles every generated table in one document (needs pdflatex)
 #   make python-info      the Python the generators use
 #   make build/threads_cpu                     the thread-scaling driver (STAGES=threads)
 #   make build/fold_cpu                        the prefactor-fold driver (STAGES=fold)
@@ -80,8 +78,7 @@
 #     drivers    CXX, V=yes (prints every build command)
 #     pipeline   SETTINGS=full, EXTERNALS=yes, KAUST=yes|no, CORPUS=yes (the answers
 #                to the four questions, also without a terminal), LEVIN FOLD THREADS
-#                CHECK FIGURES TABLES_CHECK FULL=yes|no (FULL=yes: every figure and
-#                table, not the full benchmark), GPU=auto|yes|no,
+#                CHECK FIGURES TABLES_CHECK=yes|no, GPU=auto|yes|no,
 #                GPU_STAGES=core,levin,threads|all (+ call-large, never in all),
 #                DRY=yes (prints the plan, the notice and the questions; downloads,
 #                builds and runs nothing; exit status 2 where the run would refuse to
@@ -92,11 +89,9 @@
 #                directory>
 #     externals  BOOST_CPU_ROOT, BOOST_ROOT (=none disables a Boost row), BOOST_VERSIONS
 #     python     PYTHON (the interpreter), PYTHON_CANDIDATES (the ones searched for it)
-#     figures    FULL=yes (every figure and table, not only the paper set; also for
-#                make benchmark and make pipeline); ARGS=--list | --strict | --runs DIR
-#                | --cpu-machine NAME (the paper-figures/paper-tables targets);
-#                paper-tables also --only=<text> and --no-preview (without pdflatex:
-#                the tables unfitted, no previews)
+#     figures    ARGS=--list | --strict | --runs DIR | --cpu-machine NAME (the figures
+#                and tables targets); tables also --only=<text> and --no-preview
+#                (without pdflatex: the tables unfitted, no previews)
 #
 # For the maintainers, from a git checkout of libmatern (a release tarball has no git)
 #   make dist             the code release: build/dist/libmatern-<version>.tar.gz at a
@@ -276,7 +271,7 @@ endif
         direct-argument threads neutral audit exports readme-example strict tsan install clean \
         clean-clone cuda cuda-modes references benchmark-build benchmark-suppliers \
         benchmark-gpu benchmark levin-ab-build levin-ab-build-gpu \
-        paper-figures paper-figures-final paper-tables paper-tables-check \
+        figures tables tables-check \
         benchmark-test python-info requirements supplier-objects boost-headers pipeline externals \
         corpus-tools corpus-check kaust externals-missing corpus dist help reproduce
 
@@ -1142,9 +1137,9 @@ benchmark: benchmark-build
 	     exit $$rc; \
 	 fi
 	@made=; notmade=; \
-	 if $(MAKE) --no-print-directory paper-figures-final ARGS="--runs $(RUNS_DIR) $(ARGS)"; \
+	 if $(MAKE) --no-print-directory figures ARGS="--runs $(RUNS_DIR) $(ARGS)"; \
 	 then made=figures; else notmade=figures; fi; \
-	 if $(MAKE) --no-print-directory paper-tables ARGS="--runs $(RUNS_DIR) $(ARGS)"; \
+	 if $(MAKE) --no-print-directory tables ARGS="--runs $(RUNS_DIR) $(ARGS)"; \
 	 then made="$${made:+$$made and }tables"; else notmade="$${notmade:+$$notmade and }tables"; fi; \
 	 [ -z "$$notmade" ] || \
 	     echo "make benchmark: $$notmade not made (above); the run itself is recorded under $(RUNS_DIR)/"; \
@@ -1178,25 +1173,17 @@ PY_GEN_CHECK = $(PY_FOUND_CHECK); _pk=$$($(PYTHON) tools/py_stack.py 2>/dev/null
 	  *) echo "$@: NumPy/Matplotlib not importable by $(firstword $(PYTHON)); not made -- make externals (installs NumPy and Matplotlib into .venv/$(if $(filter file,$(origin PYTHON)),; the Makefile then selects it,; used once PYTHON is unset)), or make requirements for the system packages"; exit 2 ;; \
 	esac
 
-# Figures and tables are drawn from the recorded runs only.  paper-figures writes
-# benchmark/plots/paper/ (text on the canvas), paper-figures-final
-# benchmark/plots/paper-final/ (captions in captions.tex).  Both, and paper-tables, write
-# the paper set unless FULL=yes.
-FULL_SET = $(if $(filter yes,$(call yes_no,FULL)),--full)
+# The paper's figures and tables, drawn from the recorded runs only: the figures into
+# benchmark/plots/paper-final/ (PDF, captions.tex, HARDWARE.md), the tables into
+# benchmark/tables/paper/, where pdflatex fits them to the column unless ARGS=--no-preview.
+figures:
+	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py $(ARGS)
 
-paper-figures:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py $(FULL_SET) $(ARGS)
-
-paper-figures-final:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/plots/make_paper_figures.py --paper $(FULL_SET) $(ARGS)
-
-# Tables into benchmark/tables/paper/; pdflatex fits them to the column, unless
-# ARGS=--no-preview.
-paper-tables:
-	@$(PY_GEN_CHECK); $(PYTHON) benchmark/tables/make_paper_tables.py $(FULL_SET) $(ARGS)
+tables:
+	@$(PY_GEN_CHECK); $(PYTHON) benchmark/tables/make_paper_tables.py $(ARGS)
 
 # Compiles every generated table in one document (needs pdflatex).
-paper-tables-check:
+tables-check:
 	@$(PY_FOUND_CHECK); $(PYTHON) benchmark/tables/check_tex.py $(ARGS)
 
 benchmark-test: benchmark-build

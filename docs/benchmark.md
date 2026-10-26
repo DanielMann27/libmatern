@@ -13,11 +13,9 @@ make pipeline            # builds, runs, figures and tables in one command
 make benchmark-build     # build/detect, build/benchmark_cpu
 make build/suppliers     # the external CPU suppliers
 make benchmark           # a CPU run with the drivers built, then the figures and tables
-make paper-figures       # figures with titles and notes -> benchmark/plots/paper/
-make paper-figures-final # publication figures and captions.tex -> benchmark/plots/paper-final/
-make paper-tables        # publication tables -> benchmark/tables/paper/
-                         # (all three: the paper set; FULL=yes for every figure and table)
-make paper-tables-check  # compiles every generated table with pdflatex
+make figures             # the paper's figures and captions.tex -> benchmark/plots/paper-final/
+make tables              # the paper's tables -> benchmark/tables/paper/
+make tables-check        # compiles every generated table with pdflatex
 ```
 
 Terms used below:
@@ -59,7 +57,7 @@ optional; its absence removes only what it enables:
 | component | enables | how to add |
 |---|---|---|
 | Python 3 with NumPy and Matplotlib | the figures and tables; without them the generators stop with exit status 2, and `make benchmark` and `make pipeline` record the run and fail | `make externals` (into `.venv/`), or the system packages |
-| pdflatex with geometry, amsmath, amssymb, booktabs, array, float and rotating | `make paper-tables` (exit status 2 without pdflatex, 1 on a LaTeX error; with `ARGS=--no-preview` it needs no pdflatex and leaves the tables unfitted) and `make paper-tables-check` | a TeX distribution |
+| pdflatex with geometry, amsmath, amssymb, booktabs, array, float and rotating | `make tables` (exit status 2 without pdflatex, 1 on a LaTeX error; with `ARGS=--no-preview` it needs no pdflatex and leaves the tables unfitted) and `make tables-check` | a TeX distribution |
 | a C++17 compiler with libstdc++ | the `std::cyl_bessel_k` row (libc++ lacks the special functions) and the Boost CPU row | the system compiler (`CXX`) |
 | Boost 1.75.0; Boost 1.87 or later | the Boost CPU row; the Boost GPU rows | `make boost-headers` |
 | GSL | the GSL row | `make externals`, or a system GSL found by pkg-config |
@@ -215,9 +213,8 @@ the first question does; the other switches act as for `make pipeline`.
 | `GPU` | `auto` | the GPU pipeline (`benchmark/run_gpu.sh`); `auto` runs it when `nvcc` and an NVIDIA GPU are found, `no` leaves it out (also with `SETTINGS=full` and in `make reproduce`); with `yes` and no `nvcc` or no visible GPU, `benchmark/run_gpu.sh` stops before its runs (exit status 3) and the pipeline ends with failures |
 | `GPU_STAGES` | `core`, plus `levin` and `threads` with `LEVIN` and `THREADS` | a comma list of `core`, `levin`, `threads`, or `all`, and `call-large`, which `all` does not include |
 | `CHECK` | `no` | `make check` after the builds, before the runs; a failure stops the pipeline |
-| `FIGURES` | `yes` | `make paper-figures-final` and `make paper-tables` at the end |
-| `TABLES_CHECK` | `no` | `make paper-tables-check` after the tables (needs `FIGURES=yes`) |
-| `FULL` | `no` | `yes` writes every figure and table, not only the paper set (Figures and tables); it does not select the full benchmark, which `SETTINGS=full` does |
+| `FIGURES` | `yes` | `make figures` and `make tables` at the end |
+| `TABLES_CHECK` | `no` | `make tables-check` after the tables (needs `FIGURES=yes`) |
 | `DRY` | `no` | `yes` prints the plan, the full-run notice and the questions with the answers the switches give, and downloads, builds and runs nothing; exit status 2 where the run would refuse to start ([Running the benchmark](#running-the-benchmark)) |
 
 **Corpus, externals, Python**
@@ -539,7 +536,7 @@ KAUST rows after a yes to the KAUST question or `KAUST=yes`). As in the publishe
 `make reproduce` on one Intel machine with an NVIDIA GPU and on one AMD machine, copy the
 run directories of the second (`benchmark/runs/<run id>/`, not `latest`) into
 `benchmark/runs/` of the first, and write the figures and tables again there with
-`make paper-figures-final` and `make paper-tables`. The generators read every run in
+`make figures` and `make tables`. The generators read every run in
 `benchmark/runs/` and take each kind of result from the newest run of the machine that has
 it, so an earlier run there can supply a stage; the CPU results come from a machine without
 GPU data, here the AMD one (`ARGS=--cpu-machine NAME` selects another).
@@ -666,8 +663,8 @@ Progress lines go to descriptor 3 (`BENCH_PROGRESS_FD`), not into the record.
 
 ### Figures and tables
 
-By default the figure and table targets, `make benchmark` and `make pipeline` write the
-**paper set**: the figures the paper includes and the tables its own tables are taken from
+The figure and table targets, `make benchmark` and `make pipeline` write the **paper set**
+and nothing else: the figures the paper includes and the tables its own tables are taken from
 (`PAPER_FIGURES` and `PAPER_TABLES` in `benchmark/plots/make_paper_figures.py`). A result
 that depends on the argument convention is written for both, `(z,ν)` and `(h,ν,s)`, except
 the ladder figure, which is drawn for `(z,ν)` only. Each CPU result, the machine-independent
@@ -676,15 +673,13 @@ machines without GPU data first (`ARGS=--cpu-machine NAME` puts one machine firs
 one-backend CPU stage of a GPU run is used only when no CPU run has the stage, and not for
 the machine-independent accuracy tables, which need a CPU run with the accuracy stage. The
 GPU figures and tables come from the GPU host, the thread figure from every machine; the
-generators print where each stage was taken from. `FULL=yes` (`--full` to the generators)
-writes every figure and table described below, from every machine.
+generators print where each stage was taken from.
 
-`make paper-figures-final` writes the figures as `.pdf` (with `FULL=yes` also `.png`) and
-`captions.tex` to `benchmark/plots/paper-final/`, and `make paper-figures` the figures as
-`.pdf` and `.png`, with titles and notes, to `benchmark/plots/paper/`; in both, `HARDWARE.md`
-names the Python, NumPy and Matplotlib and the machines and software of the runs drawn; in
-`paper-final/` it also lists per figure its runs and the details its caption does not carry.
-`make paper-tables` writes to `benchmark/tables/paper/` the machine-independent accuracy
+`make figures` writes the figures as `.pdf`, with `captions.tex`, to
+`benchmark/plots/paper-final/`; nothing is drawn on the canvas but the panels and their keys.
+`HARDWARE.md` there names the Python, NumPy and Matplotlib and the machines and software of
+the runs drawn, and lists per figure its runs and the details its caption does not carry.
+`make tables` writes to `benchmark/tables/paper/` the machine-independent accuracy
 tables at the root and every table with a cost column in `<machine>/`, with a `README.md`
 naming the software that made them and, per table, its runs and the details its caption and
 note do not carry. Each table is written as `.tex` (a booktabs float; a `% requires:` line
@@ -706,28 +701,24 @@ supplier stages:
 | output file | shows | needs |
 |---|---|---|
 | `tab-datasets`, `tab-references`, `tab-exclusions-<family>` | the corpus sets, the implementations, the excluded points | accuracy |
-| `<m>/fig-paper-assembly-<family>`, `tab-assembly-<family>` | the assemblies of each supplier | suppliers |
+| `<m>/fig-paper-assembly-<family>` | the assemblies of each supplier | suppliers |
 | `<m>/fig-paper-cost-accuracy-<family>-call` | cost against accuracy | suppliers |
 | `<m>/fig-paper-accuracy-distribution-<family>`, `tab-medmax-<family>` | accuracy distributions; median and maximum ULP error | suppliers |
 | `<m>/fig-paper-ladder-<law>-z_nu`, `<m>/tab-throughput-<family>` | throughput against N | ladders |
 | `<m>/fig-paper-workspace-<law>-<family>` | cost with a new and a reused workspace against N | ladders |
-| `<m>/fig-paper-levin-cpu-<backend>-<family>`, `<m>/tab-levin-cpu-<backend>` | Levin A/B on the CPU | `LEVIN=yes` |
-| `<m>/fig-paper-fold-<family>`, `<m>/fig-paper-fold-ecdf-<family>`, `tab-fold-quantiles-<family>`, `<m>/tab-fold-cpu` | prefactor fold | `FOLD=yes` |
-| `<m>/fig-paper-threads-<family>`, `<m>/tab-threads` | thread scaling | `THREADS=yes` |
-| `cross-machine/fig-paper-machine-independence`, `tab-machine-independence` | the rows of two CPU architectures against each other | CPU runs on an Intel and on an AMD CPU (two models of one vendor do not count); the table with `FULL=yes` |
-| `<g>/fig-paper-gpu-assembly-<family>`, `<g>/tab-gpu-assembly-<family>` | assemblies of the device kernels | `GPU=yes` |
-| `<g>/fig-paper-gpu-plane-<family>`, `<g>/tab-gpu-cost-<family>`, `<g>/tab-gpu-medmax-<family>` | cost and accuracy of the device kernels | `GPU=yes` |
+| `<m>/fig-paper-levin-cpu-<backend>-<family>` | Levin A/B of the vector router on the CPU, `<backend>` the best vector backend present | `LEVIN=yes` |
+| `<m>/fig-paper-fold-<family>` | prefactor fold | `FOLD=yes` |
+| `<m>/fig-paper-threads-<family>` | thread scaling | `THREADS=yes` |
+| `cross-machine/fig-paper-machine-independence` | the rows of two CPU architectures against each other | CPU runs on an Intel and on an AMD CPU (two models of one vendor do not count) |
+| `<g>/fig-paper-gpu-assembly-<family>` | assemblies of the device kernels | `GPU=yes` |
+| `<g>/fig-paper-gpu-plane-<family>`, `<g>/tab-gpu-cost-<family>`, `<g>/tab-gpu-medmax-<family>`, `<g>/tab-gpu-exclusions-<family>` | cost and accuracy of the device kernels; their excluded points | `GPU=yes` |
 | `<g>/fig-paper-gpu-accuracy-distribution-<family>` | accuracy distributions of the device kernels | `GPU=yes` |
 | `<g>/tab-gpu-call-<family>` | whole calls, transfers included | `GPU=yes` |
-| `<g>/fig-paper-gpu-modes-<law>-<family>`, `<g>/tab-gpu-throughput-<family>` | transfer strategies against N; device throughput | `GPU=yes` |
+| `<g>/fig-paper-gpu-modes-<law>-<family>` | transfer strategies against N, on the random size dataset | `GPU=yes` |
 | `<g>/fig-paper-gpu-boost-shortcut` | Boost's `K_ν` near ν = 5/2 | `GPU=yes`, Boost 1.87 or later |
 | `<g>/fig-paper-levin-cuda-async-direct-<family>` | Levin A/B on the GPU | `GPU=yes LEVIN=yes` |
 | `<g>/fig-paper-gpu-knobs` | CUDA block size and host staging threads | `GPU=yes THREADS=yes` |
 | `tab-environment` | machines and software of the runs | any run |
-
-With `FULL=yes` the generators also write supplementary figures and tables from the same
-runs (attribution and worst-case maps, ECDF and timing distributions, quantile, median and
-cost tables).
 
 ### Columns of the CSV files
 
