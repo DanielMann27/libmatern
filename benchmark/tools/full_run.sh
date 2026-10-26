@@ -108,8 +108,7 @@ text_durations() {
   the ladder time.  Durations of the published run, as the wall time of each batch
   job (build included):
       ladders (up to 2^25 points)   12.2 h on the AMD EPYC 9454, 14.3 h on the Intel
-                                    Xeon 8358 (benchmark/tools/ladder_estimate.sh
-                                    estimates 11.8 h and 14.5 h)
+                                    Xeon 8358
       accuracy and suppliers        2.0 h (AMD), 2.3 h (Intel); the KAUST rows 1.7 h
                                     and 1.8 h of it
       Levin A/B                     10 min (AMD), 13 min (Intel)
@@ -162,13 +161,21 @@ rb_default() {
 ladder_set_laws() {
     sed -n "s/^ *$1) _LADDER_DEFAULT=\"\(.*\)\" ;;.*/\1/p" "$RB" | head -1
 }
-# ladder_top: the largest ladder_top_n of benchmark/tools/ladder_estimate.sh over the effective
-# LADDER_LAWS, rounded down to a power of two as the rungs are; 0 when none is found.
+# ladder_top: the top rung over the effective LADDER_LAWS -- per law the size of its corpus
+# file (z_nu-nu_<law>_<N>.bin), else 2^25 for a *_large law and 2^20 otherwise (the 2^20 size
+# laws are prefixes of the 2^25 sets), capped by LADDER_MAX and rounded down to a power of
+# two as the rungs are; 0 when none is found.
 ladder_top() {
-    local t=0 n r l
+    local t=0 n r l f
     for l in $(printf '%s' "${LADDER_LAWS:-}" | tr ',' ' '); do
-        n=$(LADDER_LAWS=$l LADDER_MAX=${LADDER_MAX:-} DATA=${DATA:-} \
-            bash benchmark/tools/ladder_estimate.sh 2>/dev/null | sed -n 's/^ladder_top_n *//p')
+        f=$(ls "${DATA:-data}"/z_nu/z_nu-nu_"$l"_[0-9]*.bin \
+               "${DATA:-data}"/z_nu-nu_"$l"_[0-9]*.bin 2>/dev/null | head -1)
+        if [ -n "$f" ]; then
+            n=$(printf '%s' "$f" | sed 's/.*_\([0-9]*\)\.bin$/\1/')
+        else
+            case $l in *_large) n=33554432 ;; *) n=1048576 ;; esac
+        fi
+        case ${LADDER_MAX:-} in ''|*[!0-9]*) ;; *) [ "$LADDER_MAX" -lt "$n" ] && n=$LADDER_MAX ;; esac
         case $n in ''|*[!0-9]*) continue ;; esac
         [ "$n" -ge 256 ] || continue
         r=256; while [ $((r * 2)) -le "$n" ]; do r=$((r * 2)); done

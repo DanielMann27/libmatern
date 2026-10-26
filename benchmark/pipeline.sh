@@ -196,12 +196,7 @@ plan() {
     fi
     show "figures and tables" "$_figs"
     show "LADDER_SET" "$LADDER_SET${LADDER_LAWS:+ (LADDER_LAWS=$LADDER_LAWS)}${LADDER_MAX:+ (LADDER_MAX=$LADDER_MAX)}"
-    # The ladders dominate the CPU run's time; their estimate is a model (ladder_estimate.sh).
-    local _lest _cs
-    _lest=$(bash benchmark/tools/ladder_estimate.sh 2>/dev/null | awk '$1=="ladder_estimate_s"{print $2}')
-    [ -n "$_lest" ] && show "ladder estimate" "$(awk -v s="$_lest" 'BEGIN{
-        if (s < 60) printf "under a minute"; else if (s < 7200) printf "about %d min", (s + 30) / 60;
-        else printf "about %.1f h", s / 3600 }') for the CPU ladders (a model of the published machines: benchmark/tools/ladder_estimate.sh)"
+    local _cs
     if ! _cs=$(DATA="$DATA_DIR" sh tools/corpus.sh missing); then
         if [ $CORPUS_GET = yes ]; then _cs="$_cs -- downloaded at the start of the run"
         elif ask_tty; then _cs="$_cs -- asked for before anything runs"

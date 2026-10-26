@@ -1227,8 +1227,13 @@ run "size laws: the 2^20 prefix of the 2^25 sets" bash -c '
         --metric accuracy --max-points 1024 --format csv 2>/dev/null \
         | python3 -c "import csv,sys; print({r[\"n_file\"] for r in csv.DictReader(sys.stdin)})")
     [ "$n" = "{'"'"'1048576'"'"'}" ]'
-run "ladder estimate: small set tops at 2^20" bash -c '
-    [ "$(LADDER_SET=small bash benchmark/tools/ladder_estimate.sh --vendor amd | awk "\$1==\"ladder_top_n\"{print \$2}")" = 1048576 ]'
+# full_run.sh notes a LADDER_PASS_FROM above the top rung: 2^20 for the small set, LADDER_MAX
+# rounded down to a power of two when it caps the ladder.
+run "full run: small set tops at 2^20" bash -c '
+    bash benchmark/tools/full_run.sh --stages ladder LADDER_SET=small LADDER_PASS_FROM=2097152 2>&1 |
+        grep -q "no effect: the top rung is 1048576" &&
+    bash benchmark/tools/full_run.sh --stages ladder LADDER_SET=small LADDER_MAX=70000 \
+        LADDER_PASS_FROM=2097152 2>&1 | grep -q "no effect: the top rung is 65536"'
 run "LADDER_MAX is validated" bash -c '
     out=$(LADDER_MAX=abc bash benchmark/run_benchmark.sh 2>&1); rc=$?
     [ "$rc" -ne 0 ] && echo "$out" | grep -q "LADDER_MAX must be a positive number"'

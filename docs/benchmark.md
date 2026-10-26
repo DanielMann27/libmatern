@@ -75,8 +75,7 @@ overrides it.
 ## Running the benchmark
 
 `make pipeline` builds what the selected stages need, runs them, writes the figures and
-tables and notifies once at the end. It first prints its plan, with an estimate of the CPU
-ladder time from the model `benchmark/tools/ladder_estimate.sh`. On a terminal it then asks,
+tables and notifies once at the end. It first prints its plan. On a terminal it then asks,
 in this order:
 
 1. whether to switch to the settings of the full benchmark, when they differ; it lists the
@@ -569,7 +568,7 @@ Durations of the published run, as the wall time of each batch job (build includ
 
 | part | time |
 |---|---|
-| ladders (up to 2^25 points) | 12.2 h on the AMD EPYC 9454, 14.3 h on the Intel Xeon 8358 (`benchmark/tools/ladder_estimate.sh` estimates 11.8 h and 14.5 h) |
+| ladders (up to 2^25 points) | 12.2 h on the AMD EPYC 9454, 14.3 h on the Intel Xeon 8358 |
 | accuracy and suppliers | 2.0 h (AMD), 2.3 h (Intel); the KAUST rows 1.7 h and 1.8 h of it |
 | Levin A/B | 10 min (AMD), 13 min (Intel) |
 | thread scaling | 14 min (AMD), 15 min (Intel) |
