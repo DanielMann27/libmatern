@@ -437,6 +437,10 @@ def write_index(out, bymach, runs_, pdflatex):
               "Each run is named by its stamp and stage, with its machine.", ""]
     for r in runs_:
         lines.append(f"- `{r['label']}` ({mpf.machine_of(r)})")
+    vor, verdict = mp.version_of_record([(r["label"], mpf.read_provenance(r["dir"]))
+                                         for r in runs_])
+    lines += [""] + vor
+    print(f"version of record: {verdict}")
     lines += ["", "## Tables", "",
               "Per table, the runs it is built from and the details its",
               "caption and note do not carry: method, counts, checks and the",

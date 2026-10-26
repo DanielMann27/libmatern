@@ -348,6 +348,9 @@ def write_hardware(runs, outdir, prov=None):
              "## Generators", "", "| program | version |", "|---|---|"]
     lines += [f"| {name} | {ver} |" for name, ver in mp.generator_versions()]
     lines.append("")
+    vor, verdict = mp.version_of_record([(r["label"], pv) for r, pv in rows])
+    lines += vor
+    print(f"version of record: {verdict}")
     if not rows:
         lines += ["No run behind these figures records a `PROVENANCE.txt`.", ""]
     mach = None

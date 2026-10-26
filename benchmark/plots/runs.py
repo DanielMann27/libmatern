@@ -1,7 +1,7 @@
 """runs.py -- run-directory readers shared by the figure and table generators: STATUS,
 schema-checked CSV rows, machine names from PROVENANCE.txt and the accuracy-detail
 histograms."""
-import csv, os, platform, re
+import csv, os, platform, re, subprocess
 
 # style imports this module only inside a function, so there is no import cycle.
 import style as _style
@@ -19,6 +19,85 @@ def generator_versions():
         except Exception:
             out.append((name, "not importable"))
     return out
+
+
+# The tree the generators run from, two levels above benchmark/plots.
+_TREE = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+def _git(*args):
+    """stdout of `git -C <tree> <args>`, or None when git fails or is absent."""
+    try:
+        r = subprocess.run(["git", "-C", _TREE] + list(args), capture_output=True, text=True)
+    except OSError:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def generator_commit():
+    """(release, commit, dirty) of the tree the generators run from, found as
+    run_benchmark.sh finds a run's: the commit from git when the tree is the top level of a
+    git checkout (dirty `yes` or `no`, untracked files not counted), else from the RELEASE
+    file that `git archive` fills in (dirty `unknown`)."""
+    release = "not recorded"
+    try:
+        for line in open(os.path.join(_TREE, "include", "matern.h")):
+            m = re.match(r'#define MATERN_VERSION_STRING\s+"([^"]*)"', line)
+            if m:
+                release = m.group(1)
+                break
+    except OSError:
+        pass
+    top = _git("rev-parse", "--show-toplevel")
+    if top and os.path.realpath(top) == _TREE:
+        head = _git("rev-parse", "HEAD") or "not recorded"
+        st = _git("--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
+        return release, head, ("unknown" if st is None else "yes" if st else "no")
+    try:
+        for line in open(os.path.join(_TREE, "RELEASE")):
+            f = line.split()
+            if len(f) == 2 and f[0] == "commit" and re.fullmatch(r"[0-9a-f]{40}", f[1]):
+                return release, f[1], "unknown"
+    except OSError:
+        pass
+    return release, "not recorded", "unknown"
+
+
+def run_commit(pv):
+    """(release, commit, dirty) as a run's PROVENANCE.txt records them (`release`, the first
+    word of `source_commit` and of `git_dirty`)."""
+    pv = pv or {}
+    sc = (pv.get("source_commit") or "").split()
+    gd = (pv.get("git_dirty") or "").split()
+    return (pv.get("release") or "not recorded", sc[0] if sc else "not recorded",
+            gd[0] if gd else "not recorded")
+
+
+def version_of_record(runs):
+    """(markdown lines, verdict): the release and commit of the generators and of each run
+    ([(label, PROVENANCE dict)]), and whether all are one version of record -- one commit,
+    with no uncommitted changes recorded."""
+    gr, gc, gd = generator_commit()
+    lines = ["## Version of record", "",
+             "The release and commit of the generators that wrote this file and of each run",
+             "behind it (`release`, `source_commit` and `git_dirty` in the run's",
+             "`PROVENANCE.txt`).", "",
+             "| | release | commit | uncommitted changes |", "|---|---|---|---|",
+             f"| generators | {gr} | `{gc}` | {gd} |"]
+    commits, dirty = {gc}, [gd]
+    for label, pv in runs:
+        r, c, d = run_commit(pv)
+        lines.append(f"| run `{label}` | {r} | `{c}` | {d} |")
+        commits.add(c)
+        dirty.append(d)
+    if len(commits) == 1 and gc != "not recorded":
+        verdict = (f"the generators and every run are at commit {gc[:12]}"
+                   + ("" if all(d == "no" for d in dirty) else
+                      "; uncommitted changes are not ruled out for every one of them"))
+    else:
+        verdict = ("the generators and the runs are NOT at one commit: "
+                   + ", ".join(sorted(c[:12] for c in commits)))
+    return lines + ["", verdict[0].upper() + verdict[1:] + ".", ""], verdict
 
 
 def read_status(run_dir):
