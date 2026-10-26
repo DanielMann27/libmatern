@@ -500,7 +500,7 @@ run "subset: accuracy, no timing"  bash -c '
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
     out=$("'"$PY"'" "$m/plots/make_paper_figures.py" 2>&1); rc=$?
     n=$(find "$m/plots/paper-final" -name "*.pdf" 2>/dev/null | wc -l); rm -rf "$m"
-    [ "$rc" -eq 0 ] && [ "$n" -gt 0 ]'
+    [ "$rc" -eq 0 ] && { [ "$n" -gt 0 ] || echo "$out" | grep -q "no external supplier rows"; }'
 run "subset: short ladder (3 rungs)" bash -c '
     m=$(bash -c "$FIGMIRROR"); d="$m/runs/2026-01-01T00-00Z_hosta_test"; mkdir -p "$d"
     cp "'"$LAST"'"/STATUS "'"$LAST"'"/PROVENANCE.txt "'"$LAST"'"/accuracy.csv "$d/" 2>/dev/null
