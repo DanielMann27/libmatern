@@ -16,7 +16,7 @@
  * for sinpi, and the C library's elementary functions for Julia's. */
 
 #include <math.h>
-#include "cpu_wm.h"
+#include "cpu_supplier.h"
 #include "cpu_bessels_shared.h"   /* besselk0/1(x), Debye, up_recurrence, sinpi */
 
 /* Modified spherical Bessel k_n, the half-integer closed form:
@@ -218,8 +218,8 @@ static double bol_besselkx(double nu, double x)
 static double sup_kv (double nu, double z) { return bol_besselk (nu, z); }
 static double sup_kxv(double nu, double z) { return bol_besselkx(nu, z); }
 
-const wmc_supplier wmc_bessels_old = {
+const cpu_supplier cpu_supplier_bessels_old = {
     "Bessels.jl besselk, earlier algorithm (MIT)",
-    WMC_LOG_SCALED,
+    CPU_SUPPLIER_LOG_SCALED,
     sup_kv, sup_kxv, NULL
 };

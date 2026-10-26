@@ -62,7 +62,7 @@ for root, dirs, files in os.walk('.'):
             stray.append(rel)
 check("no build products outside build/", sorted(stray))
 
-# 3. Every header under src/ is included by something.
+# 3. Every header under src/ and include/matern_device/ is included by something.
 allh = {os.path.basename(f) for f in SOURCE_HEADERS}
 refd = set()
 for f in SOURCE_HEADERS + SOURCE_FILES + ['include/matern_device.cuh']:
@@ -188,7 +188,8 @@ bad = ['%s:%d' % (f, n) for f in sorted(set(TEXT))
 check("no development-history markers in sources or docs", bad)
 
 # 10. No tracked file carries KAUST CuBesselK's text ("All rights reserved").  Exempt:
-# derive_port.py (the fragments it matches) and PROVENANCE.md (quotes the notice).
+# derive_port.py (the fragments it matches), PROVENANCE.md (quotes the notice), data/ and
+# this file.
 # The first two markers lead CuBesselK's g1 and g2 Chebyshev tables (GSL's tables,
 # PROVENANCE.md, Licence).
 KAUST_MARKERS = re.compile(r'1\.14516408366268311786898152867|1\.882645524949671835019616975350'
@@ -241,7 +242,7 @@ else:
 check("the release agrees in include/matern.h, CITATION.cff and README.md", bad)
 
 # 12. The device half-integer table equals tools/half_integer_table_device.c's output, which
-# depends on long double: compared only where it has the 64-bit mantissa it was made with.
+# depends on long double: compared only where long double has a 64-bit mantissa.
 TABLE_HEADER = glob.glob('include/matern_device/half_integer_closed_form_device.cuh')
 gen = 'build/half_integer_table_device'
 os.makedirs('build', exist_ok=True)
@@ -260,7 +261,7 @@ else:
         hexnum = r'-?0x[0-9a-f]+(?:\.[0-9a-f]*)?p[+-]\d+'
         want = [float.fromhex(x) for x in re.findall(hexnum, out)]
         text = open(TABLE_HEADER[0], encoding='utf-8').read()
-        body = re.search(r'matern_tier_a_coefficients_device\[[^]]*\]\s*=\s*\{(.*?)\};', text, re.S)
+        body = re.search(r'matern_half_integer_coefficients_device\[[^]]*\]\s*=\s*\{(.*?)\};', text, re.S)
         have = [float.fromhex(x) for x in re.findall(hexnum, body.group(1))] if body else []
         bad = [] if have == want else ['%s: %d values, %d differ from the generator'
                                        % (TABLE_HEADER[0], len(have),

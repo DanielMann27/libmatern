@@ -232,7 +232,7 @@ static int load_law(corpus_dataset *cs, const char *root, const char *family,
     cs->min_bits      = (k_ref ? mb : 0);
     cs->accuracy_bits = bits;
 
-    wm_dataset *s = &cs->set;
+    bench_dataset *s = &cs->set;
     s->has_length_scale = is_hns;
     s->count            = k_nu;
     s->order            = nu;

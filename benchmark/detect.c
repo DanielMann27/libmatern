@@ -19,7 +19,7 @@
 #include "corpus_dataset.h"
 #include "matern.h"
 #include "common/ulpmodes.h"
-#include "common/wm_timing.h"
+#include "common/bench_timing.h"
 #include "../references/common/build_info.h"
 
 static void line(void) { puts("--------------------------------------------------------------------------"); }
@@ -56,12 +56,12 @@ static int cpuinfo_field(const char *key, char *out, size_t n)
 /* Whether `a*b + c` is contracted into an FMA.  GCC's default follows the -std dialect: a
  * -std=c11 build without -ffp-contract=fast does not fuse.  The volatile input keeps the
  * probe from being evaluated at compile time. */
-static volatile double wm_fma_probe_in = 1.0 + 0x1p-27;
+static volatile double bench_fma_probe_in = 1.0 + 0x1p-27;
 
 static int fma_is_contracted(void)
 {
     /* The arithmetic below is not volatile, so the build's contraction rule applies. */
-    double a = wm_fma_probe_in;
+    double a = bench_fma_probe_in;
     double r = a * a - 1.0 - 0x1p-26;
     /* unfused: a*a rounds to 1 + 2^-26, so r == 0.
      * fused:   fma(a, a, -1.0) is exact (2^-26 + 2^-54), so r == 2^-54. */
@@ -308,16 +308,16 @@ static void comment_stamps(const char *path, const char *count_path,
     char key[64];
     snprintf(key, sizeof key, "%s_compiler", unit);
     if (!file_exists(path)) {
-        wm_build_info_kv(stdout, side, key, "not built");
+        bench_build_info_kv(stdout, side, key, "not built");
         return;
     }
     static stamp_set st, per;
     if (!read_stamps(path, &st)) {
-        wm_build_info_kv(stdout, side, key, "unknown (readelf could not be run)");
+        bench_build_info_kv(stdout, side, key, "unknown (readelf could not be run)");
         return;
     }
     if (!st.ns) {
-        wm_build_info_kv(stdout, side, key,
+        bench_build_info_kv(stdout, side, key,
                          "unknown (no .comment stamp: not GCC or Clang, stripped, or no readelf)");
         return;
     }
@@ -330,7 +330,7 @@ static void comment_stamps(const char *path, const char *count_path,
         snprintf(key, sizeof key, shown->ns == 1 ? "%s_compiler" : "%s_compiler_%d", unit, k + 1);
         snprintf(val, sizeof val, "%.159s  [%d of %d object(s)]",
                  shown->stamp[k], shown->count[k], shown->members);
-        wm_build_info_kv(stdout, side, key, val);
+        bench_build_info_kv(stdout, side, key, val);
     }
 }
 
@@ -354,7 +354,7 @@ static void build_info(const char *bdir)
     snprintf(path, sizeof path, "%s/libmatern.a", bdir);
     snprintf(internal, sizeof internal, "%s/libmatern_internal.a", bdir);
     comment_stamps(path, internal, "cpu", "library");
-    wm_build_info_kv(stdout, "cpu", "library_version", matern_version());
+    bench_build_info_kv(stdout, "cpu", "library_version", matern_version());
     snprintf(path, sizeof path, "%s/cuda.o", bdir);
     /* An nvcc object carries the host compiler's stamp; nvcc's is in the GPU drivers' records. */
     if (file_exists(path)) comment_stamps(path, NULL, "gpu", "library_host");
@@ -368,10 +368,10 @@ static void build_info(const char *bdir)
         snprintf(path, sizeof path, "%s/%s", bdir, drivers[i].exe);
         fflush(stdout);
         if (access(path, X_OK) != 0)
-            wm_build_info_kv(stdout, drivers[i].unit, "compiler",
+            bench_build_info_kv(stdout, drivers[i].unit, "compiler",
                              "not built -- no rows from this driver");
         else if (relay(path) == 0)
-            wm_build_info_kv(stdout, drivers[i].unit, "compiler",
+            bench_build_info_kv(stdout, drivers[i].unit, "compiler",
                              "unknown -- the binary printed no --build-info (built before it had one, "
                              "or it cannot start here)");
     }
@@ -390,7 +390,7 @@ static void self_dir(char *out, size_t n)
     snprintf(out, n, "build");
 }
 
-/* Host timings read WM_TIMING_CLOCK (wm_timing.h).  With clocksource `tsc` and an invariant
+/* Host timings read BENCH_TIMING_CLOCK (bench_timing.h).  With clocksource `tsc` and an invariant
  * TSC a tick has the same length at every frequency; otherwise a warning goes to stderr. */
 static int cpuinfo_has_flag(const char *flags, const char *name)
 {
@@ -406,9 +406,9 @@ static int cpuinfo_has_flag(const char *flags, const char *name)
 static int timer_info(const char *indent)
 {
     printf("%s%-18s %s via clock_gettime (host timings; device kernel-only timings use CUDA events)\n",
-           indent, "timer_clock", WM_TIMING_CLOCK_NAME);
+           indent, "timer_clock", BENCH_TIMING_CLOCK_NAME);
     struct timespec res;
-    if (clock_getres(WM_TIMING_CLOCK, &res) == 0)
+    if (clock_getres(BENCH_TIMING_CLOCK, &res) == 0)
         printf("%s%-18s %.0f ns\n", indent, "timer_resolution",
                (double)res.tv_sec * 1e9 + (double)res.tv_nsec);
     else
@@ -468,7 +468,7 @@ static int timer_info(const char *indent)
     printf("%s%-18s %s; timings may drift with frequency changes\n", indent, "timer_warning", why);
     fflush(stdout);
     fprintf(stderr,
-            "WARNING: timer: %s.  " WM_TIMING_CLOCK_NAME " may then not advance at a constant\n"
+            "WARNING: timer: %s.  " BENCH_TIMING_CLOCK_NAME " may then not advance at a constant\n"
             "WARNING: rate, and timings may drift with frequency changes (turbo, power states).\n"
             "WARNING: Treat the timings of this run with caution; see timer_* in PROVENANCE.txt.\n",
             why);
@@ -494,7 +494,7 @@ int main(int argc, char **argv)
     }
     /* `--ulp`: the ULP metric the drivers score with, as `key value` lines. */
     if (argc > 1 && strcmp(argv[1], "--ulp") == 0) {
-        wm_ulp_mode_describe(stdout, "", WM_ULP_MODE_DEFAULT);
+        bench_ulp_mode_describe(stdout, "", BENCH_ULP_MODE_DEFAULT);
         return 0;
     }
     /* `--timer`: the timer clock as `key value` lines. */
@@ -572,11 +572,11 @@ int main(int argc, char **argv)
 
     /* 2. NUMA topology and the placement obtained */
     puts("");
-    int nodes = 0, best = wm_best_node(&nodes);
+    int nodes = 0, best = bench_best_node(&nodes);
     if (nodes <= 0) {
         puts("  numa       no /sys topology -- placement policy UNAVAILABLE, running unpinned");
         fflush(stdout);
-        wm_bind_warn(0, "no NUMA topology or CPU-affinity API on this platform; running UNPINNED");
+        bench_bind_warn(0, "no NUMA topology or CPU-affinity API on this platform; running UNPINNED");
         warn++;
     } else {
         printf("  numa       %d node(s)\n", nodes);
@@ -589,10 +589,10 @@ int main(int argc, char **argv)
             printf("             node%d cpus %-22s distance %s\n", i, cl, di);
         }
         char why[256];
-        int st = wm_bind_node(best < 0 ? 0 : best, why, sizeof why);
+        int st = bench_bind_node(best < 0 ? 0 : best, why, sizeof why);
         printf("  placement  %s\n", why);
         fflush(stdout);
-        wm_bind_warn(st, why);
+        bench_bind_warn(st, why);
         /* The mask after binding (PROVENANCE's `affinity_mask` is the mask before it). */
         {
             cpu_set_t got;
@@ -649,7 +649,7 @@ int main(int argc, char **argv)
     puts("");
     warn += timer_info("  ");
     puts("");
-    wm_ulp_mode_describe(stdout, "  ", WM_ULP_MODE_DEFAULT);
+    bench_ulp_mode_describe(stdout, "  ", BENCH_ULP_MODE_DEFAULT);
 
     /* 4. ISA: compiled-for vs executable */
     puts("");

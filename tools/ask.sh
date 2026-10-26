@@ -1,10 +1,10 @@
 # ask.sh -- questions on a terminal for the benchmark scripts (POSIX sh, sourced:
 # `. ./tools/ask.sh`).  A question is asked only when stdin and stdout are terminals
-# and WM_UNATTENDED is unset; otherwise every question counts as answered no.
+# and BENCH_UNATTENDED is unset; otherwise every question counts as answered no.
 
 # ask_tty: true when a question can be asked.
 ask_tty() {
-    [ -z "${WM_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 1 ]
+    [ -z "${BENCH_UNATTENDED:-}" ] && [ -t 0 ] && [ -t 1 ]
 }
 
 # ask_yn <question>: 0 for yes, 1 for no (the default, also on end of input or

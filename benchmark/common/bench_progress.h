@@ -1,8 +1,8 @@
-/* wm_progress.h -- wm_progress(fmt, ...) writes one time-stamped line, in one write(2),
- * to the descriptor named by WM_PROGRESS_FD (none: no output).  Drivers call it only
+/* bench_progress.h -- bench_progress(fmt, ...) writes one time-stamped line, in one write(2),
+ * to the descriptor named by BENCH_PROGRESS_FD (none: no output).  Drivers call it only
  * between measurements, never inside a timed interval. */
-#ifndef WM_PROGRESS_H
-#define WM_PROGRESS_H
+#ifndef BENCH_PROGRESS_H
+#define BENCH_PROGRESS_H
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -10,11 +10,11 @@
 #include <time.h>
 #include <unistd.h>
 
-static inline void wm_progress(const char *fmt, ...)
+static inline void bench_progress(const char *fmt, ...)
 {
     static int fd = -2;
     if (fd == -2) {
-        const char *e = getenv("WM_PROGRESS_FD");
+        const char *e = getenv("BENCH_PROGRESS_FD");
         fd = (e && *e) ? atoi(e) : -1;
     }
     if (fd < 0) return;
@@ -32,4 +32,4 @@ static inline void wm_progress(const char *fmt, ...)
     if (write(fd, buf, n) < 0) fd = -1;     /* not open: stop trying */
 }
 
-#endif /* WM_PROGRESS_H */
+#endif /* BENCH_PROGRESS_H */

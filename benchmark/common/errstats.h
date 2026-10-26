@@ -1,12 +1,12 @@
-/* errstats.h -- `wmq_ulp_at`, the ulp of a reference value, on which ulpmodes.h builds.
+/* errstats.h -- `bench_ulp_at`, the ulp of a reference value, on which ulpmodes.h builds.
  * Taken at the reference, so a result cannot gain a larger ulp by landing in a higher
  * binade; nextafter covers the subnormal range, which the corpus reaches. */
-#ifndef CPU_ERRSTATS_H
-#define CPU_ERRSTATS_H
+#ifndef BENCH_ERRSTATS_H
+#define BENCH_ERRSTATS_H
 #include <math.h>
 
 /* ulp at a double magnitude; the subnormal floor is the smallest positive double. */
-static inline double wmq_ulp_at(double r)
+static inline double bench_ulp_at(double r)
 {
     double u;
     r = fabs(r);
@@ -16,4 +16,4 @@ static inline double wmq_ulp_at(double r)
     return u;
 }
 
-#endif /* CPU_ERRSTATS_H */
+#endif /* BENCH_ERRSTATS_H */

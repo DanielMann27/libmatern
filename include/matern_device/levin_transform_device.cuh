@@ -1,10 +1,11 @@
 /* levin_transform_device.cuh -- device Levin transform of the large-argument series, with the
  * term ratios, weights and phases of the host AVX2/width-1 form and the exponent folded in
- * through matern_wm_exponent_device.  Routed only under MATERN_ROUTE_L. */
+ * through matern_large_argument_folded_prefactor_device.  Routed only under
+ * MATERN_ROUTE_LEVIN_BIT. */
 #ifndef MATERN_LEVIN_TRANSFORM_DEVICE_CUH
 #define MATERN_LEVIN_TRANSFORM_DEVICE_CUH
 
-#include "asymptotic_large_argument_device.cuh"   /* matern_wm_exponent_device */
+#include "asymptotic_large_argument_device.cuh"   /* matern_large_argument_folded_prefactor_device */
 
 #define MATERN_LEVIN_TERMS_DEVICE 15
 
@@ -55,7 +56,7 @@ static __device__ __forceinline__ double matern_levin_fold_dd_argument_device(do
     const double ratio = (wt[MATERN_LEVIN_TERMS_DEVICE - 1] == 0.0)
                        ? seq[MATERN_LEVIN_TERMS_DEVICE - 1] : (num / den);
 
-    const double eE = matern_wm_exponent_device(Zh, Zl, nu);
+    const double eE = matern_large_argument_folded_prefactor_device(Zh, Zl, nu);
     const double v  = eE * ratio;
     return (v > 0.0 && v <= 1.0) ? v : 0.0;    /* M lies in (0, 1] */
 }

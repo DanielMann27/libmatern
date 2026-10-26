@@ -1,5 +1,5 @@
 /* suppliers.c -- external K_nu suppliers on the corpus, assembled into M (direct, scaled,
- * logtrick; references/common/cpu_wm.h) and scored like the library rows, with the assembly
+ * logtrick; references/common/cpu_supplier.h) and scored like the library rows, with the assembly
  * in the `backend` column (see the accompanying paper, reference implementations). */
 #include "common/numa_bind.h"        /* first: sets _GNU_SOURCE */
 
@@ -8,57 +8,57 @@
 #include <string.h>
 #include <math.h>
 #include "corpus_dataset.h"
-#include "common/wm_metrics.h"
-#include "common/wm_timing.h"
-#include "common/wm_progress.h"
-#include "cpu_wm.h"
-#include "cpu_wm_registry.h"
+#include "common/bench_metrics.h"
+#include "common/bench_timing.h"
+#include "common/bench_progress.h"
+#include "cpu_supplier.h"
+#include "cpu_supplier_registry.h"
 #include "build_info.h"
 
 /* The ULP mode of the scoring call and of the `ulp_mode` column. */
-#define WM_ACC_MODE WM_ULP_MODE_DEFAULT
+#define BENCH_ACCURACY_ULP_MODE BENCH_ULP_MODE_DEFAULT
 
 /* `--build-info`: the build record of this binary and of every linked supplier object,
  * relayed by `detect --build-info`. */
 static void print_build_info(void)
 {
-    WM_BUILD_INFO_COMMON(stdout, "cpu_suppliers");
-    wm_build_info_kv(stdout, "cpu_suppliers", "ulp_mode", wm_ulp_mode_name(WM_ACC_MODE));
-    wm_build_info_cpu_supplier_c(stdout);
-#ifdef WMC_WITH_CXX
-    wm_build_info_cpu_supplier_cxx(stdout);
+    BENCH_BUILD_INFO_COMMON(stdout, "cpu_suppliers");
+    bench_build_info_kv(stdout, "cpu_suppliers", "ulp_mode", bench_ulp_mode_name(BENCH_ACCURACY_ULP_MODE));
+    bench_build_info_cpu_supplier_c(stdout);
+#ifdef CPU_SUPPLIER_WITH_CXX
+    bench_build_info_cpu_supplier_cxx(stdout);
 #else
-    wm_build_info_kv(stdout, "cpu_supplier_cxx", "compiler", "not built (no C++ compiler at build time)");
+    bench_build_info_kv(stdout, "cpu_supplier_cxx", "compiler", "not built (no C++ compiler at build time)");
 #endif
-#ifdef WMC_WITH_GSL
-    wm_build_info_cpu_supplier_gsl(stdout);
+#ifdef CPU_SUPPLIER_WITH_GSL
+    bench_build_info_cpu_supplier_gsl(stdout);
 #else
-    wm_build_info_kv(stdout, "cpu_supplier_gsl", "headers", "none (not built: no GSL at build time)");
+    bench_build_info_kv(stdout, "cpu_supplier_gsl", "headers", "none (not built: no GSL at build time)");
 #endif
 }
 
-/* Supplier list: references/common/cpu_wm_registry.h, shared with threads_cpu.c. */
-#define entry wmc_entry
-static int build_list(entry *e, int cap) { return wmc_build_list(e, cap); }
+/* Supplier list: references/common/cpu_supplier_registry.h, shared with threads_cpu.c. */
+#define entry cpu_supplier_entry
+static int build_list(entry *e, int cap) { return cpu_supplier_build_list(e, cap); }
 
 enum { ASM_DIRECT, ASM_SCALED, ASM_LOGTRICK, ASM_COUNT };
 static const char *asm_name(int a)
 { return a == ASM_DIRECT ? "direct" : a == ASM_SCALED ? "scaled" : "logtrick"; }
 
-static double assemble(const wmc_supplier *s, int a, int has_length_scale,
+static double assemble(const cpu_supplier *s, int a, int has_length_scale,
                        double h, double nu, double scale, double z)
 {
     if (has_length_scale) {
         switch (a) {
-            case ASM_DIRECT:   return wmc_direct(s, h, nu, scale);
-            case ASM_SCALED:   return wmc_scaled(s, h, nu, scale);
-            default:           return wmc_logtrick(s, h, nu, scale);
+            case ASM_DIRECT:   return cpu_supplier_direct(s, h, nu, scale);
+            case ASM_SCALED:   return cpu_supplier_scaled(s, h, nu, scale);
+            default:           return cpu_supplier_logtrick(s, h, nu, scale);
         }
     }
     switch (a) {
-        case ASM_DIRECT:   return wmc_direct_z(s, z, nu);
-        case ASM_SCALED:   return wmc_scaled_z(s, z, nu);
-        default:           return wmc_logtrick_z(s, z, nu);
+        case ASM_DIRECT:   return cpu_supplier_direct_z(s, z, nu);
+        case ASM_SCALED:   return cpu_supplier_scaled_z(s, z, nu);
+        default:           return cpu_supplier_logtrick_z(s, z, nu);
     }
 }
 
@@ -67,7 +67,7 @@ static size_t time_points_cap = 0;
 
 /* Times the work that is scored (same assembly, points and order) as whole calls, as the
  * library rows are timed. */
-static wm_time time_assembly(const wmc_supplier *sp, int a, int has_length_scale,
+static bench_time time_assembly(const cpu_supplier *sp, int a, int has_length_scale,
                              const corpus_dataset *cs, double *out, size_t n,
                              int reps, size_t *timed_points,
                              int ladder_mode,
@@ -78,67 +78,67 @@ static wm_time time_assembly(const wmc_supplier *sp, int a, int has_length_scale
     if (!ladder_mode && time_points_cap && n > time_points_cap) n = time_points_cap;
     *timed_points = n;
     double *t = (double *)malloc((size_t)reps * sizeof *t);
-    if (!t) { wm_time z; memset(&z, 0, sizeof z); return z; }
-    wm_sched_begin();
-    for (int w = 0; w < WM_WARMUP_REPS; w++)
+    if (!t) { bench_time z; memset(&z, 0, sizeof z); return z; }
+    bench_sched_begin();
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++)
         for (size_t i = 0; i < n; i++)
             out[i] = assemble(sp, a, has_length_scale, has_length_scale ? cs->set.h[i] : 0.0,
                               cs->set.order[i],
                               has_length_scale ? cs->set.length_scale[i] : 0.0,
                               has_length_scale ? 0.0 : cs->set.argument[i]);
     for (int r = 0; r < reps; r++) {
-        double t0 = wm_now_s();
+        double t0 = bench_now_s();
         for (size_t i = 0; i < n; i++)
             out[i] = assemble(sp, a, has_length_scale, has_length_scale ? cs->set.h[i] : 0.0,
                               cs->set.order[i],
                               has_length_scale ? cs->set.length_scale[i] : 0.0,
                               has_length_scale ? 0.0 : cs->set.argument[i]);
-        t[r] = (wm_now_s() - t0) * 1e9 / (double)n;
+        t[r] = (bench_now_s() - t0) * 1e9 / (double)n;
     }
     /* Before the reduce, which sorts in place: the raw samples keep their order. */
-    wm_raw_emit("cpu", sp_label, fam_label, law_label, asm_label, n, t, reps);
-    wm_time r = wm_time_reduce(t, reps);
+    bench_raw_emit("cpu", sp_label, fam_label, law_label, asm_label, n, t, reps);
+    bench_time r = bench_time_reduce(t, reps);
     free(t);
     return r;
 }
 
 /* --ladder-pass-from S: one pass over [0, top) per repetition, chunk bounds doubling from
  * S, with the clock read after each chunk, so rung N is the time for the first N points.
- * T receives one wm_time per rung. */
+ * T receives one bench_time per rung. */
 static size_t ladder_pass_from = 0;
 
-static void time_assembly_pass(const wmc_supplier *sp, int a, int has_length_scale,
+static void time_assembly_pass(const cpu_supplier *sp, int a, int has_length_scale,
                                const corpus_dataset *cs, double *out, size_t S,
                                size_t top, int reps, const char *sp_label,
                                const char *fam_label, const char *law_label,
-                               const char *asm_label, wm_time *T)
+                               const char *asm_label, bench_time *T)
 {
     int k = 0;
     size_t bnd[40];
     for (size_t b = S; b <= top && k < 40; b <<= 1) bnd[k++] = b;
     double *t = (double *)malloc((size_t)k * (size_t)reps * sizeof *t);
     if (!t) { memset(T, 0, (size_t)k * sizeof *T); return; }
-    wm_sched_begin();
-    for (int r = -WM_WARMUP_REPS; r < reps; r++) {         /* r < 0: untimed warm-up */
+    bench_sched_begin();
+    for (int r = -BENCH_WARMUP_REPS; r < reps; r++) {         /* r < 0: untimed warm-up */
         size_t lo = 0;
-        const double t0 = wm_now_s();
+        const double t0 = bench_now_s();
         for (int j = 0; j < k; j++) {
             for (size_t i = lo; i < bnd[j]; i++)
                 out[i] = assemble(sp, a, has_length_scale, has_length_scale ? cs->set.h[i] : 0.0,
                                   cs->set.order[i],
                                   has_length_scale ? cs->set.length_scale[i] : 0.0,
                                   has_length_scale ? 0.0 : cs->set.argument[i]);
-            if (r >= 0) t[(size_t)j * (size_t)reps + (size_t)r] = (wm_now_s() - t0) * 1e9 / (double)bnd[j];
+            if (r >= 0) t[(size_t)j * (size_t)reps + (size_t)r] = (bench_now_s() - t0) * 1e9 / (double)bnd[j];
             lo = bnd[j];
         }
     }
     /* every rung of the pass carries the pass's scheduler record */
-    const wm_sched mark = wm_sched_mark;
+    const bench_sched mark = bench_sched_mark;
     for (int j = 0; j < k; j++) {
         double *tj = t + (size_t)j * (size_t)reps;
-        wm_sched_mark = mark; wm_sched_marked = 1;
-        wm_raw_emit("cpu", sp_label, fam_label, law_label, asm_label, bnd[j], tj, reps);
-        T[j] = wm_time_reduce(tj, reps);
+        bench_sched_mark = mark; bench_sched_marked = 1;
+        bench_raw_emit("cpu", sp_label, fam_label, law_label, asm_label, bnd[j], tj, reps);
+        T[j] = bench_time_reduce(tj, reps);
     }
     free(t);
 }
@@ -154,12 +154,12 @@ static void ladder_header(void)
 
 /* mode: `rung` (timed on its own) or `pass` (read from the cumulative pass) */
 static void ladder_row(const char *sup, const char *fam, const char *law,
-                       const char *assembly, size_t n, const wm_time *T,
+                       const char *assembly, size_t n, const bench_time *T,
                        const char *mode)
 {
     printf("%d,cpu,%s,%s,%s,%s,%zu,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%zu,call,%s,%zu\n",
-           WM_SCHEMA, sup, fam, law, assembly, n,
+           BENCH_SCHEMA, sup, fam, law, assembly, n,
            T->min, T->q1, T->med, T->q3, T->p95, T->max, T->mean, T->iqr,
            T->spread, T->reps, n, mode, ladder_pass_from);
 }
@@ -173,13 +173,13 @@ static void csv_header(void)
 }
 
 static void csv_row(const char *supplier, const char *fam, const char *law,
-                    const char *assembly, const wm_metrics *M, const wm_time *T,
+                    const char *assembly, const bench_metrics *M, const bench_time *T,
                     size_t ns_points)
 {
     printf("%d,cpu,%s,%s,%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%d,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%zu,call,%zu\n",
-           WM_SCHEMA, supplier, fam, law, assembly, wm_ulp_mode_name(WM_ACC_MODE),
+           BENCH_SCHEMA, supplier, fam, law, assembly, bench_ulp_mode_name(BENCH_ACCURACY_ULP_MODE),
            M->n, M->n_scored, M->n_excluded, M->n_nonfinite,
            M->n_ref_zero, M->n_ref_subnormal, M->n_exact, M->min_bits,
            M->u_min, M->u_q1, M->u_med, M->u_q3, M->u_p99, M->u_p999, M->u_max,
@@ -214,7 +214,7 @@ int main(int argc, char **argv)
     size_t maxpts = 0;
     /* The library stage's fixed repetition count: a minimum over a different number of
      * samples is a different estimator. */
-    int reps = WM_REPS_MIN_DEFAULT;
+    int reps = BENCH_REPS_MIN_DEFAULT;
     int ladder = 0;
     /* The ladder is bounded by the dataset and the budget; --ladder-max caps it. */
     size_t ladder_max = (size_t)-1;
@@ -244,8 +244,8 @@ int main(int argc, char **argv)
             printf("%d supplier(s) in this build:\n", n);
             for (int i = 0; i < n; i++)
                 printf("  %-20s %-28s scaled=%s\n", e[i].label, e[i].s->origin,
-                       wmc_has_scaled(e[i].s) ? "yes" : "no");
-            wmc_print_absent();
+                       cpu_supplier_has_scaled(e[i].s) ? "yes" : "no");
+            cpu_supplier_print_absent();
             return 0;
         }
         else if (!strcmp(argv[a],"--help")) { usage(stdout, argv[0]); return 0; }
@@ -266,11 +266,11 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    char why[256]; int nodes = 0, best = wm_best_node(&nodes);
-    wm_expect_single_thread = 1;
-    const int st = wm_bind_node(best < 0 ? 0 : best, why, sizeof why);
+    char why[256]; int nodes = 0, best = bench_best_node(&nodes);
+    bench_expect_single_thread = 1;
+    const int st = bench_bind_node(best < 0 ? 0 : best, why, sizeof why);
     if (strcmp(format,"csv") != 0) printf("# placement: %s\n", why);
-    wm_bind_warn(st, why);
+    bench_bind_warn(st, why);
 
     entry sup[16]; const int nsup = build_list(sup, 16);
     if (only) {                       /* an unknown supplier name is an error */
@@ -285,8 +285,8 @@ int main(int argc, char **argv)
         }
     }
     size_t rows_emitted = 0;
-    wm_raw_open(getenv("WM_RAW_REPS"));
-    wm_detail_open(getenv("WM_ACC_DETAIL"));
+    bench_raw_open(getenv("BENCH_TIMING_RAW"));
+    bench_detail_open(getenv("BENCH_ACCURACY_DETAIL"));
     if (!strcmp(format,"csv")) { if (ladder) ladder_header(); else csv_header(); }
 
     char famb[64]; snprintf(famb, sizeof famb, "%s", families);
@@ -310,7 +310,7 @@ int main(int argc, char **argv)
                 if (!hit) continue;
             }
             /* between measurements: before the law is loaded and warmed up */
-            if (!ladder) wm_progress("    %s/%s", fs, law);
+            if (!ladder) bench_progress("    %s/%s", fs, law);
             corpus_dataset cs;
             if ((ladder && ladder_max != (size_t)-1)
                     ? corpus_dataset_load_prefix(&cs, root, fs, law, ladder_max)   /* the rungs need no more */
@@ -324,24 +324,24 @@ int main(int argc, char **argv)
                 if (only && strcmp(only, sup[si].label)) continue;
                 for (int a = 0; a < ASM_COUNT; a++) {
                     /* a supplier without a scaled K gets no scaled row */
-                    if (a == ASM_SCALED && !wmc_has_scaled(sup[si].s)) continue;
-                    if (ladder) wm_progress("    %s/%s  %s", fs, law, asm_name(a));
+                    if (a == ASM_SCALED && !cpu_supplier_has_scaled(sup[si].s)) continue;
+                    if (ladder) bench_progress("    %s/%s  %s", fs, law, asm_name(a));
                     for (size_t i = 0; i < n; i++)
                         out[i] = assemble(sup[si].s, a, has_length_scale,
                                           has_length_scale ? cs.set.h[i] : 0.0,
                                           cs.set.order[i],
                                           has_length_scale ? cs.set.length_scale[i] : 0.0,
                                           has_length_scale ? 0.0 : cs.set.argument[i]);
-                    wm_metrics M;
-                    wm_metrics_compute(&M, out, cs.set.reference_high,
+                    bench_metrics M;
+                    bench_metrics_compute(&M, out, cs.set.reference_high,
                                        cs.set.reference_low, cs.accuracy_bits,
                                        cs.set.order,
                                        has_length_scale ? cs.set.h : cs.set.argument,
                                        has_length_scale ? cs.set.length_scale : NULL,
-                                       n, WM_ACC_MODE);
+                                       n, BENCH_ACCURACY_ULP_MODE);
                     M.n_file = cs.file_points;
-                    /* the detail sidecar (wm_metrics.h), before the timed loop reuses `out` */
-                    wm_detail_emit("cpu", sup[si].label, fs, law, asm_name(a), &M, out,
+                    /* the detail sidecar (bench_metrics.h), before the timed loop reuses `out` */
+                    bench_detail_emit("cpu", sup[si].label, fs, law, asm_name(a), &M, out,
                                    cs.set.order, has_length_scale ? cs.set.h : cs.set.argument,
                                    has_length_scale ? cs.set.length_scale : NULL, n);
                     if (ladder) {
@@ -351,9 +351,9 @@ int main(int argc, char **argv)
                         double last_cost = 0.0; size_t last_nn = 0; int stopped = 0;
                         for (size_t nn = 256; nn <= lim; nn <<= 1) {
                             if (ladder_pass_from && nn >= ladder_pass_from) break;
-                            const double rung_t0 = wm_now_s();
+                            const double rung_t0 = bench_now_s();
                             size_t lp = 0;
-                            wm_time LT = time_assembly(sup[si].s, a, has_length_scale, &cs,
+                            bench_time LT = time_assembly(sup[si].s, a, has_length_scale, &cs,
                                                        out, nn, reps, &lp, 1,
                                                        sup[si].label, fs, law,
                                                        asm_name(a));
@@ -365,7 +365,7 @@ int main(int argc, char **argv)
                                 printf("  ladder %-18s %-9s %-10s %-9s n=%-9zu "
                                        "%.3f ns/elem\n", sup[si].label, fs, law,
                                        asm_name(a), nn, LT.min);
-                            last_cost = wm_now_s() - rung_t0; last_nn = nn;
+                            last_cost = bench_now_s() - rung_t0; last_nn = nn;
                             /* Stop once a rung costs more than the budget (the next
                              * is twice the work); a budget of 0 climbs to the top. */
                             if (ladder_budget > 0.0 && last_cost > ladder_budget) {
@@ -385,21 +385,21 @@ int main(int argc, char **argv)
                          * give the projection its cost. */
                         if (ladder_pass_from && !stopped && ladder_pass_from <= lim) {
                             if (!last_nn && ladder_budget > 0.0) {
-                                const double c0 = wm_now_s();
-                                for (int r = 0; r < WM_WARMUP_REPS + reps; r++)
+                                const double c0 = bench_now_s();
+                                for (int r = 0; r < BENCH_WARMUP_REPS + reps; r++)
                                     for (size_t i = 0; i < ladder_pass_from; i++)
                                         out[i] = assemble(sup[si].s, a, has_length_scale,
                                                           has_length_scale ? cs.set.h[i] : 0.0,
                                                           cs.set.order[i],
                                                           has_length_scale ? cs.set.length_scale[i] : 0.0,
                                                           has_length_scale ? 0.0 : cs.set.argument[i]);
-                                last_cost = wm_now_s() - c0; last_nn = ladder_pass_from;
+                                last_cost = bench_now_s() - c0; last_nn = ladder_pass_from;
                             }
                             size_t top = ladder_pass_from;
                             while (2 * top <= lim && (ladder_budget <= 0.0 ||
                                    last_cost * (double)top / (double)last_nn <= ladder_budget))
                                 top *= 2;
-                            wm_time PT[40];
+                            bench_time PT[40];
                             time_assembly_pass(sup[si].s, a, has_length_scale, &cs, out,
                                                ladder_pass_from, top, reps,
                                                sup[si].label, fs, law, asm_name(a), PT);
@@ -418,7 +418,7 @@ int main(int argc, char **argv)
                         continue;
                     }
                     size_t tpts = 0;
-                    wm_time T = time_assembly(sup[si].s, a, has_length_scale, &cs, out,
+                    bench_time T = time_assembly(sup[si].s, a, has_length_scale, &cs, out,
                                               n, reps, &tpts, 0, sup[si].label,
                                               fs, law, asm_name(a));
                     rows_emitted++;
@@ -436,8 +436,8 @@ int main(int argc, char **argv)
             corpus_dataset_free(&cs);
         }
     }
-    wm_raw_close();
-    wm_detail_close();
+    bench_raw_close();
+    bench_detail_close();
     if (rows_emitted == 0) {
         fprintf(stderr, "suppliers: nothing matched --family '%s' --law '%s'.\n", families, laws);
         return 4;

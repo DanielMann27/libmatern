@@ -1,21 +1,21 @@
-/* half_integer_closed_form_device.cuh -- device half-integer closed form ("Tier A" in
- * the identifiers), M = e^-Z P(Z), with the order tested per thread (see the accompanying
- * paper, half-integer orders).  Host counterpart: half_integer_closed_form.h. */
+/* half_integer_closed_form_device.cuh -- device half-integer closed form, M = e^-Z P(Z),
+ * with the order tested per thread (see the accompanying paper, half-integer orders).
+ * Host counterpart: half_integer_closed_form.h. */
 #ifndef MATERN_HALF_INTEGER_CLOSED_FORM_DEVICE_CUH
 #define MATERN_HALF_INTEGER_CLOSED_FORM_DEVICE_CUH
 
 #include "dd_arithmetic_device.cuh"
 
 /* Highest polynomial degree in the device table (nu <= 32.5), and the table size. */
-#define MATERN_TIER_A_PMAX_DEVICE  32
-#define MATERN_TIER_A_NCOEF_DEVICE (((MATERN_TIER_A_PMAX_DEVICE)+1)*((MATERN_TIER_A_PMAX_DEVICE)+2)/2)
+#define MATERN_HALF_INTEGER_MAX_DEGREE_DEVICE 32
+#define MATERN_HALF_INTEGER_TABLE_SIZE_DEVICE \
+    (((MATERN_HALF_INTEGER_MAX_DEGREE_DEVICE)+1)*((MATERN_HALF_INTEGER_MAX_DEGREE_DEVICE)+2)/2)
 
 /* Triangular, row p at offset p(p+1)/2: c_0 .. c_p, built by the ratio recurrence in x87
  * long double and rounded once to double (tools/half_integer_table_device.c; make audit
- * compares the two).  Statically initialised, so no host code has to upload it.  static: a
- * file-scope __constant__ with external linkage would be a duplicate symbol across linked
- * translation units. */
-static __device__ __constant__ double matern_tier_a_coefficients_device[MATERN_TIER_A_NCOEF_DEVICE] = {
+ * compares the two); statically initialised.  static: a file-scope __constant__ with
+ * external linkage would be a duplicate symbol across linked translation units. */
+static __device__ __constant__ double matern_half_integer_coefficients_device[MATERN_HALF_INTEGER_TABLE_SIZE_DEVICE] = {
     /* p = 0 */
     0x1p+0,
     /* p = 1 */
@@ -204,13 +204,13 @@ static __device__ __constant__ double matern_tier_a_coefficients_device[MATERN_T
     0x1.96c8bf0d31af7p-147,
 };
 
-static __device__ __host__ inline int matern_tier_a_offset_device(int p){ return p*(p+1)/2; }
+static __device__ __host__ inline int matern_half_integer_offset_device(int p){ return p*(p+1)/2; }
 
 
 /* p for nu = p + 1/2 within the table, -1 otherwise, so the caller tests a sign.
  * The comparison t == r is exact, not a tolerance: nu - 1/2 is computed exactly in
  * the table's range, and lands on an integer only at a true half-integer order. */
-static __device__ __host__ inline int matern_tier_a_order_device(double nuc)
+static __device__ __host__ inline int matern_half_integer_degree_device(double nuc)
 {
     double t = nuc - 0.5;
     double r = floor(t + 0.5);
@@ -218,16 +218,16 @@ static __device__ __host__ inline int matern_tier_a_order_device(double nuc)
     /* Range test before the cast: for very large nu, nuc - 0.5 is inexact enough
      * that t == r holds, and converting an out-of-range double to int is
      * undefined. */
-    if (!(r >= 0.0) || r > (double)MATERN_TIER_A_PMAX_DEVICE) return -1;
+    if (!(r >= 0.0) || r > (double)MATERN_HALF_INTEGER_MAX_DEGREE_DEVICE) return -1;
     return (int)r;
 }
 
 
 /* Direct form e^-Zh P(Zh); it loses bits where e^-Zh is subnormal (Zh > 708.396).  The
  * factor (1 - Zl + Zl*d/s) includes e^-Zl, because only -Zh is exponentiated. */
-static __device__ inline double matern_tier_a_device(double Zh, double Zl, int p)
+static __device__ inline double matern_half_integer_direct_form_device(double Zh, double Zl, int p)
 {
-    const double *c = matern_tier_a_coefficients_device + matern_tier_a_offset_device(p);
+    const double *c = matern_half_integer_coefficients_device + matern_half_integer_offset_device(p);
     double s = c[p], d = 0.0;
     /* simultaneous Horner: s ends as P(Zh) and d as P'(Zh), which supplies the
      * argument correction */
@@ -237,9 +237,9 @@ static __device__ inline double matern_tier_a_device(double Zh, double Zl, int p
 
 /* exp(-Z + ln P(Z)) with a double-double exponent carrying -Zh-Zl exactly, so only the
  * polynomial is corrected for Zl. */
-static __device__ inline double matern_tier_a_exp_log_device(double Zh, double Zl, int p)
+static __device__ inline double matern_half_integer_exp_log_device(double Zh, double Zl, int p)
 {
-    const double *c = matern_tier_a_coefficients_device + matern_tier_a_offset_device(p);
+    const double *c = matern_half_integer_coefficients_device + matern_half_integer_offset_device(p);
     double s = c[p], d = 0.0;
     for (int j = p - 1; j >= 0; j--){ d = fma(d, Zh, s); s = fma(s, Zh, c[j]); }
     const double pc = fma(d, Zl, s);           /* all c_j > 0, Zh >= 0 => pc >= 1 */

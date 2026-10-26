@@ -19,7 +19,7 @@ typedef bmp::policy<
     bmp::pole_error      <bmp::ignore_error>
 > host_policy;
 
-extern "C" void wm_boost_shortcut_host(const double *nu, const double *z,
+extern "C" void bench_boost_shortcut_host(const double *nu, const double *z,
                                        double *out, int n)
 {
     for (int i = 0; i < n; i++) {
@@ -29,24 +29,27 @@ extern "C" void wm_boost_shortcut_host(const double *nu, const double *z,
 }
 
 /* 1 when this object evaluates in a type wider than double (the `precision` column) */
-extern "C" int wm_boost_shortcut_host_promoted(void)
+extern "C" int bench_boost_shortcut_host_promoted(void)
 {
     typedef bmp::evaluation<double, bmp::policy<> >::type eval_t;
     return sizeof(eval_t) > sizeof(double);
 }
 
-extern "C" int wm_boost_shortcut_host_version(void) { return BOOST_VERSION; }
+extern "C" int bench_boost_shortcut_host_version(void) { return BOOST_VERSION; }
 
-/* This object's build record (build_gpu_boost_shortcut_cpu_row_*), Boost version and
- * evaluation type included. */
-extern "C" void wm_boost_shortcut_host_build_info(FILE *f)
+/* This object's build record (build_gpu_boost_shortcut_cpu_row_*), Boost version, include
+ * directory and origin (GPU_SUPPLIER_BOOST_SOURCE) and evaluation type included. */
+extern "C" void bench_boost_shortcut_host_build_info(FILE *f)
 {
     const char *unit = "gpu_boost_shortcut_cpu_row";
     char v[32];
-    WM_BUILD_INFO_COMMON(f, unit);
+    BENCH_BUILD_INFO_COMMON(f, unit);
     snprintf(v, sizeof v, "%d.%d.%d", BOOST_VERSION / 100000, BOOST_VERSION / 100 % 1000,
              BOOST_VERSION % 100);
-    wm_build_info_kv(f, unit, "boost", v);
-    wm_build_info_kv(f, unit, "boost_eval_type",
-                     wm_boost_shortcut_host_promoted() ? "long double" : "double");
+    bench_build_info_kv(f, unit, "boost", v);
+#ifdef GPU_SUPPLIER_BOOST_SOURCE
+    bench_build_info_kv(f, unit, "boost_source", GPU_SUPPLIER_BOOST_SOURCE);
+#endif
+    bench_build_info_kv(f, unit, "boost_eval_type",
+                     bench_boost_shortcut_host_promoted() ? "long double" : "double");
 }

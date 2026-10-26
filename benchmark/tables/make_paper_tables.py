@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """make_paper_tables.py -- builds the paper table set into benchmark/tables/paper/; needs
-pdflatex unless --no-preview.  By default only the tables the paper's own tables are taken
-from are built (make_paper_figures.PAPER_TABLES); --full builds every table.  Runs are loaded and grouped by make_paper_figures; the
-tables come from paper_tables.  Exit status: 1 for no runs, a refused input or a LaTeX
-error in a preview; 2 for no pdflatex, or under --strict an incomplete run or a refused
-input."""
+pdflatex unless --no-preview.  By default only the paper set is built
+(make_paper_figures.PAPER_TABLES); --full builds every table.  Runs are loaded and
+grouped by make_paper_figures; the tables come from paper_tables.  Exit status: 1 for no
+runs, a refused input or a LaTeX error in a preview; 2 for no pdflatex, or under --strict
+an incomplete run or a refused input."""
 import argparse, os, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))

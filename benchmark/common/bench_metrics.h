@@ -1,8 +1,8 @@
-/* wm_metrics.h -- accuracy statistics of one row (ULP primary; relative and absolute
+/* bench_metrics.h -- accuracy statistics of one row (ULP primary; relative and absolute
  * error secondary, since relative error is undefined where the reference is 0; signed
  * histogram; worst points), the accuracy detail sidecar and the CSV schema number. */
-#ifndef WM_METRICS_H
-#define WM_METRICS_H
+#ifndef BENCH_METRICS_H
+#define BENCH_METRICS_H
 
 #include <stdlib.h>
 #include <string.h>
@@ -12,14 +12,14 @@
 
 /* The histogram layout is part of the schema; benchmark/plots/runs.py duplicates it
  * (HIST_*): change both. */
-#define WM_HIST_BINS   48                 /* log-spaced over [2^-10, 2^10) ulp */
-#define WM_HIST_LO_LOG (-10.0)
-#define WM_HIST_HI_LOG ( 10.0)
-#define WM_WORST_KEEP  64                 /* located worst points kept */
+#define BENCH_HIST_BINS   48                 /* log-spaced over [2^-10, 2^10) ulp */
+#define BENCH_HIST_LO_LOG (-10.0)
+#define BENCH_HIST_HI_LOG ( 10.0)
+#define BENCH_WORST_KEEP  64                 /* located worst points kept */
 /* The record layout version, the first column of every CSV row; readers refuse a
  * schema they do not accept, so benchmark/plots/runs.py SCHEMA_ACCEPTED must contain it.
  * Columns: docs/benchmark.md.  benchmark/tests/run_tests.sh reads the define line below. */
-#define WM_SCHEMA      11
+#define BENCH_SCHEMA      11
 
 typedef struct {
     double ulp;                  /* signed */
@@ -27,7 +27,7 @@ typedef struct {
     double value, ref;
     int    bits;
     size_t index;
-} wm_worst;
+} bench_worst;
 
 typedef struct {
     /* population */
@@ -36,7 +36,7 @@ typedef struct {
     size_t n_beyond_fence;
     int    min_bits;
     /* Points of the law on disk (`n_file`); set by the caller after
-     * wm_metrics_compute, which zeroes it. */
+     * bench_metrics_compute, which zeroes it. */
     size_t n_file;
 
     /* ULP, primary */
@@ -49,39 +49,39 @@ typedef struct {
     double rel_max_nu, rel_max_arg;
 
     /* signed histogram: [0] = exactly zero, [1..BINS] = log bins, [BINS+1] = over */
-    long   hist_neg[WM_HIST_BINS + 2];
-    long   hist_pos[WM_HIST_BINS + 2];
+    long   hist_neg[BENCH_HIST_BINS + 2];
+    long   hist_pos[BENCH_HIST_BINS + 2];
 
-    wm_worst worst[WM_WORST_KEEP];
+    bench_worst worst[BENCH_WORST_KEEP];
     size_t   n_worst;
-} wm_metrics;
+} bench_metrics;
 
-static inline int wm_cmp_double(const void *a, const void *b)
+static inline int bench_cmp_double(const void *a, const void *b)
 { double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
 
 /* Nearest rank on the exact sorted sample, index round(f*(m-1)): every reported
  * value occurred. */
-static inline double wm_q(const double *sorted, size_t m, double f)
+static inline double bench_quantile(const double *sorted, size_t m, double f)
 { return m ? sorted[(size_t)(f * (double)(m - 1) + 0.5)] : 0.0; }
 
-static inline int wm_hist_bin(double au)
+static inline int bench_hist_bin(double au)
 {
     if (au == 0.0) return 0;
     double L = log2(au);
-    if (L < WM_HIST_LO_LOG) return 1;                       /* underflow bin */
-    if (L >= WM_HIST_HI_LOG) return WM_HIST_BINS + 1;       /* overflow bin */
-    int b = 1 + (int)((L - WM_HIST_LO_LOG) *
-                      (WM_HIST_BINS / (WM_HIST_HI_LOG - WM_HIST_LO_LOG)));
+    if (L < BENCH_HIST_LO_LOG) return 1;                          /* underflow bin */
+    if (L >= BENCH_HIST_HI_LOG) return BENCH_HIST_BINS + 1;       /* overflow bin */
+    int b = 1 + (int)((L - BENCH_HIST_LO_LOG) *
+                      (BENCH_HIST_BINS / (BENCH_HIST_HI_LOG - BENCH_HIST_LO_LOG)));
     if (b < 1) b = 1;
-    if (b > WM_HIST_BINS) b = WM_HIST_BINS;
+    if (b > BENCH_HIST_BINS) b = BENCH_HIST_BINS;
     return b;
 }
 
 /* `aux` may be NULL (a (z, nu) set has no scale parameter s). */
-static inline void wm_metrics_compute(wm_metrics *M, const double *value,
+static inline void bench_metrics_compute(bench_metrics *M, const double *value,
                                const double *hi, const double *lo, const int *bits,
                                const double *nu, const double *arg, const double *aux,
-                               size_t n, wm_ulp_mode mode)
+                               size_t n, bench_ulp_mode mode)
 {
     memset(M, 0, sizeof *M);
     M->n = n;
@@ -100,12 +100,12 @@ static inline void wm_metrics_compute(wm_metrics *M, const double *value,
         if (hi[i] == 0.0)                                   M->n_ref_zero++;
         else if (fabs(hi[i]) < DBL_MIN)                     M->n_ref_subnormal++;
 
-        const double su = wm_ulp_signed(value[i], hi[i], lo[i], mode);
+        const double su = bench_ulp_signed(value[i], hi[i], lo[i], mode);
         const double au = fabs(su);
         if (au == 0.0) M->n_exact++;
 
         long *H = (su < 0.0) ? M->hist_neg : M->hist_pos;
-        H[wm_hist_bin(au)]++;
+        H[bench_hist_bin(au)]++;
 
         U[m++] = au; sum += au;
         if (hi[i] != 0.0) UN[mn++] = au;
@@ -119,8 +119,8 @@ static inline void wm_metrics_compute(wm_metrics *M, const double *value,
         }
         /* The k worst by |ulp|, by insertion; the stored ulp is signed, so both
          * sides compare magnitudes (benchmark/tests/test_metrics.c). */
-        if (M->n_worst < WM_WORST_KEEP || au > fabs(M->worst[M->n_worst - 1].ulp)) {
-            size_t pos = (M->n_worst < WM_WORST_KEEP) ? M->n_worst : WM_WORST_KEEP - 1;
+        if (M->n_worst < BENCH_WORST_KEEP || au > fabs(M->worst[M->n_worst - 1].ulp)) {
+            size_t pos = (M->n_worst < BENCH_WORST_KEEP) ? M->n_worst : BENCH_WORST_KEEP - 1;
             while (pos > 0 && fabs(M->worst[pos - 1].ulp) < au) {
                 M->worst[pos] = M->worst[pos - 1]; pos--;
             }
@@ -128,29 +128,29 @@ static inline void wm_metrics_compute(wm_metrics *M, const double *value,
             M->worst[pos].arg = arg[i]; M->worst[pos].aux = aux ? aux[i] : 0.0;
             M->worst[pos].value = value[i]; M->worst[pos].ref = r;
             M->worst[pos].bits = bits ? bits[i] : 0; M->worst[pos].index = i;
-            if (M->n_worst < WM_WORST_KEEP) M->n_worst++;
+            if (M->n_worst < BENCH_WORST_KEEP) M->n_worst++;
         }
     }
 
     M->n_scored = m;
     if (!m) { free(U); free(UN); M->min_bits = 0; return; }
 
-    qsort(U, m, sizeof *U, wm_cmp_double);
-    M->u_min  = U[0];            M->u_q1   = wm_q(U, m, 0.25);
-    M->u_med  = wm_q(U, m, 0.50); M->u_q3  = wm_q(U, m, 0.75);
-    M->u_p99  = wm_q(U, m, 0.99); M->u_p999 = wm_q(U, m, 0.999);
-    M->u_max  = U[m - 1];        M->u_mean = sum / (double)m;
+    qsort(U, m, sizeof *U, bench_cmp_double);
+    M->u_min  = U[0];                      M->u_q1   = bench_quantile(U, m, 0.25);
+    M->u_med  = bench_quantile(U, m, 0.50); M->u_q3  = bench_quantile(U, m, 0.75);
+    M->u_p99  = bench_quantile(U, m, 0.99); M->u_p999 = bench_quantile(U, m, 0.999);
+    M->u_max  = U[m - 1];                  M->u_mean = sum / (double)m;
     M->u_iqr  = M->u_q3 - M->u_q1;
     M->u_fence_hi = M->u_q3 + 1.5 * M->u_iqr;
     for (size_t i = 0; i < m; i++) if (U[i] > M->u_fence_hi) M->n_beyond_fence++;
 
-    if (mn) { qsort(UN, mn, sizeof *UN, wm_cmp_double);
-              M->u_med_nontrivial = wm_q(UN, mn, 0.50); }
+    if (mn) { qsort(UN, mn, sizeof *UN, bench_cmp_double);
+              M->u_med_nontrivial = bench_quantile(UN, mn, 0.50); }
 
     free(U); free(UN);
 }
 
-/* The accuracy detail sidecar: one CSV per process (path WM_ACC_DETAIL), read by
+/* The accuracy detail sidecar: one CSV per process (path BENCH_ACCURACY_DETAIL), read by
  * benchmark/plots/runs.py (DETAIL_HEADER: change both).  Rows are keyed like their
  * accuracy row and are of three kinds:
  *   hist     key = bin, sign (+/-), [lo_log2, hi_log2), count; bin 0 = exactly zero,
@@ -162,44 +162,44 @@ static inline void wm_metrics_compute(wm_metrics *M, const double *value,
  * `index` is into the scored arrays (with a --max-points stride, file row = index *
  * stride). */
 #include <stdio.h>
-static FILE *wm_detail_fp = NULL;
+static FILE *bench_detail_fp = NULL;
 
-static inline void wm_detail_open(const char *path)
+static inline void bench_detail_open(const char *path)
 {
     if (!path || !*path) return;
-    wm_detail_fp = fopen(path, "w");
-    if (wm_detail_fp)
-        fprintf(wm_detail_fp, "device,supplier,family,law,backend,kind,key,sign,"
+    bench_detail_fp = fopen(path, "w");
+    if (bench_detail_fp)
+        fprintf(bench_detail_fp, "device,supplier,family,law,backend,kind,key,sign,"
                 "lo_log2,hi_log2,count,ulp,nu,arg,aux,value,ref,bits,index,reason\n");
 }
 
-static inline void wm_detail_close(void)
-{ if (wm_detail_fp) { fclose(wm_detail_fp); wm_detail_fp = NULL; } }
+static inline void bench_detail_close(void)
+{ if (bench_detail_fp) { fclose(bench_detail_fp); bench_detail_fp = NULL; } }
 
-static inline void wm_detail_emit(const char *device, const char *supplier,
+static inline void bench_detail_emit(const char *device, const char *supplier,
                                   const char *fam, const char *law,
-                                  const char *backend, const wm_metrics *M,
+                                  const char *backend, const bench_metrics *M,
                                   const double *value, const double *nu,
                                   const double *arg, const double *aux, size_t n)
 {
-    FILE *f = wm_detail_fp;
+    FILE *f = bench_detail_fp;
     if (!f) return;
-    const double step = (WM_HIST_HI_LOG - WM_HIST_LO_LOG) / WM_HIST_BINS;
+    const double step = (BENCH_HIST_HI_LOG - BENCH_HIST_LO_LOG) / BENCH_HIST_BINS;
     for (int sgn = 0; sgn < 2; sgn++) {
         const long *H = sgn ? M->hist_neg : M->hist_pos;
-        for (int b = 0; b < WM_HIST_BINS + 2; b++) {
+        for (int b = 0; b < BENCH_HIST_BINS + 2; b++) {
             double lo_l, hi_l;
             if (b == 0)                 { lo_l = -INFINITY; hi_l = -INFINITY; }
-            else if (b == 1)            { lo_l = -INFINITY; hi_l = WM_HIST_LO_LOG + step; }
-            else if (b == WM_HIST_BINS + 1) { lo_l = WM_HIST_HI_LOG; hi_l = INFINITY; }
-            else { lo_l = WM_HIST_LO_LOG + (b - 1) * step; hi_l = lo_l + step; }
+            else if (b == 1)            { lo_l = -INFINITY; hi_l = BENCH_HIST_LO_LOG + step; }
+            else if (b == BENCH_HIST_BINS + 1) { lo_l = BENCH_HIST_HI_LOG; hi_l = INFINITY; }
+            else { lo_l = BENCH_HIST_LO_LOG + (b - 1) * step; hi_l = lo_l + step; }
             fprintf(f, "%s,%s,%s,%s,%s,hist,%d,%s,%.17g,%.17g,%ld,,,,,,,,,\n",
                     device, supplier, fam, law, backend, b, sgn ? "-" : "+",
                     lo_l, hi_l, H[b]);
         }
     }
     for (size_t k = 0; k < M->n_worst; k++) {
-        const wm_worst *w = &M->worst[k];
+        const bench_worst *w = &M->worst[k];
         if (aux)
             fprintf(f, "%s,%s,%s,%s,%s,worst,%zu,,,,,%.17g,%.17g,%.17g,%.17g,%.17g,"
                     "%.17g,%d,%zu,\n", device, supplier, fam, law, backend, k,
@@ -223,4 +223,4 @@ static inline void wm_detail_emit(const char *device, const char *supplier,
     fflush(f);
 }
 
-#endif /* WM_METRICS_H */
+#endif /* BENCH_METRICS_H */

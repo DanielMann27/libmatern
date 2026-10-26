@@ -238,8 +238,8 @@ SIMD_TYPE_FLOAT large_argument_extended_assemble(SIMD_TYPE_FLOAT Z, SIMD_TYPE_FL
     /* + 0.5 ln(pi/2) */
     SIMD_TYPE_FLOAT Eh, x4; dd_two_sum(e3, VEC_VSET(HALF_LN_PI_OVER_2_HI), &Eh, &x4);
     SIMD_TYPE_FLOAT El = VEC_ADD(VEC_ADD(x4, l3), VEC_VSET(HALF_LN_PI_OVER_2_LO));
-    /* The exponential engine is valid on [-708, 708]; three branchless cases keep it there:
-     *   Eh >= -708.396418532264 (-log DBL_MIN) : the engine directly;
+    /* The exponential engine is valid on [ln DBL_MIN, 708]; three branchless cases keep it there:
+     *   Eh >= -708.396418532264 (ln DBL_MIN)   : the engine directly;
      *   -745.2 <= Eh < -708.396418532264       : engine(Eh/2)^2, reaching the subnormals;
      *   Eh < -745.2 (exp underflows to 0)      : exactly 0. */
     const SIMD_TYPE_FLOAT eLO = VEC_VSET(-708.396418532264);

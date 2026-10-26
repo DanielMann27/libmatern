@@ -27,7 +27,10 @@ Steed's continued fraction otherwise, with no separate large-order method. Anoth
 gives a different row, so a number quoted from this row should state the library version.
 The Boost row label carries the Boost version (`boost-<version>`). The row is built
 against Boost 1.75.0 only (`../../docs/benchmark.md`, Boost versions); `make boost-headers`
-fetches it.
+fetches it, and so does `make externals`, under `make pipeline` and `make reproduce` only
+where no Boost 1.75.0 is found. `PROVENANCE.txt` records the include directory used and
+where it came from (`build_cpu_supplier_cxx_boost_source`). The published CPU row used the
+Boost 1.75.0 package of the run machines (Red Hat Enterprise Linux 9.6, `/usr/include`).
 
 ## Upstream
 
@@ -37,7 +40,10 @@ fetches it.
   `boost/math/special_functions/bessel.hpp` and the headers it uses for it under
   `boost/math/special_functions/detail/`: `bessel_ik.hpp` (non-integer order), `bessel_kn.hpp`,
   `bessel_k0.hpp` and `bessel_k1.hpp` (integer order). The GPU Boost row uses Boost 1.87.0,
-  from the same server (`../fetch_boost.sh` holds its digest).
+  from the same server (`../fetch_boost.sh` holds its digest); the published GPU rows used
+  the 1.87.0 of an environment module of the run machine, installed from that archive.
+  `PROVENANCE.txt` records the include directory used for the GPU rows and where it came from
+  (`build_gpu_suppliers_boost_source`).
 * **libstdc++ 14:** part of GCC 14.2.0, whose source release is at
   <https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/>; `std::cyl_bessel_k` is in
   `libstdc++-v3/include/tr1/modified_bessel_func.tcc` of that source, installed as
@@ -46,7 +52,7 @@ fetches it.
 ## Wrapper
 
 `cpu_cxx.cpp` calls the two functions and registers them behind the shared supplier
-interface (`../common/cpu_wm.h`), so the covariance assembly around `K_ν` is the same as
+interface (`../common/cpu_supplier.h`), so the covariance assembly around `K_ν` is the same as
 for every other supplier.
 
 The only configuration change: both return a value instead of throwing, so an overflow

@@ -74,7 +74,7 @@ case "${STAGES:-all}" in
     all|ladder) case ",$LADDER_LAWS," in *,size_*) _corpus_scope="" ;; *) _corpus_scope=tracked ;; esac ;;
     *)          _corpus_scope="" ;;
 esac
-DATA="$DATA" sh tools/corpus.sh need "${WM_FULLRUN_ENTRY:-benchmark/run_benchmark.sh}" $_corpus_scope || exit 2
+DATA="$DATA" sh tools/corpus.sh need "${BENCH_FULL_RUN_ENTRY:-benchmark/run_benchmark.sh}" $_corpus_scope || exit 2
 # A ladder stage refuses a missing 2^25 set here, not at its first rung (the 2^20 laws are its
 # prefixes); files are looked for as the readers look: data/z_nu/, then data/.
 _has_law(){ compgen -G "$DATA/z_nu/z_nu-nu_$1_[0-9]*.bin" >/dev/null ||
@@ -136,7 +136,7 @@ if [ "$STAGES" = fold ]; then
     [ -x "$BUILD/fold_cpu" ] || {
         echo "fold: $BUILD/fold_cpu is missing -- run 'make build/fold_cpu' first" >&2
         exit 2; }
-    # fold_cpu is benchmark_cpu.c built with -DWM_FOLD; without it the library's backends run.
+    # fold_cpu is benchmark_cpu.c built with -DBENCH_FOLD; without it the library's backends run.
     "$BUILD"/fold_cpu --print-build 2>/dev/null | grep -qx 'fold=on' || {
         echo "fold: $BUILD/fold_cpu does not report fold=on -- it is not the fold build," >&2
         echo "      refusing to measure; rebuild it with 'make build/fold_cpu'" >&2
@@ -185,8 +185,8 @@ fi
 BASE="$(date -u +%Y-%m-%dT%H-%MZ)_$(hostname -s)_$SCOPE"
 [ "$STAGES" = all ] || { [ "$STAGES" = record ] && [ -n "$_scope_given" ]; } \
     || BASE="${BASE}-${STAGES}"
-# WM_RUNS_DIR overrides the record root, so that the test suite does not write into benchmark/runs/.
-RUNS_ROOT="${WM_RUNS_DIR:-benchmark/runs}"
+# BENCH_RUNS_DIR overrides the record root, so that the test suite does not write into benchmark/runs/.
+RUNS_ROOT="${BENCH_RUNS_DIR:-benchmark/runs}"
 mkdir -p "$RUNS_ROOT" || exit 1
 RUNID="$BASE"; n=2
 while [ -e "$RUNS_ROOT/$RUNID" ]; do RUNID="$BASE.$n"; n=$((n+1)); done
@@ -197,7 +197,7 @@ ln -sfn "$RUNID" "$RUNS_ROOT/latest" 2>/dev/null
 
 say(){ printf '%s\n' "$*"; }
 # progress: a timestamped line before each timing process; the drivers add one per (family,
-# law, backend) block on descriptor 3 (WM_PROGRESS_FD), before the block's untimed warm-up.
+# law, backend) block on descriptor 3 (BENCH_PROGRESS_FD), before the block's untimed warm-up.
 progress(){ printf '%(%H:%M:%S)T  %s\n' -1 "$*"; }
 # ext_note <stage> <cpu|threads> <parameter> <program --list output>: the supplier rows the build
 # lacks, with the commands that add them, and whether built KAUST rows run (not under ship).
@@ -205,7 +205,7 @@ ext_note(){
     bash benchmark/tools/missing.sh rows "$1" "$2" "$3" "${!3:-ship}" "$4"
 }
 exec 3>&1
-export WM_PROGRESS_FD=3
+export BENCH_PROGRESS_FD=3
 stage_rc=0
 declare -a MISSING=()
 declare -a SKIPPED=()
@@ -236,15 +236,15 @@ say "run id : $RUNID"
 say "output : $OUT"
 # The full-run notice (benchmark/tools/full_run.sh); silent when an outer command printed it.
 case "$STAGES" in all) _fr_stages=rest,ladder ;; *) _fr_stages=$STAGES ;; esac
-_fr_entry="${WM_FULLRUN_ENTRY:-bash benchmark/run_benchmark.sh}"
+_fr_entry="${BENCH_FULL_RUN_ENTRY:-bash benchmark/run_benchmark.sh}"
 [ "$STAGES" = all ] || _fr_entry="$_fr_entry, STAGES=$STAGES"
 # One probe of the missing software before any timing; an outer command passes its own.
-if [ -z "${WM_MISSING_CACHE:-}" ]; then
-    WM_MISSING_CACHE=$(bash benchmark/tools/missing.sh probe); export WM_MISSING_CACHE
-    trap 'rm -f "$WM_MISSING_CACHE"' EXIT
+if [ -z "${BENCH_MISSING_CACHE:-}" ]; then
+    BENCH_MISSING_CACHE=$(bash benchmark/tools/missing.sh probe); export BENCH_MISSING_CACHE
+    trap 'rm -f "$BENCH_MISSING_CACHE"' EXIT
 fi
 bash benchmark/tools/full_run.sh --entry "$_fr_entry" --stages "$_fr_stages"
-export WM_FULLRUN_NOTICE=shown
+export BENCH_FULL_RUN_NOTICE=shown
 
 # Provenance.  A probe that fails is recorded by pv() as `unavailable` with the reason.
 pv(){ # pv <key> <value> [why it is missing]
@@ -275,7 +275,7 @@ _gpuq() {
 }
 
 # Source identity: release from include/matern.h; the commit from git only when this directory
-# is the checkout's top level (not a tree inside another repository), else WM_SOURCE_COMMIT,
+# is the checkout's top level (not a tree inside another repository), else BENCH_SOURCE_COMMIT,
 # else RELEASE as git archive fills it in (a $Format or %(...) placeholder names nothing).
 RELEASE_VERSION="$(sed -n 's/^#define MATERN_VERSION_STRING[[:space:]]*"\([^"]*\)".*/\1/p' include/matern.h 2>/dev/null | head -1)"
 _git_top="$(git rev-parse --show-toplevel 2>/dev/null)"
@@ -287,8 +287,8 @@ _release_line(){ # the value of one RELEASE line; empty when git archive did not
 }
 if [ -n "$OWN_CHECKOUT" ]; then
   SOURCE_COMMIT="$(git rev-parse HEAD 2>/dev/null) (this git checkout; git_dirty below)"
-elif [ -n "${WM_SOURCE_COMMIT:-}" ]; then
-  SOURCE_COMMIT="$WM_SOURCE_COMMIT (WM_SOURCE_COMMIT: the checkout this tree was copied from)"
+elif [ -n "${BENCH_SOURCE_COMMIT:-}" ]; then
+  SOURCE_COMMIT="$BENCH_SOURCE_COMMIT (BENCH_SOURCE_COMMIT: the checkout this tree was copied from)"
 elif [ -n "$(_release_line commit)" ]; then
   _described="$(_release_line describe)"
   SOURCE_COMMIT="$(_release_line commit)${_described:+ = $_described} (RELEASE, filled in by git archive)"
@@ -305,17 +305,17 @@ fi
   # is identifiable.
   echo "sup_max_points    ${SUP_MAX_POINTS:-none (every supplier scores the whole dataset)}"
   echo "time_max_points   ${TIME_MAX_POINTS:-none (every point of every dataset is timed)}"
-  case "${WM_PIN:-cpu}" in
-    node) echo "cpu_pinning       node -- WM_PIN=node: each timing process is bound to all CPUs of one NUMA node" ;;
+  case "${BENCH_PIN:-cpu}" in
+    node) echo "cpu_pinning       node -- BENCH_PIN=node: each timing process is bound to all CPUs of one NUMA node" ;;
     *)    echo "cpu_pinning       cpu -- each timing process is pinned to one CPU of the NUMA node it chose; per-row migrations, involuntary switches and threads in timing_raw.*.sched.csv" ;;
   esac
   echo "run_label         $SCOPE${LABEL_REASONS:+  (differs from the defaults: $LABEL_REASONS)}"
   # A benchmark/run_gpu.sh run: one-backend CPU rows, used by the figures only where the machine
   # has no other CPU run.
-  [ -n "${WM_GPU_PIPELINE:-}" ] && echo "pipeline          gpu"
+  [ -n "${BENCH_GPU_PIPELINE:-}" ] && echo "pipeline          gpu"
   pv release "$RELEASE_VERSION" "include/matern.h states no MATERN_VERSION_STRING"
   pv source_commit "$SOURCE_COMMIT" \
-     "this tree is not the top level of a git checkout, WM_SOURCE_COMMIT is unset and RELEASE was not filled in by git archive"
+     "this tree is not the top level of a git checkout, BENCH_SOURCE_COMMIT is unset and RELEASE was not filled in by git archive"
   if [ -n "$OWN_CHECKOUT" ]; then
     echo "git_commit        $(git rev-parse --short HEAD 2>/dev/null)"
     echo "git_dirty         $(test -n "$(git --no-optional-locks status --porcelain --untracked-files=no 2>/dev/null)" && echo "yes (uncommitted changes to tracked files)" || echo no)"
@@ -475,7 +475,7 @@ fi
     else
       echo "gpu_throttle_cap  no power or thermal cap at sample time"
     fi
-    # The header field is "CUDA Version" up to driver 595, "CUDA UMD Version" from 615.
+    # nvidia-smi names the header field "CUDA Version" or "CUDA UMD Version", depending on the driver.
     echo "gpu_cuda_driver   $(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA \(UMD \)\{0,1\}Version: *\([0-9.]*\).*/\2/p' | head -1)"
   else
     echo "gpu               none -- no nvidia-smi on this machine (CPU run, no device rows)"
@@ -559,10 +559,24 @@ fi
 } > "$OUT/PROVENANCE.txt"
 record provenance 0
 
-progress "manifest: sha256 of the corpus and the sources"
 # The corpus files against the sha256 list of data/MANIFEST.md (tools/corpus_check.sh: 0 all
-# match, 3 the present ones match, 1 a mismatch or an unlisted file).
-_cc_out=$(bash tools/corpus_check.sh "$DATA" --list 2>/dev/null); _cc_rc=$?
+# match, 3 the present ones match, 1 a mismatch or an unlisted file).  make pipeline checks
+# them once for all its runs and passes the result in the file BENCH_CORPUS_CHECK (first line
+# `<exit status> <DATA>`, then the output of corpus_check.sh --list); it is taken only for the
+# same DATA, else the files are checked here.
+_cc_rc=""
+if [ -n "${BENCH_CORPUS_CHECK:-}" ] && [ -r "$BENCH_CORPUS_CHECK" ]; then
+    read -r _cc_rc _cc_data < "$BENCH_CORPUS_CHECK"
+    case "$_cc_rc" in [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) ;; *) _cc_rc="" ;; esac
+    [ "$_cc_data" = "$DATA" ] || _cc_rc=""
+fi
+if [ -n "$_cc_rc" ]; then
+    progress "manifest: sha256 of the sources; the corpus result of make pipeline"
+    _cc_out=$(tail -n +2 "$BENCH_CORPUS_CHECK")
+else
+    progress "manifest: sha256 of the corpus and the sources"
+    _cc_out=$(bash tools/corpus_check.sh "$DATA" --list 2>/dev/null); _cc_rc=$?
+fi
 case $_cc_rc in
     0|3) ;;
     1) warn "corpus: sha256 differs from data/MANIFEST.md for $(printf '%s\n' "$_cc_out" | tail -n 1 \
@@ -595,10 +609,11 @@ esac
   for f in Makefile matern.map; do
     [ -f "$f" ] && sha256sum "$f"
   done
-  # The supplier sources.  GSL is linked as a built library, so its versions are PROVENANCE keys
-  # (build_cpu_supplier_gsl_headers and _runtime), not a digest.
-  for f in references/*/*.c references/*/*.cpp references/*/port/*.c \
-           references/common/*.h references/kaust_logbesselk/derive_port.py; do
+  # The supplier sources.  GSL is linked as a built library, so its versions and location are
+  # PROVENANCE keys (build_cpu_supplier_gsl_headers, _runtime, _source and _library), not a
+  # digest.
+  for f in references/*/*.c references/*/*.cpp references/*/port/*.c references/*/port/*.h \
+           references/common/*.h references/kaust_logbesselk/derive_port.py references/Makefile; do
     [ -f "$f" ] && sha256sum "$f"
   done
   # KAUST: the downloaded upstream files and the generated port, when present.
@@ -632,12 +647,12 @@ grep -m1 '^  placement' "$OUT/detect.txt" 2>/dev/null \
   | sed 's/^  placement  */placement         /' >> "$OUT/PROVENANCE.txt" || true
 
 # Raw repetitions are recorded: summary statistics cannot show bimodality.
-export WM_RAW_REPS="$OUT/timing_raw"
+export BENCH_TIMING_RAW="$OUT/timing_raw"
 # Stages are selected by inclusion, so the A/B stages do not run the accuracy sweep.
 if [ "$STAGES" = all ] || [ "$STAGES" = rest ]; then
 # accuracy_detail.<backend>: histogram, the 64 worst points, excluded points with reason.
 progress "accuracy: library, backends $BACKENDS"
-WM_ACC_DETAIL="$OUT/accuracy_detail" \
+BENCH_ACCURACY_DETAIL="$OUT/accuracy_detail" \
 ./"$BUILD"/benchmark_cpu --family "$FAMILIES" --law all --backend "$BACKENDS" \
     --metric accuracy --reps "$REPS" --format csv --data-dir "$DATA" $time_cap \
     > "$OUT/accuracy.csv" 2>"$OUT/accuracy.err"
@@ -648,7 +663,7 @@ fi
 if [ "$STAGES" = all ] || [ "$STAGES" = ladder ]; then
 # Own raw prefix, so the accuracy stage's timing_raw.<backend> files are not overwritten.
 progress "ladder: library, backends $BACKENDS"
-WM_RAW_REPS="$OUT/timing_raw.ladder" \
+BENCH_TIMING_RAW="$OUT/timing_raw.ladder" \
 ./"$BUILD"/benchmark_cpu --family "$FAMILIES" --law "$LADDER_LAWS" --backend "$BACKENDS" \
     --metric speed --ladder ${_LADDER_MAX_ARG[@]+"${_LADDER_MAX_ARG[@]}"} ${_LADDER_PASS_ARG[@]+"${_LADDER_PASS_ARG[@]}"} --reps "$REPS" --format csv --data-dir "$DATA" \
     > "$OUT/ladder.csv" 2>"$OUT/ladder.err"
@@ -662,7 +677,7 @@ sup_note(){
     printf '%-22s %s\n' "$1" "$2" >> "$OUT/STAGES.txt"
     case "$2" in SKIPPED*) SKIPPED+=("$1 ${2#SKIPPED }") ;; esac
 }
-if [ -n "${WM_GPU_PIPELINE:-}" ]; then
+if [ -n "${BENCH_GPU_PIPELINE:-}" ]; then
     say "suppliers: the CPU suppliers are not part of the GPU pipeline (a CPU run,"
     say "           run_benchmark.sh, measures them; the GPU suppliers are run by"
     say "           benchmark/run_gpu.sh from build/suppliers_gpu) -- skipping both CPU supplier stages."
@@ -675,6 +690,10 @@ elif [ ! -x "$BUILD/suppliers" ]; then
     say "           compare against and will say so by name."
     sup_note suppliers       "SKIPPED (no $BUILD/suppliers)"
     sup_note supplier-ladder "SKIPPED (no $BUILD/suppliers)"
+    # SUPPLIERS=all asks for every supplier row of the suppliers stage (STAGES all or rest).
+    if [ "${SUPPLIERS:-ship}" = all ] && { [ "$STAGES" = all ] || [ "$STAGES" = rest ]; }; then
+        warn "suppliers: SUPPLIERS=all, but $BUILD/suppliers is not built; no supplier rows (make build/suppliers)"
+    fi
 elif [ "$STAGES" = levin ] || [ "$STAGES" = threads ] || [ "$STAGES" = fold ] || [ "$STAGES" = record ]; then
     # The A/B stages have no supplier side; `record` times nothing.
     sup_note suppliers       "SKIPPED (STAGES=$STAGES)"
@@ -698,25 +717,35 @@ else
         : > "$OUT/suppliers.csv"
         # Each supplier has its own STAGES.txt entry (suppliers:<label>).
         ext_note "suppliers (accuracy and timing per dataset)" cpu SUPPLIERS "$(./"$BUILD"/suppliers --list)"
+        # SUPPLIERS=all asks for every row: a row the build lacks is a warning in STATUS.  Labels
+        # and row prefixes as in benchmark/tools/missing.sh rows.
+        if [ "${SUPPLIERS:-ship}" = all ]; then
+            _absent=""
+            for _k in "std::cyl_bessel_k|std-cyl_bessel_k" "Boost 1.75.0|boost-" "GSL|gsl-" "KAUST CuBesselK|kaust"; do
+                case " $sup_all" in *" ${_k#*|}"*) ;; *) _absent="${_absent:+$_absent, }${_k%%|*}" ;; esac
+            done
+            [ -z "$_absent" ] ||
+                warn "suppliers: SUPPLIERS=all, but $BUILD/suppliers has no rows of $_absent (make requirements)"
+        fi
         _pi=0; _pn=$(echo $sup_list | wc -w)
         for sp in $sup_list; do
             _pi=$((_pi+1)); progress "suppliers: [$_pi/$_pn] $sp"
-            export WM_RAW_REPS="$OUT/timing_raw.suppliers.$sp"
+            export BENCH_TIMING_RAW="$OUT/timing_raw.suppliers.$sp"
             _before=$(grep -c '^[0-9]' "$OUT/suppliers.csv")
             if [ -s "$OUT/suppliers.csv" ]; then
-                WM_ACC_DETAIL="$OUT/accuracy_detail.suppliers.$sp" \
+                BENCH_ACCURACY_DETAIL="$OUT/accuracy_detail.suppliers.$sp" \
                 ./"$BUILD"/suppliers --family "$FAMILIES" --law all --supplier "$sp" \
                     --reps "$REPS" --data-dir "$DATA" $sup_cap --format csv 2>>"$OUT/suppliers.err" \
                     | tail -n +2 >> "$OUT/suppliers.csv"
                 _rc=${PIPESTATUS[0]}
             else
-                WM_ACC_DETAIL="$OUT/accuracy_detail.suppliers.$sp" \
+                BENCH_ACCURACY_DETAIL="$OUT/accuracy_detail.suppliers.$sp" \
                 ./"$BUILD"/suppliers --family "$FAMILIES" --law all --supplier "$sp" \
                     --reps "$REPS" --data-dir "$DATA" $sup_cap --format csv >> "$OUT/suppliers.csv" \
                     2>>"$OUT/suppliers.err"
                 _rc=$?
             fi
-            unset WM_RAW_REPS
+            unset BENCH_TIMING_RAW
             record_rows "suppliers:$sp" "$_rc" "$_before" "$OUT/suppliers.csv"
         done
         record_laws suppliers "$OUT/suppliers.err"
@@ -737,7 +766,7 @@ else
         _pi=0; _pn=$(echo $sup_lad | wc -w)
         for sp in $sup_lad; do
             _pi=$((_pi+1)); progress "supplier ladder: [$_pi/$_pn] $sp"
-            export WM_RAW_REPS="$OUT/timing_raw.suppliers_ladder.$sp"
+            export BENCH_TIMING_RAW="$OUT/timing_raw.suppliers_ladder.$sp"
             _before=$(grep -c '^[0-9]' "$OUT/suppliers_ladder.csv")
             if [ -s "$OUT/suppliers_ladder.csv" ]; then
                 ./"$BUILD"/suppliers --family "$FAMILIES" --law "$LADDER_LAWS" --ladder ${_LADDER_MAX_ARG[@]+"${_LADDER_MAX_ARG[@]}"} ${_LADDER_PASS_ARG[@]+"${_LADDER_PASS_ARG[@]}"} \
@@ -752,7 +781,7 @@ else
                     2>>"$OUT/suppliers_ladder.err"
                 _rc=$?
             fi
-            unset WM_RAW_REPS
+            unset BENCH_TIMING_RAW
             record_rows "supplier-ladder:$sp" "$_rc" "$_before" "$OUT/suppliers_ladder.csv"
         done
         record_laws supplier-ladder "$OUT/suppliers_ladder.err"
@@ -773,8 +802,8 @@ if [ "$STAGES" = levin ]; then
     for arm in base novec scal; do
         progress "levin: arm $arm, backends $BACKENDS"
         # One raw prefix per arm, since the three arms time the same (law, backend) rows.
-        WM_RAW_REPS="$OUT/timing_raw.levin_$arm" \
-        WM_ACC_DETAIL="$OUT/accuracy_detail.levin_$arm" \
+        BENCH_TIMING_RAW="$OUT/timing_raw.levin_$arm" \
+        BENCH_ACCURACY_DETAIL="$OUT/accuracy_detail.levin_$arm" \
         ./"$AB"/benchmark_cpu_"$arm" --family "$FAMILIES" --law all --backend "$BACKENDS" \
             --metric accuracy --reps "$REPS" --format csv --data-dir "$DATA" $time_cap \
             > "$OUT/levin_$arm.csv" 2>>"$OUT/levin.err"
@@ -830,7 +859,7 @@ fi
 if [ "$STAGES" = threads ]; then
     # threads_cpu is checked above, before the run directory exists.
     : > "$OUT/threads.csv"; : > "$OUT/threads.err"; _first=1
-    ext_note "threads (supplier rows)" threads THREADS_SUPPLIERS "$(WM_RAW_REPS= ./"$BUILD"/threads_cpu --list)"
+    ext_note "threads (supplier rows)" threads THREADS_SUPPLIERS "$(BENCH_TIMING_RAW= ./"$BUILD"/threads_cpu --list)"
     for _fam in $(echo "$FAMILIES" | tr ',' ' '); do
       for _bk in $(echo "$BACKENDS" | tr ',' ' '); do
         # Pin modes: dense fills one socket first; spread deals the threads round-robin over the
@@ -839,7 +868,7 @@ if [ "$STAGES" = threads ]; then
           _tag="${_fam}_${_bk}"; [ "$_pm" = dense ] || _tag="${_tag}_${_pm}"
           progress "threads: $_fam $_bk ($_pm)"
           # One raw file per invocation, so processes do not truncate each other's.
-          WM_RAW_REPS="$OUT/timing_raw.threads_${_tag}" \
+          BENCH_TIMING_RAW="$OUT/timing_raw.threads_${_tag}" \
           ./"$BUILD"/threads_cpu $THREADS_CAP --family "$_fam" --law "$THREADS_LAW" --backend "$_bk" \
               --reps "$THREADS_REPS" --n "$THREADS_N" --pin-mode "$_pm" \
               --format csv --data-dir "$DATA" \
@@ -854,13 +883,13 @@ if [ "$STAGES" = threads ]; then
       # first thread count of an invocation; timed in the assembly of their accuracy rows
       # (THREADS_ASSEMBLY overrides it).  KAUST only with THREADS_SUPPLIERS=all.
       if [ "${THREADS_SUPPLIERS:-ship}" = all ]; then
-        _splist=$(WM_RAW_REPS= ./"$BUILD"/threads_cpu --list | awk '/^  [a-z]/{print $1}')
+        _splist=$(BENCH_TIMING_RAW= ./"$BUILD"/threads_cpu --list | awk '/^  [a-z]/{print $1}')
       else
-        _splist=$(WM_RAW_REPS= ./"$BUILD"/threads_cpu --list | awk '/^  [a-z]/{print $1}' | grep -v '^kaust')
+        _splist=$(BENCH_TIMING_RAW= ./"$BUILD"/threads_cpu --list | awk '/^  [a-z]/{print $1}' | grep -v '^kaust')
       fi
       for _sp in $_splist; do
         progress "threads: $_fam $_sp"
-        WM_RAW_REPS="$OUT/timing_raw.threads_${_fam}_${_sp}" \
+        BENCH_TIMING_RAW="$OUT/timing_raw.threads_${_fam}_${_sp}" \
         ./"$BUILD"/threads_cpu $THREADS_CAP --family "$_fam" --law "$THREADS_LAW" \
             --supplier "$_sp" --assembly "${THREADS_ASSEMBLY:-direct}" \
             --reps "$THREADS_REPS" --n "$THREADS_N" --format csv --data-dir "$DATA" \
@@ -882,7 +911,7 @@ if [ "$STAGES" = threads ]; then
         for _bk in $(echo "${THREADS_WS_BACKENDS:-$BACKENDS}" | tr ',' ' '); do
           for _wn in $(echo "$THREADS_WS_N" | tr ',' ' '); do
             progress "threads working set: $_fam $_bk n=$_wn"
-            WM_RAW_REPS="$OUT/timing_raw.threads_ws_${_fam}_${_bk}_${_wn}" \
+            BENCH_TIMING_RAW="$OUT/timing_raw.threads_ws_${_fam}_${_bk}_${_wn}" \
             ./"$BUILD"/threads_cpu $THREADS_CAP --family "$_fam" --law "$THREADS_LAW" \
                 --backend "$_bk" --threads "$_wt" --reps "$THREADS_REPS" \
                 --n "$_wn" --format csv --data-dir "$DATA" \
@@ -901,14 +930,14 @@ fi
 
 # Prefactor fold: the scalar backend against its unfolded twin (src/backends/scalar/
 # scalar_internal.h), whose regions return K_nu and apply the Matern prefactor outside.
-# fold_cpu is benchmark_cpu.c with -DWM_FOLD, so fold.csv has accuracy.csv's layout; backends:
+# fold_cpu is benchmark_cpu.c with -DBENCH_FOLD, so fold.csv has accuracy.csv's layout; backends:
 #   scalar                  the shipped scalar backend
 #   scalar-control          the shipped source built as the twin is
 #   scalar-unfolded-direct  the twin, M = 2 (z/2)^nu / Gamma(nu) * K_nu
 #   scalar-unfolded-explog  the twin, M = exp((1-nu) ln2 - lnGamma(nu) + nu ln z + ln K_nu)
 if [ "$STAGES" = fold ]; then
     progress "fold: the scalar backend against its unfolded twin"
-    WM_RAW_REPS="$OUT/timing_raw.fold" WM_ACC_DETAIL="$OUT/accuracy_detail.fold" \
+    BENCH_TIMING_RAW="$OUT/timing_raw.fold" BENCH_ACCURACY_DETAIL="$OUT/accuracy_detail.fold" \
         ./"$BUILD"/fold_cpu --family "$FAMILIES" --law all --metric accuracy \
         --reps "$REPS" --format csv --data-dir "$DATA" $time_cap \
         > "$OUT/fold.csv" 2>>"$OUT/fold.err"
@@ -1032,8 +1061,8 @@ rows=$(grep -c '^[0-9]' "$ROW_SRC" 2>/dev/null); rows=${rows:-0}
 cat "$OUT/STATUS"
 
 # End-of-run notification (benchmark/tools/notify.sh); make benchmark and make pipeline set
-# WM_NOTIFY_SKIP and notify once.
-if [ -z "${WM_NOTIFY_SKIP:-}" ]; then
+# BENCH_NOTIFY_SKIP and notify once.
+if [ -z "${BENCH_NOTIFY_SKIP:-}" ]; then
     _el=$SECONDS
     _msg="$(sed -n 's/^STATUS *//p' "$OUT/STATUS" | head -1) after $(printf '%d:%02d:%02d' $((_el/3600)) $((_el%3600/60)) $((_el%60))) -- $OUT"
     [ ${#MISSING[@]} -gt 0 ] && _msg="$_msg; missing: ${MISSING[*]}"

@@ -1,8 +1,6 @@
 /* vector_ops_scalar.h -- the region-kernel vocabulary over plain doubles: VEC_FMA is fma()
  * as set by fused_multiply_add_scalar.h, vec_divide_refined a plain divide as on AVX2.
- * matched_fma runs the AVX2 region formulas, but the compiler may fuse further multiply-adds
- * in this width-1 code that AVX2 keeps apart, so it agrees with AVX2 to a few ulp, not bit
- * for bit. */
+ * Under -mfma the compiler can fuse width-1 multiply-adds that AVX2 keeps apart. */
 #ifndef MATERN_VECTOR_OPS_SCALAR_H
 #define MATERN_VECTOR_OPS_SCALAR_H
 

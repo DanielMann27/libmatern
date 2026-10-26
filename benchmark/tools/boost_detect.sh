@@ -1,15 +1,20 @@
 #!/bin/bash
-# boost_detect.sh [--select cpu|gpu] -- finds Boost installations and reports them, or prints the
-# include directory selected for the CPU row (1.75.0 only) or the GPU row (>= 1.87, with
-# BOOST_MATH_GPU_ENABLED); BOOST_CPU_ROOT / BOOST_ROOT override them, and none disables a row.
+# boost_detect.sh [--select|--where cpu|gpu] -- finds Boost installations and reports them, or
+# prints the include directory selected for the CPU row (1.75.0 only) or the GPU row (>= 1.87,
+# with BOOST_MATH_GPU_ENABLED); BOOST_CPU_ROOT / BOOST_ROOT override them, and none disables a
+# row.  --where prints "<dir> (<origin>)" for the build records (references/Makefile, the
+# Makefile) and tools/externals.sh: the origin is the override (BOOST_CPU_ROOT, BOOST_ROOT)
+# where it selects the directory, else the first way the directory is found: make externals
+# (references/boost/, which make boost-headers also fills), the variable that names it, or
+# system (the compiler's search path, Homebrew or a standard directory).
 set -u
 MODE=report
 ROLE=""
 case "${1:-}" in
-    --select) MODE=select; ROLE="${2:-}"
-              case "$ROLE" in cpu|gpu) ;; *) echo "boost_detect.sh: --select cpu|gpu" >&2; exit 2 ;; esac ;;
+    --select|--where) MODE=${1#--}; ROLE="${2:-}"
+              case "$ROLE" in cpu|gpu) ;; *) echo "boost_detect.sh: $1 cpu|gpu" >&2; exit 2 ;; esac ;;
     "") ;;
-    *) echo "usage: boost_detect.sh [--select cpu|gpu]" >&2; exit 2 ;;
+    *) echo "usage: boost_detect.sh [--select|--where cpu|gpu]" >&2; exit 2 ;;
 esac
 
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
@@ -40,55 +45,62 @@ BOOST_ROOT=$(absdir "${BOOST_ROOT:-}")
 [ -n "$BOOST_CPU_ROOT" ] || unset BOOST_CPU_ROOT
 [ -n "$BOOST_ROOT" ] || unset BOOST_ROOT
 
-# Candidates in search order.  First the Boost a bare compile resolves, which includes paths
-# that environment modules add without setting BOOST_ROOT.
-CANDIDATES=()
+# Candidates in search order, each with its origin (FROMS, for --where).  First the Boost a
+# bare compile resolves, which includes paths that environment modules add without setting
+# BOOST_ROOT.
+CANDIDATES=(); FROMS=()
+cand() { CANDIDATES+=("$1"); FROMS+=("$2"); }
 _resolved=$(echo '#include <boost/version.hpp>' \
             | ${CXX:-g++} -E -x c++ - 2>/dev/null \
             | sed -n 's/^# *[0-9][0-9]* *"\(.*\)\/boost\/version\.hpp".*/\1/p' \
             | head -1)
-[ -n "$_resolved" ] && CANDIDATES+=("$_resolved")
-for _v in "${BOOST_DIR:-}" "${BOOST_ROOT:-}" "${BOOST_CPU_ROOT:-}" "${BOOST_INC_DIR:-}" "${BOOST_INCLUDE_DIR:-}"; do
-    [ -n "$_v" ] && [ "$_v" != none ] && CANDIDATES+=("$(incroot "$_v")")
+[ -n "$_resolved" ] && cand "$_resolved" system
+for _n in BOOST_DIR BOOST_ROOT BOOST_CPU_ROOT BOOST_INC_DIR BOOST_INCLUDE_DIR; do
+    _v=${!_n:-}
+    [ -n "$_v" ] && [ "$_v" != none ] && cand "$(incroot "$_v")" "$_n"
 done
 for _d in "$HERE"/references/boost/*/; do
-    [ -d "$_d" ] && CANDIDATES+=("${_d%/}")
+    [ -d "$_d" ] && cand "${_d%/}" "make externals"
 done
-[ -n "${CONDA_PREFIX:-}" ] && CANDIDATES+=("$CONDA_PREFIX/include")
-command -v brew >/dev/null 2>&1 && CANDIDATES+=("$(brew --prefix 2>/dev/null)/include")
+[ -n "${CONDA_PREFIX:-}" ] && cand "$CONDA_PREFIX/include" CONDA_PREFIX
+command -v brew >/dev/null 2>&1 && cand "$(brew --prefix 2>/dev/null)/include" system
 # the compiler's own C++ search path, in its own order
 while read -r _d; do
-  case "$_d" in /*) CANDIDATES+=("$_d");; esac
+  case "$_d" in /*) cand "$_d" system;; esac
 done < <(${CXX:-g++} -E -x c++ -v /dev/null 2>&1 \
          | sed -n '/^#include <...> search starts here:/,/^End of search list/p' \
          | sed -n 's/^ \(\/.*\)$/\1/p')
-CANDIDATES+=(/usr/include /usr/local/include /opt/homebrew/include /opt/local/include)
+for _d in /usr/include /usr/local/include /opt/homebrew/include /opt/local/include; do
+  cand "$_d" system
+done
 
 version_at() { sed -n 's/^#define BOOST_VERSION  *\([0-9]*\).*/\1/p' "$1/boost/version.hpp" 2>/dev/null | head -1; }
 gpu_capable() { grep -q BOOST_MATH_GPU_ENABLED "$1/boost/math/special_functions/bessel.hpp" 2>/dev/null; }
 dotted() { echo "$(($1/100000)).$(($1/100%1000)).$(($1%100))"; }
 
-DIRS=(); VERS=()
+# A directory found in several ways keeps the origin of the first.
+DIRS=(); VERS=(); ORIGS=()
 declare -A _seen=()
-for d in "${CANDIDATES[@]}"; do
-  d=$(cd "$d" 2>/dev/null && pwd) || continue
+for i in "${!CANDIDATES[@]}"; do
+  d=$(cd "${CANDIDATES[$i]}" 2>/dev/null && pwd) || continue
   [ -n "${_seen[$d]:-}" ] && continue        # one entry per directory, not per way of naming it
   _seen[$d]=1
   v=$(version_at "$d")
   [ -n "$v" ] || continue
-  DIRS+=("$d"); VERS+=("$v")
+  DIRS+=("$d"); VERS+=("$v"); ORIGS+=("${FROMS[$i]}")
 done
 
-# select_cpu / select_gpu set SEL (directory, empty for none), NOTE (why) and NEED, read by
-# tools/requirements.sh.  CPU NEED: ok; unset (BOOST_CPU_ROOT=none); fix-root (BOOST_CPU_ROOT
-# names no 1.75.0; no other Boost is used while it is set); fetch (no 1.75.0 found).
+# select_cpu / select_gpu set SEL (directory, empty for none), ORIG (its origin), NOTE (why)
+# and NEED, read by tools/requirements.sh.  CPU NEED: ok; unset (BOOST_CPU_ROOT=none);
+# fix-root (BOOST_CPU_ROOT names no 1.75.0; no other Boost is used while it is set); fetch
+# (no 1.75.0 found).
 select_cpu() {
-  SEL=""; NOTE=""; NEED=ok
+  SEL=""; ORIG=""; NOTE=""; NEED=ok
   if [ -n "${BOOST_CPU_ROOT:-}" ]; then
     if [ "$BOOST_CPU_ROOT" = none ]; then NOTE="disabled (BOOST_CPU_ROOT=none)"; NEED=unset; return; fi
     local cv; cv=$(version_at "$BOOST_CPU_ROOT")
     if [ "$cv" = "$CPU_VERSION" ]; then
-      SEL=$(cd "$BOOST_CPU_ROOT" && pwd); NOTE="BOOST_CPU_ROOT"; return
+      SEL=$(cd "$BOOST_CPU_ROOT" && pwd); ORIG=BOOST_CPU_ROOT; NOTE="BOOST_CPU_ROOT"; return
     fi
     if [ -n "$cv" ]; then
       NOTE="BOOST_CPU_ROOT=$BOOST_CPU_ROOT is Boost $(dotted "$cv"); the CPU row is Boost 1.75.0"
@@ -100,7 +112,7 @@ select_cpu() {
   local i
   for i in "${!DIRS[@]}"; do
     if [ "${VERS[$i]}" -eq "$CPU_VERSION" ]; then
-      SEL=${DIRS[$i]}; NOTE="Boost 1.75.0, the version of the published CPU rows"; return
+      SEL=${DIRS[$i]}; ORIG=${ORIGS[$i]}; NOTE="Boost 1.75.0, the version of the published CPU rows"; return
     fi
   done
   if [ "${#DIRS[@]}" -gt 0 ]; then
@@ -115,11 +127,11 @@ select_cpu() {
 # GPU NEED: ok; unset (BOOST_ROOT=none); fetch (no GPU-capable Boost).  A BOOST_ROOT without
 # GPU support (often set for other builds) is reported and passed over for the highest one found.
 select_gpu() {
-  SEL=""; NOTE=""; NEED=ok
+  SEL=""; ORIG=""; NOTE=""; NEED=ok
   local pre=""
   if [ -n "${BOOST_ROOT:-}" ]; then
     if [ "$BOOST_ROOT" = none ]; then NOTE="disabled (BOOST_ROOT=none)"; NEED=unset; return; fi
-    if gpu_capable "$BOOST_ROOT"; then SEL=$(cd "$BOOST_ROOT" && pwd); NOTE="BOOST_ROOT"; return; fi
+    if gpu_capable "$BOOST_ROOT"; then SEL=$(cd "$BOOST_ROOT" && pwd); ORIG=BOOST_ROOT; NOTE="BOOST_ROOT"; return; fi
     local rv; rv=$(version_at "$BOOST_ROOT")
     if [ -n "$rv" ]; then
       pre="BOOST_ROOT=$BOOST_ROOT is Boost $(dotted "$rv"), which has no GPU support (needs >= 1.87); "
@@ -133,7 +145,7 @@ select_gpu() {
     if gpu_capable "${DIRS[$i]}" && [ "${VERS[$i]}" -gt "$bv" ]; then bv=${VERS[$i]}; b=$i; fi
   done
   if [ "$b" -ge 0 ]; then
-    SEL=${DIRS[$b]}; NOTE="${pre:+${pre}using the }highest Boost with BOOST_MATH_GPU_ENABLED"
+    SEL=${DIRS[$b]}; ORIG=${ORIGS[$b]}; NOTE="${pre:+${pre}using the }highest Boost with BOOST_MATH_GPU_ENABLED"
   elif [ -n "$pre" ]; then
     NOTE="${pre}no other Boost found has GPU support"; NEED=fetch
   elif [ "$hv" -gt 0 ]; then
@@ -143,9 +155,9 @@ select_gpu() {
   fi
 }
 
-if [ "$MODE" = select ]; then
+if [ "$MODE" != report ]; then
   if [ "$ROLE" = cpu ]; then select_cpu; else select_gpu; fi
-  echo "$SEL"
+  if [ "$MODE" = where ] && [ -n "$SEL" ]; then echo "$SEL ($ORIG)"; else echo "$SEL"; fi
   exit 0
 fi
 

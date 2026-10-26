@@ -2,7 +2,7 @@
 # full_run.sh [--brief|--durations|--diff|--assign] [--entry E] [--stages S] [--gpu G] [--note N]
 #             [P=v ...] -- prints the notice of the full benchmark (published results, command,
 # duration) and how the calling invocation differs from it; the notice is silent once
-# WM_FULLRUN_NOTICE=shown.
+# BENCH_FULL_RUN_NOTICE=shown.
 # The notice repeats docs/benchmark.md, "Replicating the published results" -- keep the two in step.
 set -u
 
@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ $MODE = notice ] && [ "${WM_FULLRUN_NOTICE:-}" = shown ] && exit 0
+[ $MODE = notice ] && [ "${BENCH_FULL_RUN_NOTICE:-}" = shown ] && exit 0
 cd "$(dirname "$0")/../.." || exit 0
 RB=benchmark/run_benchmark.sh
 
@@ -36,25 +36,67 @@ text_commands() {
 == the full benchmark (the published results)
   The published results come from the full benchmark on exclusive nodes: its CPU part
   once on an Intel Xeon Platinum 8358 and once on an AMD EPYC 9454, its GPU part on an
-  NVIDIA A100 80GB PCIe.  The first four commands put the corpus, the external
-  suppliers and the KAUST port in place; the last runs all of it on one machine:
+  NVIDIA A100 80GB PCIe in a machine with the Intel CPU, each part as a separate batch
+  job.  One command runs the full benchmark on one machine:
 
-      make corpus DOWNLOAD=yes      (the corpus from Zenodo, 5.19 GB; make corpus first)
-      make externals
-      make kaust                    (the copyright notice of CuBesselK: read it first)
-      make kaust DOWNLOAD=yes       (if you decide to: downloads the files, ports them)
-      make pipeline GPU=yes LEVIN=yes FOLD=yes THREADS=yes LADDER_SET=large SUPPLIERS=all \
-                    SUP_LADDER_BUDGET=1500
+      make reproduce
 
-  On a terminal, make pipeline asks for all of this at its start (the full settings,
-  the externals, KAUST and the corpus) and then runs unattended.
+  It is make pipeline with the settings of the full benchmark (SETTINGS=full), the
+  externals the run uses (EXTERNALS=yes) and the download of the missing or damaged
+  corpus files (CORPUS=yes, 5.19 GB from Zenodo).  The GPU part runs where nvcc and an
+  NVIDIA GPU are found and is left out elsewhere; make reproduce GPU=no runs the full
+  CPU part only.  SETTINGS=full sets LEVIN, FOLD, THREADS and the run parameters over
+  values given on the command line.  The published CPU rows used the system
+  Boost 1.75.0 and GSL 2.6 of the run machines (packages of Red Hat Enterprise
+  Linux 9.6; GSL as a shared library found by pkg-config).  make reproduce likewise
+  uses a system Boost 1.75.0 or GSL 2.6 where it finds one (a GSL copy in
+  references/gsl/ is preferred to it) and downloads the version only where the system
+  lacks it; PROVENANCE.txt records the copy a run used
+  (build_cpu_supplier_cxx_boost_source, build_cpu_supplier_gsl_source).  A GSL
+  compiled with fused multiply-adds (an -march with FMA) gives different gsl rows;
+  that can be a system copy or the copy make externals builds, which takes the
+  compiler's default -march unless CFLAGS sets one.  build_cpu_supplier_gsl_library
+  records the library file the build linked and the number of fused multiply-adds in
+  its Bessel functions (most of the K_nu code).
 
-  The port is deleted at the end of make pipeline, so run make kaust DOWNLOAD=yes
-  again before the next make pipeline.  The downloaded files are kept, so the
-  repeated command only generates the port again.
+  KAUST CuBesselK is not distributed.  When its port is absent, make reproduce on a
+  terminal shows the copyright notice of CuBesselK in short and asks whether to
+  download its two files and generate the port.  Without a terminal (a batch job,
+  nohup, | tee) it asks nothing and needs KAUST=yes (the notice in short, then the
+  download and the port; where these cannot be done, the run goes on without the
+  KAUST rows) or KAUST=no (no KAUST rows) on the command line; without either it
+  stops before anything runs.  A port in place is used, and KAUST=no then stops the
+  run before anything runs (make kaust CLEAN=yes deletes the port).  The port is
+  deleted at the end of the run and the two files are kept, so a later KAUST=yes or
+  make kaust DOWNLOAD=yes only generates the port again.
 
-  GPU=no runs the CPU part alone, on a machine without an NVIDIA GPU.  The published
-  run ran the parts as separate batch jobs.
+  The figure cross-machine/fig-paper-machine-independence compares the CPU runs of an
+  Intel and an AMD CPU (two models of one vendor do not count), so one machine cannot
+  write it; a machine with the GPU part writes every other figure and table of the
+  paper set (with the KAUST rows after a yes to the KAUST question or KAUST=yes).  As
+  in the published run, run make reproduce on one Intel machine with an NVIDIA GPU and
+  on one AMD machine, copy the run directories of the second (benchmark/runs/<run id>/,
+  not latest) into benchmark/runs/ of the first, and write the figures and tables
+  again there with make paper-figures-final and make paper-tables.  The generators
+  read every run in benchmark/runs/ and take each kind of result from the newest run
+  of the machine that has it, so an earlier run there can supply a stage; the CPU
+  results come from a machine without GPU data, here the AMD one
+  (ARGS=--cpu-machine NAME selects another).
+
+  make reproduce installs no system software; make requirements reports what is
+  present.  Besides the requirements (docs/benchmark.md) it needs pdflatex with
+  geometry, amsmath, amssymb, booktabs, array, float and rotating; a C++17 compiler
+  with libstdc++; curl or wget, bzip2 and sha256sum; Python 3; and for the GPU part
+  nvcc and an NVIDIA GPU.  Without pdflatex the tables are not written and the run
+  ends with failures; a CPU supplier row that is not built (std::cyl_bessel_k, Boost,
+  GSL, KAUST) is a warning in the CPU run's STATUS.
+
+      make reproduce DRY=yes                   # the plan and the questions; runs nothing
+      make reproduce                           # on a terminal
+      make reproduce KAUST=no > run.log 2>&1   # without a terminal: KAUST=yes or KAUST=no
+
+  Without a terminal, make reproduce DRY=yes exits with status 2 where the run would
+  refuse to start, as without KAUST=yes or KAUST=no while the port is absent.
 EOF
 }
 text_durations() {

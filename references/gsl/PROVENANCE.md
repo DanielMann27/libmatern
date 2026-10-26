@@ -15,9 +15,15 @@ The supplier calls `gsl_sf_bessel_Knu`, `gsl_sf_bessel_Knu_scaled` and `gsl_sf_b
 `make externals` runs `references/fetch_gsl.sh`, which downloads `gsl-2.6.tar.gz` from
 ftp.gnu.org or a mirror, checks its sha256 against the pinned digest
 `b782339fc7a38fe17689cb39966c4d821236c28018b6593ddb6fd59ee40786a8`, and builds a static
-library into `references/gsl/2.6/`. Without it, `benchmark/tools/gsl_flags.sh` uses a system
-GSL found by pkg-config; its version is recorded in each run's `PROVENANCE.txt`, and the
-published rows used 2.6.
+library into `references/gsl/2.6/`, with `build-flags.txt` naming the compiler and flags that
+compiled `bessel_Knu.c`; under `make pipeline` and `make reproduce` it does so only
+where `benchmark/tools/gsl_flags.sh` takes no GSL 2.6 from pkg-config: pkg-config finds none,
+or `references/gsl/` holds a copy, which that script prefers (the highest version). Without
+such a copy, `gsl_flags.sh` uses a system GSL found by pkg-config. Each run's `PROVENANCE.txt`
+records the GSL's version and location (`build_cpu_supplier_gsl_headers`, `_runtime` and
+`_source`) and its library file with its package or build flags and the fused multiply-adds
+in its Bessel functions (`_library`). The published rows used a system GSL: the GSL 2.6
+package of Red Hat Enterprise Linux 9.6 on the run machines, a shared library.
 
 ## Use
 

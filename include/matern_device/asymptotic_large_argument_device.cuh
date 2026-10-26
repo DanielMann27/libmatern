@@ -41,7 +41,7 @@ static __device__ __forceinline__ double matern_large_argument_dd_argument_devic
 
 /* exp(E), E = (nu-1/2) ln z - z - lnGamma(nu) + (1-nu) ln 2 + 1/2 ln(pi/2) in double-double
  * with Zl absorbed exactly; shared by the asymptotic sum and its Levin transform. */
-static __device__ __forceinline__ double matern_wm_exponent_device(double Zh, double Zl,
+static __device__ __forceinline__ double matern_large_argument_folded_prefactor_device(double Zh, double Zl,
                                                                    double nu)
 {
     const double rz = 1.0 / Zh;
@@ -92,7 +92,7 @@ static __device__ __forceinline__ double matern_large_argument_fold_device(doubl
         if (fabs(start) < DBL_EPSILON * fabs(sum)) break;
     }
 
-    const double eE = matern_wm_exponent_device(Zh, Zl, nu);
+    const double eE = matern_large_argument_folded_prefactor_device(Zh, Zl, nu);
     const double v = eE * sum;
     return (v > 0.0 && v <= 1.0) ? v : 0.0;        /* M lies in (0, 1] */
 }

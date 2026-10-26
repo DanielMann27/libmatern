@@ -1,7 +1,7 @@
 # references/Makefile -- the external K_nu supplier objects, built with the flags of
 # the published comparison (-march=native -O2, no -std); nothing links libmatern.
 
-# The first rule is the `$(OBJECTS): common/cpu_wm.h` line, not `all`.
+# The first rule is the `$(OBJECTS): common/cpu_supplier.h` line, not `all`.
 .DEFAULT_GOAL := all
 
 # No -std: the GNU dialect defaults to -ffp-contract=fast, while -std=c11 changes
@@ -19,11 +19,16 @@ Q := $(if $(filter $(YES_WORDS),$(strip $(V))),,@)
 KAUST_PORT := $(wildcard build/kaust/kaust_derived.h)
 KAUST_SRC  := $(if $(KAUST_PORT),kaust_logbesselk/kaust_port.c)
 
-# GSL: one built by `make externals` (gsl/<version>/), else the system GSL.
+# GSL: one built by `make externals` (gsl/<version>/), else the system GSL.  GSL_WHERE, the
+# copy used, and GSL_LIBRARY, the library file with its package or build flags and its FMA
+# count (gsl_flags.sh --library, run once and only by the cpu_gsl.o rules), go into the
+# object's build record.
 GSL_FLAGS   = bash ../benchmark/tools/gsl_flags.sh
 GSL_PRESENT := $(shell $(GSL_FLAGS) --exists && echo yes)
 ifeq ($(GSL_PRESENT),yes)
 GSL_CFLAGS := $(shell $(GSL_FLAGS) --cflags)
+GSL_WHERE  := $(shell $(GSL_FLAGS) --where)
+GSL_LIBRARY = $(eval GSL_LIBRARY := $(shell CC="$(CC)" $(GSL_FLAGS) --library))$(GSL_LIBRARY)
 endif
 
 # C++ counts as present only if it compiles std::cyl_bessel_k (libc++ has no C++17
@@ -33,12 +38,14 @@ CXX_PRESENT := $(shell printf '\043include <cmath>\nint main(){return (int)std::
 
 # The CPU Boost row is Boost 1.75.0 or absent.  The compile refuses a
 # boost/version.hpp other than BOOST_CPU_VERSION (CPATH can put another Boost ahead of -I).
+# BOOST_CPU_WHERE, the directory and its origin, goes into the object's build record.
 ifeq ($(CXX_PRESENT),yes)
 BOOST_CPU_DIR := $(shell CXX="$(CXX)" BOOST_CPU_ROOT="$(BOOST_CPU_ROOT)" bash ../benchmark/tools/boost_detect.sh --select cpu)
+BOOST_CPU_WHERE := $(shell CXX="$(CXX)" BOOST_CPU_ROOT="$(BOOST_CPU_ROOT)" bash ../benchmark/tools/boost_detect.sh --where cpu)
 endif
 ifneq ($(BOOST_CPU_DIR),)
 BOOST_CPU_VERSION := $(shell sed -n 's/^\#define BOOST_VERSION  *\([0-9]*\).*/\1/p' $(BOOST_CPU_DIR)/boost/version.hpp | head -1)
-BOOST_CXXFLAGS := -DWMC_WITH_BOOST -DWMC_BOOST_EXPECT=$(BOOST_CPU_VERSION) -I$(BOOST_CPU_DIR)
+BOOST_CXXFLAGS := -DCPU_SUPPLIER_WITH_BOOST -DCPU_SUPPLIER_BOOST_EXPECT=$(BOOST_CPU_VERSION) -I$(BOOST_CPU_DIR)
 endif
 
 OBJECTS = build/cpu_bessels_jl.o \
@@ -48,20 +55,20 @@ DEFINES =
 LINK_LIBS =
 ifeq ($(CXX_PRESENT),yes)
 OBJECTS   += build/cpu_cxx.o
-DEFINES   += -DWMC_WITH_CXX $(if $(BOOST_CPU_DIR),-DWMC_WITH_BOOST)
+DEFINES   += -DCPU_SUPPLIER_WITH_CXX $(if $(BOOST_CPU_DIR),-DCPU_SUPPLIER_WITH_BOOST)
 LINK_LIBS += -lstdc++
 endif
 ifneq ($(KAUST_SRC),)
 OBJECTS += build/kaust_port.o
-DEFINES += -DWMC_WITH_KAUST
+DEFINES += -DCPU_SUPPLIER_WITH_KAUST
 endif
 ifeq ($(GSL_PRESENT),yes)
 OBJECTS   += build/cpu_gsl.o
-DEFINES   += -DWMC_WITH_GSL
+DEFINES   += -DCPU_SUPPLIER_WITH_GSL
 LINK_LIBS += $(shell $(GSL_FLAGS) --libs)
 endif
 
-$(OBJECTS): common/cpu_wm.h
+$(OBJECTS): common/cpu_supplier.h
 
 # The drivers read build/defines.txt and build/link.txt, so detection happens here
 # only; the explicit object list keeps a leftover object of another configuration out.
@@ -93,25 +100,35 @@ build/kaust_port.o: kaust_logbesselk/kaust_port.c build/kaust/kaust_derived.h
 	@mkdir -p build
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -Ibuild/kaust -c $< -o $@
 
-# Configuration stamps, rewritten only on change: another GSL or Boost rebuilds the object.
+# Configuration stamps, rewritten only on change: another GSL or Boost, another origin of
+# the same directory, or another GSL library record rebuilds the object.  make rebuilds only
+# on a strictly newer prerequisite and some file systems store whole seconds, so stamp_newer
+# makes a rewritten stamp newer than a listed file written in the same second.
+stamp_newer = for f in $(1); do [ ! -e $$f ] || [ $@ -nt $$f ] || { sleep 1; touch $@; break; }; done
 build/gsl.config: FORCE
 	@mkdir -p build
-	@echo "$(GSL_CFLAGS)" | cmp -s - $@ || echo "$(GSL_CFLAGS)" > $@
+	@echo "$(GSL_CFLAGS) $(GSL_WHERE) $(GSL_LIBRARY)" | cmp -s - $@ \
+	    || { echo "$(GSL_CFLAGS) $(GSL_WHERE) $(GSL_LIBRARY)" > $@; $(call stamp_newer,build/cpu_gsl.o); }
 
 build/cpu_gsl.o: gsl/cpu_gsl.c build/gsl.config common/build_info.h
 	@mkdir -p build
-	$(Q)$(CC) $(CFLAGS) $(INCLUDES) $(GSL_CFLAGS) -c $< -o $@
+	$(Q)$(CC) $(CFLAGS) $(INCLUDES) $(GSL_CFLAGS) -DCPU_SUPPLIER_GSL_SOURCE='"$(GSL_WHERE)"' \
+	    -DCPU_SUPPLIER_GSL_LIBRARY='"$(GSL_LIBRARY)"' -c $< -o $@
 
 build/cxx.config: FORCE
 	@mkdir -p build
-	@echo "$(CXX) $(BOOST_CXXFLAGS)" | cmp -s - $@ || echo "$(CXX) $(BOOST_CXXFLAGS)" > $@
+	@echo "$(CXX) $(BOOST_CXXFLAGS) $(BOOST_CPU_WHERE)" | cmp -s - $@ \
+	    || { echo "$(CXX) $(BOOST_CXXFLAGS) $(BOOST_CPU_WHERE)" > $@; $(call stamp_newer,build/cpu_cxx.o); }
 
-# std::cyl_bessel_k, and Boost (headers, BSL-1.0) when one is selected.
+# std::cyl_bessel_k, and Boost (headers, BSL-1.0) when one is selected; its directory and
+# origin go into the object's build record.
 build/cpu_cxx.o: cpp_stdlib/cpu_cxx.cpp build/cxx.config common/build_info.h
 	@mkdir -p build
-	$(Q)$(CXX) $(CXXFLAGS) $(BOOST_CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(Q)$(CXX) $(CXXFLAGS) $(BOOST_CXXFLAGS) $(if $(BOOST_CPU_DIR),-DCPU_SUPPLIER_BOOST_SOURCE='"$(BOOST_CPU_WHERE)"') \
+	    $(INCLUDES) -c $< -o $@
 
-# FMA instruction counts of every C supplier source, GNU dialect against -std=c11.
+# FMA instruction counts of the C ports (Bessels.jl, and KAUST when ported), GNU dialect
+# against -std=c11.
 FLAG_SOURCES := $(KAUST_SRC) \
                 bessels_jl/port/cpu_bessels_jl.c \
                 bessels_jl/port/cpu_bessels_old.c

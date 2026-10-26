@@ -1,7 +1,8 @@
 #!/bin/bash
 # requirements.sh [all|suppliers|missing] -- reports the external software the build and
 # benchmark can use and how to add what is absent (make requirements | references |
-# externals-missing).  Measures and changes nothing; always exits 0.
+# externals-missing).  Measures and changes nothing; exits 1 if the repository root cannot
+# be entered, 2 for an unknown section, otherwise 0.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
@@ -427,10 +428,12 @@ corpus() {
     fi
 }
 
+# nvidia-smi as the Makefile resolves it (NVIDIA_SMI), the test of make pipeline.
 gpu() {
+    local smi="${NVIDIA_SMI:-nvidia-smi}"
     section "GPU (optional: make cuda, benchmark-gpu)"
-    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-        row found "GPU" "$(nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null | head -1)" "GPU stages"
+    if command -v "$smi" >/dev/null 2>&1 && "$smi" -L >/dev/null 2>&1; then
+        row found "GPU" "$("$smi" --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null | head -1)" "GPU stages"
     else
         row absent "GPU" "no NVIDIA GPU visible (nvidia-smi)" "GPU stages; optional (nvcc and the device suppliers: above)" "" gpu
     fi

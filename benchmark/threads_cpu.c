@@ -14,10 +14,10 @@
 
 #include "matern.h"
 #include "corpus_dataset.h"
-#include "common/wm_metrics.h"   /* WM_SCHEMA: these rows carry the same schema number */
-#include "cpu_wm.h"              /* the external suppliers, same objects suppliers.c times */
-#include "cpu_wm_registry.h"     /* the supplier list, shared with suppliers.c */
-#include "common/wm_timing.h"
+#include "common/bench_metrics.h"      /* BENCH_SCHEMA: these rows carry the same schema number */
+#include "cpu_supplier.h"              /* the external suppliers, same objects suppliers.c times */
+#include "cpu_supplier_registry.h"     /* the supplier list, shared with suppliers.c */
+#include "common/bench_timing.h"
 
 #define MAX_THREADS       256
 #define MAX_THREAD_STEPS   16
@@ -172,13 +172,13 @@ typedef struct {
     evaluate_fn     evaluate;
     evaluate_z_fn   evaluate_z;
     /* An external supplier instead of the library when non-NULL, in the same harness. */
-    const wmc_supplier *sup;         /* NULL = this library                   */
-    int             assembly;        /* WMC_ASM_* when sup != NULL            */
+    const cpu_supplier *sup;         /* NULL = this library                   */
+    int             assembly;        /* CPU_SUPPLIER_ASM_* when sup != NULL   */
     int             pin_to;          /* logical CPU, or -1 for "do not pin"   */
     int             ran_on;          /* sched_getcpu() after the warm-up      */
     double          elapsed_best;    /* seconds, min over reps                */
     double         *elapsed_rep;     /* seconds, every rep (NULL = not kept)  */
-    int             ws_needed;       /* 1 = a workspace per call (library, not scalar) */
+    int             ws_needed;       /* 1 = a workspace per call (avx512, avx2) */
     int             status;
     pthread_barrier_t *barrier;
 } worker;
@@ -195,12 +195,13 @@ static void *run_worker(void *argument)
             w->status = -100;         /* reported as a pinning failure */
     }
 
-    /* One workspace per call, created and destroyed inside each timed repetition and
-     * warm-up pass by the thread that uses it (first touch places it on that node). */
-    #define WM_THREAD_CALL(ST, OUT)                                               \
+    /* On avx512 and avx2, a workspace per call, created and destroyed inside each timed
+     * repetition and warm-up pass by the thread that uses it (first touch places it on
+     * that node). */
+    #define BENCH_THREAD_CALL(ST, OUT)                                            \
         do {                                                                      \
             if (w->sup) {                                                         \
-                wmc_eval_array(w->sup, w->assembly, !w->z_family,                 \
+                cpu_supplier_eval_array(w->sup, w->assembly, !w->z_family,        \
                                w->h, w->nu, w->scale, w->h, (OUT), w->n);         \
                 (ST) = MATERN_OK;                                                 \
             } else {                                                              \
@@ -215,10 +216,10 @@ static void *run_worker(void *argument)
             }                                                                     \
         } while (0)
 
-    /* Untimed warm-up, WM_WARMUP_REPS passes as in every other stage. */
-    for (int k = 0; k < WM_WARMUP_REPS; k++) {
+    /* Untimed warm-up, BENCH_WARMUP_REPS passes as in every other stage. */
+    for (int k = 0; k < BENCH_WARMUP_REPS; k++) {
         int warm = MATERN_OK;
-        WM_THREAD_CALL(warm, w->out);
+        BENCH_THREAD_CALL(warm, w->out);
         if (warm != MATERN_OK) { w->status = warm; break; }
     }
 
@@ -231,15 +232,15 @@ static void *run_worker(void *argument)
 
         /* The timed pass, whose output the re-entrancy check compares. */
         int status = MATERN_OK;
-        const double start = wm_now_s();
-        WM_THREAD_CALL(status, w->out);
-        const double elapsed = wm_now_s() - start;
+        const double start = bench_now_s();
+        BENCH_THREAD_CALL(status, w->out);
+        const double elapsed = bench_now_s() - start;
 
         if (status != MATERN_OK) { w->status = status; break; }
         if (w->elapsed_rep) w->elapsed_rep[r] = elapsed;
         if (elapsed < w->elapsed_best) w->elapsed_best = elapsed;
     }
-    #undef WM_THREAD_CALL
+    #undef BENCH_THREAD_CALL
     return NULL;
 }
 
@@ -278,12 +279,12 @@ static void usage(FILE *o, const char *program)
 /* The parallel region at one thread count; returns 0 on success.  `wall` is the slowest
  * worker's best repetition, since the region ends when the last thread finishes. */
 static int run_at(int threads, const cpu_topology *topo, int pin,
-                  const wm_dataset *set, size_t n, int reps, int z_family,
+                  const bench_dataset *set, size_t n, int reps, int z_family,
                   evaluate_fn ev, evaluate_z_fn ev_z,
-                  const wmc_supplier *sup, int assembly,
-                  double *wall, wm_time *tm, double *rep_ns,
+                  const cpu_supplier *sup, int assembly,
+                  double *wall, bench_time *tm, double *rep_ns,
                   int *identical, int *status_out, int *cores_used,
-                  const int *acc_bits, wm_metrics *M_out,
+                  const int *acc_bits, bench_metrics *M_out,
                   double *mhz_out)
 {
     pthread_t   tid[MAX_THREADS];
@@ -312,9 +313,10 @@ static int run_at(int threads, const cpu_topology *topo, int pin,
         work[t].evaluate_z = ev_z;
         work[t].sup        = sup;
         work[t].assembly   = assembly;
-        /* Same rule as benchmark_cpu's backend_builds_workspace; the backend is
-         * resolved and verified in main() before any thread exists. */
-        work[t].ws_needed  = !sup && strncmp(matern_backend_name(), "scalar", 6) != 0;
+        /* A workspace on avx512 and avx2 only, the backends that use one (dispatch.c),
+         * as in benchmark_cpu.c; the backend is resolved and verified in main() before
+         * any thread exists. */
+        work[t].ws_needed  = !sup && strncmp(matern_backend_name(), "avx", 3) == 0;
         work[t].pin_to   = pin ? topo->cpu[t] : -1;
         work[t].ran_on   = -1;
         work[t].status   = MATERN_OK;
@@ -354,7 +356,7 @@ static int run_at(int threads, const cpu_topology *topo, int pin,
                 slow[r] = m * per;
                 if (rep_ns) rep_ns[r] = slow[r];
             }
-            *tm = wm_time_reduce(slow, reps);
+            *tm = bench_time_reduce(slow, reps);
             free(slow);
         }
     }
@@ -372,15 +374,15 @@ static int run_at(int threads, const cpu_topology *topo, int pin,
         if (memcmp(out, out + (size_t)t * n, n * sizeof *out) != 0) *identical = 0;
 
     /* Accuracy of thread 0's slice (the first n points of the law, acc_points), scored
-     * with wm_metrics.h; not scored when a thread failed. */
+     * with bench_metrics.h; not scored when a thread failed. */
     if (M_out) {
         memset(M_out, 0, sizeof *M_out);
         if (*status_out == MATERN_OK) {
-            wm_metrics_compute(M_out, out, set->reference_high, set->reference_low,
+            bench_metrics_compute(M_out, out, set->reference_high, set->reference_low,
                                acc_bits, set->order,
                                set->has_length_scale ? set->h : set->argument,
                                set->has_length_scale ? set->length_scale : NULL,
-                               n, WM_ULP_MODE_DEFAULT);
+                               n, BENCH_ULP_MODE_DEFAULT);
         } else {
             M_out->n = n;
             M_out->u_max = NAN;
@@ -404,7 +406,7 @@ int main(int argc, char **argv)
     const char *format   = "csv";
     const char *tlist    = NULL;
     int max_threads      = 0;          /* --max-threads; 0 = no cap */
-    int   reps = WM_REPS_MAX_DEFAULT, pin = 1;   /* the pipeline's default count */
+    int   reps = BENCH_REPS_MAX_DEFAULT, pin = 1;   /* the pipeline's default count */
     const char *pin_mode = "dense";       /* dense | spread -- see spread_topology */
     size_t n   = 262144;   /* = run_benchmark.sh THREADS_N */
 
@@ -416,12 +418,12 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[a],"--supplier") && nx) supplier = argv[++a];
         else if (!strcmp(argv[a],"--assembly") && nx) assembly_name = argv[++a];
         else if (!strcmp(argv[a],"--list")) {
-            wmc_entry e[16]; const int ne = wmc_build_list(e, 16);
+            cpu_supplier_entry e[16]; const int ne = cpu_supplier_build_list(e, 16);
             printf("%d supplier(s) this build can thread:\n", ne);
             for (int i = 0; i < ne; i++)
                 printf("  %-22s scaled=%s\n", e[i].label,
-                       wmc_has_scaled(e[i].s) ? "yes" : "no");
-            wmc_print_absent();
+                       cpu_supplier_has_scaled(e[i].s) ? "yes" : "no");
+            cpu_supplier_print_absent();
             return 0;
         }
         else if (!strcmp(argv[a],"--threads")  && nx) tlist   = argv[++a];
@@ -440,27 +442,27 @@ int main(int argc, char **argv)
 
     const int z_family = !strcmp(family, "z_nu");
     /* Per-repetition samples; run_benchmark.sh gives each invocation its own path. */
-    wm_raw_open(getenv("WM_RAW_REPS"));
+    bench_raw_open(getenv("BENCH_TIMING_RAW"));
 
     /* An unknown supplier name is refused; the library does not stand in for it. */
-    wmc_entry sups[16]; const int nsup = wmc_build_list(sups, 16);
-    const wmc_supplier *sup = NULL; const char *sup_label = "-";
-    int assembly = WMC_ASM_DIRECT;
+    cpu_supplier_entry sups[16]; const int nsup = cpu_supplier_build_list(sups, 16);
+    const cpu_supplier *sup = NULL; const char *sup_label = "-";
+    int assembly = CPU_SUPPLIER_ASM_DIRECT;
     if (supplier) {
-        const wmc_entry *found = wmc_find(sups, nsup, supplier);
+        const cpu_supplier_entry *found = cpu_supplier_find(sups, nsup, supplier);
         if (!found) {
             fprintf(stderr, "threads_cpu: no supplier '%s' in this build."
                             "  --list shows the %d there are.\n", supplier, nsup);
             return 3;
         }
         sup = found->s; sup_label = found->label;
-        if      (!strcmp(assembly_name, "direct"))   assembly = WMC_ASM_DIRECT;
-        else if (!strcmp(assembly_name, "scaled"))   assembly = WMC_ASM_SCALED;
-        else if (!strcmp(assembly_name, "logtrick")) assembly = WMC_ASM_LOGTRICK;
+        if      (!strcmp(assembly_name, "direct"))   assembly = CPU_SUPPLIER_ASM_DIRECT;
+        else if (!strcmp(assembly_name, "scaled"))   assembly = CPU_SUPPLIER_ASM_SCALED;
+        else if (!strcmp(assembly_name, "logtrick")) assembly = CPU_SUPPLIER_ASM_LOGTRICK;
         else { fprintf(stderr, "threads_cpu: --assembly must be direct, scaled "
                                "or logtrick (got '%s')\n", assembly_name); return 3; }
         /* A supplier without a scaled K_nu has no scaled row. */
-        if (assembly == WMC_ASM_SCALED && !wmc_has_scaled(sup)) {
+        if (assembly == CPU_SUPPLIER_ASM_SCALED && !cpu_supplier_has_scaled(sup)) {
             fprintf(stderr, "threads_cpu: %s publishes no scaled K_nu; there is "
                             "no scaled row for it.\n", sup_label);
             return 3;
@@ -471,7 +473,7 @@ int main(int argc, char **argv)
      * backend is checked here, before any thread exists. */
     if (sup) {
         /* For a supplier row the backend column holds the assembly. */
-        backend = wmc_asm_name(assembly);
+        backend = cpu_supplier_asm_name(assembly);
     } else if (backend) {
         setenv("MATERN_BACKEND", backend, 1);
         double probe_o, probe_z = 1.0, probe_nu = 1.5;
@@ -507,7 +509,7 @@ int main(int argc, char **argv)
     }
     /* the last-level cache of the first pinned CPU, read once */
     int  llc_share = 1;
-    long llc_bytes = wm_llc_bytes_shared(topo.cpu[0], &llc_share);
+    long llc_bytes = bench_llc_bytes_shared(topo.cpu[0], &llc_share);
 
     int steps[MAX_THREAD_STEPS]; int nsteps = 0;
     if (tlist) nsteps = parse_int_list(tlist, steps, MAX_THREAD_STEPS);
@@ -571,11 +573,11 @@ int main(int argc, char **argv)
         if (t > topo.count) continue;          /* more threads than usable CPUs */
 
         double wall = 0.0;
-        wm_time tm;
+        bench_time tm;
         double *rep_ns = (double *)calloc((size_t)(reps > 0 ? reps : 1), sizeof *rep_ns);
         if (!rep_ns) { rc = 1; continue; }
         int identical = 0, status = 0, cores = 0;
-        wm_metrics M; double mhz = 0.0;
+        bench_metrics M; double mhz = 0.0;
         if (run_at(t, &topo, pin, &cs.set, n, reps, z_family, ev, ev_z,
                    sup, assembly,
                    &wall, &tm, rep_ns, &identical, &status, &cores,
@@ -589,7 +591,7 @@ int main(int argc, char **argv)
         const double ns_pe  = wall * 1e9 / total;
         /* Raw samples, keyed by the whole region's point count. */
         if (tm.reps > 0)
-            wm_raw_emit("cpu", sup_label, family, law, backend, (size_t)total,
+            bench_raw_emit("cpu", sup_label, family, law, backend, (size_t)total,
                         rep_ns, tm.reps);
         free(rep_ns);
         const double vps    = wall > 0.0 ? total / wall : 0.0;
@@ -605,7 +607,7 @@ int main(int argc, char **argv)
                    "up,%zu,%zu,%zu,%zu,%zu,%zu,%d,"
                    "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,%.17g,"
                    "%.17g,%.17g,%.17g,%.17g\n",
-                   WM_SCHEMA, sup_label, family, law, backend, t, pin ? "yes" : "no", cores,
+                   BENCH_SCHEMA, sup_label, family, law, backend, t, pin ? "yes" : "no", cores,
                    topo.physical_cores, topo.siblings_per_core, n, total, reps,
                    wall, ns_pe, speedup, speedup / (double)t,
                    /* At T=1 there is nothing to compare, so `identical` is n/a. */
@@ -630,7 +632,7 @@ int main(int argc, char **argv)
         if (!identical) rc = 4;                /* re-entrancy failure */
     }
 
-    wm_raw_close();
+    bench_raw_close();
     corpus_dataset_free(&cs);
     return rc;
 }

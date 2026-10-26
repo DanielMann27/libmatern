@@ -39,32 +39,32 @@ void   matern_scalar_half_integer_run(double *out, const double *h, double order
 double matern_scalar_clamp_to_unit(double value);
 
 /* Unfolded twin, built only with MATERN_SCALAR_ENTRY/_Z set, for build/fold_cpu: with
- * -DWMS_UNFOLDED=1 (direct) or =2 (exp-log) every region kernel returns K_nu(z) or
- * ln K_nu(z), and WMS_FINISH applies the prefactor and clamps only a finite value. */
-#ifdef WMS_UNFOLDED
+ * -DMATERN_SCALAR_UNFOLDED=1 (direct) or =2 (exp-log) every region kernel returns K_nu(z) or
+ * ln K_nu(z), and MATERN_SCALAR_FINISH applies the prefactor and clamps only a finite value. */
+#ifdef MATERN_SCALAR_UNFOLDED
 #  if !defined(MATERN_SCALAR_ENTRY) || !defined(MATERN_SCALAR_ENTRY_Z)
-#    error "WMS_UNFOLDED builds only as a renamed variant: define MATERN_SCALAR_ENTRY and MATERN_SCALAR_ENTRY_Z"
+#    error "MATERN_SCALAR_UNFOLDED builds only as a renamed variant: define MATERN_SCALAR_ENTRY and MATERN_SCALAR_ENTRY_Z"
 #  endif
-#  ifdef WMS_LEVIN
-#    error "WMS_UNFOLDED and WMS_LEVIN exclude each other"
+#  ifdef MATERN_SCALAR_WITH_LEVIN
+#    error "MATERN_SCALAR_UNFOLDED and MATERN_SCALAR_WITH_LEVIN exclude each other"
 #  endif
-#  if WMS_UNFOLDED != 1 && WMS_UNFOLDED != 2
-#    error "WMS_UNFOLDED must be 1 (direct) or 2 (exp-log)"
+#  if MATERN_SCALAR_UNFOLDED != 1 && MATERN_SCALAR_UNFOLDED != 2
+#    error "MATERN_SCALAR_UNFOLDED must be 1 (direct) or 2 (exp-log)"
 #  endif
-#  define WMS_PI_2  1.57079632679489661923       /* pi/2, as glibc's M_PI_2 */
-#  define WMS_LN2   0.6931471805599453           /* ln 2                    */
-#  if WMS_UNFOLDED == 2
-#    define WMS_K_RESULT(k)  log(k)              /* the kernels return ln K */
+#  define MATERN_SCALAR_PI_2  1.57079632679489661923       /* pi/2, as glibc's M_PI_2 */
+#  define MATERN_SCALAR_LN2   0.6931471805599453           /* ln 2                    */
+#  if MATERN_SCALAR_UNFOLDED == 2
+#    define MATERN_SCALAR_K_RESULT(k)  log(k)              /* the kernels return ln K */
 #  else
-#    define WMS_K_RESULT(k)  (k)                 /* the kernels return K    */
+#    define MATERN_SCALAR_K_RESULT(k)  (k)                 /* the kernels return K    */
 #  endif
 /* Defined in asymptotic_large_argument.c, which has lnGamma. */
 double matern_scalar_compose_unfolded(double k, double z, double order);
 double matern_scalar_finish_unfolded(double k, double z, double order);
 double matern_scalar_log_gamma_unfolded(double order);
-#  define WMS_FINISH(k, z, nu)  matern_scalar_finish_unfolded((k), (z), (nu))
+#  define MATERN_SCALAR_FINISH(k, z, nu)  matern_scalar_finish_unfolded((k), (z), (nu))
 #else
-#  define WMS_FINISH(k, z, nu)  matern_scalar_clamp_to_unit(k)
+#  define MATERN_SCALAR_FINISH(k, z, nu)  matern_scalar_clamp_to_unit(k)
 #endif
 
 #endif /* MATERN_SCALAR_INTERNAL_H */

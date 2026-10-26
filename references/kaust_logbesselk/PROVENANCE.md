@@ -61,7 +61,7 @@ well.
 
 The trapezoid branch forms `res = log(h) + max_term + log(sum)` and exponentiates only at
 the end (`logbesselk.cu:245-246`), so `ln K_ν` is available natively; the port returns it
-as the supplier's log form (`WMC_LOG_NATIVE`).
+as the supplier's log form (`CPU_SUPPLIER_LOG_NATIVE`).
 
 ## Upstream defects
 
@@ -91,18 +91,19 @@ Two files of this folder hold the project's code for the port:
   the final `exp`. The header is read for its two constants and not included.
 * `kaust_port.c` adds the non-overflowing integrand, the integration range of Geng et al.'s
   Eq. (7), the three configurations below, the host supplier table and the device entry
-  points `wmk_dev_kv` / `wmk_dev_logkv`. It is compiled as C for the CPU rows and as CUDA
-  for the GPU rows, so a variant name means the same configuration on both devices.
+  points `gpu_supplier_kaust_kv` / `gpu_supplier_kaust_logkv`. It is compiled as C for the
+  CPU rows and as CUDA for the GPU rows, so a variant name means the same configuration on
+  both devices.
 
-The benchmark registers three configurations (`../common/cpu_wm_registry.h`):
+The benchmark registers three configurations (`../common/cpu_supplier_registry.h`):
 
 | variant | symbol | configuration |
 |---|---|---|
-| `kaust-128` | `wmc_kaust` | 128 panels (upstream's default), both defects as released |
-| `kaust-40` | `wmc_kaust40` | `setIntervals(40)`, the panel count Geng et al. recommend, both defects as released |
-| `kaust-adaptive` | `wmc_kaust4` | 128 panels, `e10` applied, `log(cosh y) = \|y\| − ln2 + log1p(e^{−2\|y\|})`, and the adaptive integration range of Geng et al.'s Eq. (7) in place of `t ∈ [0, 9]` |
+| `kaust-128` | `cpu_supplier_kaust_128` | 128 panels (upstream's default), both defects as released |
+| `kaust-40` | `cpu_supplier_kaust_40` | `setIntervals(40)`, the panel count Geng et al. recommend, both defects as released |
+| `kaust-adaptive` | `cpu_supplier_kaust_adaptive` | 128 panels, `e10` applied, `log(cosh y) = \|y\| − ln2 + log1p(e^{−2\|y\|})`, and the adaptive integration range of Geng et al.'s Eq. (7) in place of `t ∈ [0, 9]` |
 
-The corrected configuration and the log-space assembly of `../common/cpu_wm.h` (on the GPU
+The corrected configuration and the log-space assembly of `../common/cpu_supplier.h` (on the GPU
 `../../benchmark/suppliers_gpu.cu`; the exponent is summed and exponentiated once) make
 KAUST more accurate than the released code; a comparison quoting the `kaust-adaptive` row
 should state that it is an adjusted configuration.

@@ -22,35 +22,35 @@ double matern_scalar_clamp_to_unit(double v){
 }
 
 /* The (z, nu) router; validity is tested on (z, nu), and an infinite nu is invalid.
- * WMS_FINISH is the clamp, or in the unfolded twin the prefactor followed by the clamp
+ * MATERN_SCALAR_FINISH is the clamp, or in the unfolded twin the prefactor followed by the clamp
  * of a finite value. */
 double matern_scalar_one_point_z(double z, double nu)
 {
     if (!(nu > 0.0 && nu <= DBL_MAX) || !(z >= 0.0)) return (double)NAN;
     if (!(z > 0.0))        return 1.0;                   /* z = 0: M(0) = 1 */
     /* Past the exponential limit: the folded single-exponent tail. */
-    if (!(z <= MATERN_EXP_RANGE_LIMIT))  return WMS_FINISH(matern_scalar_large_argument_folded_at(z, nu), z, nu);
+    if (!(z <= MATERN_EXP_RANGE_LIMIT))  return MATERN_SCALAR_FINISH(matern_scalar_large_argument_folded_at(z, nu), z, nu);
 
     double Cb = nu*nu/36.0 + 18.0;                       /* C(nu), as in region_partition.h */
     if (nu <= LARGE_ARGUMENT_ORDER_CAP) Cb = fmin(Cb, LARGE_ARGUMENT_Z_FLOOR);   /* fmin == the compare form (region_partition.h) */
     /* Large argument: z > C(nu) and nu <= 30, inclusive; above nu = 30 Debye at every z. */
     if (nu <= LARGE_ARGUMENT_ORDER_CAP && z > Cb)
-        return WMS_FINISH(matern_scalar_large_argument_at(z, nu), z, nu);
+        return MATERN_SCALAR_FINISH(matern_scalar_large_argument_at(z, nu), z, nu);
     /* Below z = 1 the small-argument kernel up to order 30 (26 in the vector and CUDA
-     * routers, whose Debye is the more accurate kernel there; the scalar one is not), Debye
-     * above; then Debye for nu >= 30.  The order of the tests is theirs. */
+     * routers), Debye above; then Debye for nu >= 30.  Same test order as
+     * matern_region_of. */
     if (z < SMALL_ARGUMENT_Z_CEILING) {
-        if (nu <= LARGE_ARGUMENT_ORDER_CAP) return WMS_FINISH(matern_scalar_small_argument(z, nu), z, nu);
-        return WMS_FINISH(matern_scalar_debye(z, nu), z, nu);
+        if (nu <= LARGE_ARGUMENT_ORDER_CAP) return MATERN_SCALAR_FINISH(matern_scalar_small_argument(z, nu), z, nu);
+        return MATERN_SCALAR_FINISH(matern_scalar_debye(z, nu), z, nu);
     }
-    if (nu >= LARGE_ARGUMENT_ORDER_CAP) return WMS_FINISH(matern_scalar_debye(z, nu), z, nu);
+    if (nu >= LARGE_ARGUMENT_ORDER_CAP) return MATERN_SCALAR_FINISH(matern_scalar_debye(z, nu), z, nu);
     /* No upper bound on z is needed (region_partition.h). */
-#ifdef WMS_LEVIN
+#ifdef MATERN_SCALAR_WITH_LEVIN
     /* Levin band: off by default, unlike the vector router; tested at that router's position. */
     if (nu <= 15.0){ double L = nu*nu*nu*nu/2401.0 + 1.5;
-                     if (z > L) return WMS_FINISH(matern_scalar_levin(z, nu), z, nu); }
+                     if (z > L) return MATERN_SCALAR_FINISH(matern_scalar_levin(z, nu), z, nu); }
 #endif
-    return WMS_FINISH(matern_scalar_continued_fraction(z, nu), z, nu);
+    return MATERN_SCALAR_FINISH(matern_scalar_continued_fraction(z, nu), z, nu);
 }
 
 /* The (h, nu, s) entry; guarded here because two sign errors in h and s cancel in z. */

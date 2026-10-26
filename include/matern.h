@@ -90,19 +90,21 @@
  * thread its own, or pass NULL so that each thread caches its own.
  * Each call is deterministic, but the composition of a batch can change the last
  * bits: on avx512 and avx2 the same point evaluated alone and inside a batch can
- * differ, because the router tiles and sorts and some kernels stop on a test across a
- * whole vector; on matched_fma and matched only a continued-fraction point can, since
- * those run four at a time.  scalar routes each point on its own and is exactly
- * batch-invariant.  Consequently a covariance matrix is not exactly
- * symmetric on those backends: compare the two triangles with a tolerance, or
- * compute one and mirror it.
+ * differ, because the router tiles and sorts, some kernels stop on a test across a
+ * whole vector, and whether a half-integer order takes the closed form depends on the
+ * runs in the batch (see the CUDA entries below); on matched_fma and matched only a
+ * continued-fraction point can, since those run four at a time.  scalar routes each
+ * point on its own and is exactly batch-invariant.  Consequently a covariance matrix is
+ * not exactly symmetric on those backends: compare the two triangles with a tolerance,
+ * or compute one and mirror it.
  *
  * RESOURCES
  * The CPU library has no global constructors, atexit handlers, signal handlers or
  * I/O, allocates only in matern_workspace_create and the per-thread cache, and
- * depends on libm only.  The CUDA entries (build/cuda.o) allocate device and
- * page-locked host memory within each call, start OpenMP threads, and need the CUDA
- * runtime, OpenMP and the C++ standard library.
+ * depends on libm only.  The CUDA entries (build/cuda.o) need the CUDA runtime, OpenMP
+ * and the C++ standard library.  Within each call, depending on the transfer mode, the
+ * entries on host arrays allocate device memory, page-lock host memory and start OpenMP
+ * threads; matern_covariance_cuda_device() and _device_z() do none of these.
  */
 #ifndef MATERN_H
 #define MATERN_H
@@ -180,7 +182,8 @@ const char *matern_backend_name(void);
  * matern_cuda_device_name() "", evaluation entries MATERN_UNSUPPORTED_CPU).  Linking
  * build/cuda.o replaces them and adds the CUDA runtime, OpenMP and the C++ standard
  * library (README.md, "CUDA").  Inside a CUDA kernel, include/matern_device.cuh gives
- * the same per-point evaluation as __device__ functions, without this library.
+ * the per-point evaluation of the default build as __device__ functions, without this
+ * library.
  *
  * Transfer modes, which differ only in the transfer strategy.  The ASYNC modes
  * release every page lock before returning and own nothing across calls; pin the
@@ -227,11 +230,13 @@ int         matern_cuda_available(void);
 const char *matern_cuda_device_name(void);
 
 /* M(h) and M_nu(z) on the device, with the interface and input rules of the CPU
- * entries.  The routing differs from the CPU vector backends in two respects: the
- * Levin band goes to the continued fraction, and the half-integer closed form is
- * selected per point, where the CPU vector backends select it for a run of constant
+ * entries.  Unlike avx512, avx2, matched_fma and matched, the routing sends the Levin
+ * band to the continued fraction.  As on matched and matched_fma, the half-integer
+ * closed form is selected per point.  avx512 and avx2 select it for a run of constant
  * half-integer order, or a mixed half-integer segment, of at least 256 points
- * (HALF_INTEGER_MIN_RUN) or reaching the end of the batch. */
+ * (HALF_INTEGER_MIN_RUN) or reaching the end of the batch.  The scan runs from the start
+ * of the batch; from the first run of fewer than 256 points that the closed form does
+ * not take, the rest of the batch goes through the router. */
 int matern_covariance_cuda(double *out, const double *h, const double *nu,
                            const double *scale, size_t n, int mode);
 int matern_covariance_cuda_z(double *out, const double *z, const double *nu,

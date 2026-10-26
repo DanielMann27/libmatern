@@ -1,7 +1,7 @@
 #!/bin/bash
-# kaust.sh [notice|box|ask|download|clean] [--quiet] -- the KAUST CuBesselK rows: copyright
-# notice (make kaust), its short form in a box, the question of make pipeline (ask), download
-# and port (make kaust DOWNLOAD=yes, the only mode that downloads CuBesselK), and clean.
+# kaust.sh [notice|box|ask|given|download|clean] [--quiet] -- the KAUST CuBesselK rows: copyright
+# notice (make kaust), its short form in a box, the question of make pipeline (ask; given: for KAUST=yes),
+# download and port (make kaust DOWNLOAD=yes, the only mode that downloads CuBesselK), and clean.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 . ./tools/ask.sh || exit 2
@@ -45,9 +45,10 @@ KAUST CuBesselK -- copyright notice
   files of commit ${COMMIT:0:7} (src/logbesselk.cu, include/logbesselk.h) and a port of
   them that is generated on your machine by this project's own code
   ($K/derive_port.py, kaust_port.c).
-  The files are downloaded only on your explicit yes: make kaust DOWNLOAD=yes, or
-  the question of make pipeline, which on a terminal shows this notice in short
-  and asks at its start.  Whether your use of the files is permitted is for you to
+  The files are downloaded only on your explicit yes: make kaust DOWNLOAD=yes,
+  KAUST=yes for make pipeline or make reproduce (after this notice in short), or
+  the question of make pipeline and make reproduce, which on a terminal shows this
+  notice in short and asks at their start.  Whether your use of the files is permitted is for you to
   judge.  Do not redistribute them or anything generated from them.
 
   make kaust DOWNLOAD=yes   downloads the two files from the public repository into
@@ -57,7 +58,7 @@ KAUST CuBesselK -- copyright notice
   make kaust CLEAN=yes      deletes the generated port: the header, the KAUST objects
                             and the supplier programs built with them; the
                             downloaded files are kept
-  The generated port is also deleted at the end of make pipeline.
+  The generated port is also deleted at the end of make pipeline and make reproduce.
 
 EOF
 }
@@ -105,7 +106,7 @@ CuBesselK (Geng et al., https://github.com/stsds/CuBesselK) carries "Copyright (
 
 CuBesselK is not part of libmatern and is not redistributed with it.
 
-A yes downloads src/logbesselk.cu and include/logbesselk.h of commit ${COMMIT:0:7} from that repository, checks their sha256 and generates the port on this machine. The port is deleted at the end of make pipeline; the two files are kept. A no runs the benchmark without the KAUST rows.
+A yes downloads src/logbesselk.cu and include/logbesselk.h of commit ${COMMIT:0:7} from that repository, checks their sha256 and generates the port on this machine. The port is deleted at the end of make pipeline or make reproduce; the two files are kept. A no runs the benchmark without the KAUST rows.
 
 Whether your use of the files is permitted is for you to judge. Do not redistribute them or anything generated from them.
 
@@ -132,7 +133,8 @@ cannot() {
     command -v "${PY%% *}" >/dev/null 2>&1 || echo "no Python (${PY%% *}) to generate the port"
 }
 
-# ask: the box, then the question; 0 yes, 1 no (also without a terminal), 2 cannot
+# ask: the box, then the question; 0 yes, 1 no (also without a terminal), 2 cannot.
+# ask given: the box and the check alone, for an answer given as KAUST=yes; 0, or 2 cannot.
 ask() {
     local why
     box
@@ -141,6 +143,7 @@ ask() {
         echo "KAUST: cannot download and port here: $why"
         return 2
     fi
+    [ "${1:-}" = given ] && return 0
     ask_yn "Download the two CuBesselK files and generate the port at the start of the run?"
 }
 
@@ -178,7 +181,8 @@ download() {
     $PY "$K/derive_port.py" "$UP" "$HDR" || { rm -f "$HDR"; return 1; }
     echo "  done      the KAUST rows are built with the supplier programs"
     echo "            (make build/suppliers, build/threads_cpu, build/suppliers_gpu);"
-    echo "            the port is deleted at the end of make pipeline and by make kaust CLEAN=yes"
+    echo "            the port is deleted at the end of make pipeline or make reproduce and by"
+    echo "            make kaust CLEAN=yes"
 }
 
 clean() {
@@ -186,7 +190,7 @@ clean() {
     # defines.txt names the port (they relink on every supplier build, so it is current),
     # the device program only when the device object exists.
     local f gone=()
-    if grep -q -- '-DWMC_WITH_KAUST' references/build/defines.txt 2>/dev/null; then
+    if grep -q -- '-DCPU_SUPPLIER_WITH_KAUST' references/build/defines.txt 2>/dev/null; then
         for f in build/suppliers build/threads_cpu references/build/defines.txt; do
             [ -e "$f" ] && gone+=("$f")
         done
@@ -210,7 +214,8 @@ case "$MODE" in
     notice)   notice_text; state ;;
     box)      box ;;
     ask)      ask; exit $? ;;
+    given)    ask given; exit $? ;;
     download) notice_text; download || { echo "make kaust DOWNLOAD=yes: FAILED"; exit 1; } ;;
     clean)    clean ;;
-    *)        echo "usage: kaust.sh [notice|box|ask|download|clean] [--quiet]" >&2; exit 2 ;;
+    *)        echo "usage: kaust.sh [notice|box|ask|given|download|clean] [--quiet]" >&2; exit 2 ;;
 esac

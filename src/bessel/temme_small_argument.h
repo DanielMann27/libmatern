@@ -18,8 +18,8 @@
 
 /* The second series' term c_k (p_k - k f_k) is rounded before it is added, at every width.
  * AVX2 and AVX-512 keep it apart through their blend.  At width 1 the blend folds away
- * inside the loop, and with FMA (matched_fma) -ffp-contract=fast would fuse the product
- * into the sum; the empty asm hands the add a rounded double instead. */
+ * inside the loop, so under -mfma (matched_fma, or matched built with FMA=yes)
+ * -ffp-contract=fast would fuse the product into the sum; the empty asm prevents it. */
 #if defined(MATERN_TARGET_SCALAR) && defined(__FMA__)
 static inline __attribute__((always_inline)) double small_argument_rounded(double x)
 {

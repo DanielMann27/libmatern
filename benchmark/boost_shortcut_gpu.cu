@@ -11,22 +11,22 @@
 #include <boost/version.hpp>
 #include <boost/math/special_functions/bessel.hpp>
 #include "boost_adapted.h"
-#include "wm_metrics.h"          /* WM_SCHEMA, and the pipeline's ULP (ulpmodes.h) */
+#include "bench_metrics.h"          /* BENCH_SCHEMA, and the pipeline's ULP (ulpmodes.h) */
 #include "corpus_bin.h"
 #include "common/build_info_cuda.h"
 
-extern "C" void wm_boost_shortcut_host(const double *, const double *, double *, int);
-extern "C" int  wm_boost_shortcut_host_promoted(void);
-extern "C" int  wm_boost_shortcut_host_version(void);
-extern "C" void wm_boost_shortcut_host_build_info(FILE *);
+extern "C" void bench_boost_shortcut_host(const double *, const double *, double *, int);
+extern "C" int  bench_boost_shortcut_host_promoted(void);
+extern "C" int  bench_boost_shortcut_host_version(void);
+extern "C" void bench_boost_shortcut_host_build_info(FILE *);
 
-/* The record's schema number, from wm_metrics.h. */
-#define SCHEMA WM_SCHEMA
+/* The record's schema number, from bench_metrics.h. */
+#define SCHEMA BENCH_SCHEMA
 
 __global__ void k_plain(const double *nu, const double *z, double *o, int n)
 { int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) o[i] = boost::math::cyl_bessel_k(nu[i], z[i]); }
 __global__ void k_adapted(const double *nu, const double *z, double *o, int n)
-{ int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) o[i] = wm_boost_kv_adapted(nu[i], z[i]); }
+{ int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) o[i] = bench_boost_kv_adapted(nu[i], z[i]); }
 
 /* One array of a corpus file (benchmark/corpus_bin.h); empty on any error. */
 static std::vector<double> column(const std::string &p, uint32_t kind, int array)
@@ -50,15 +50,18 @@ static void print_build_info(void)
 {
     const char *unit = "gpu_boost_shortcut";
     char v[32];
-    wm_build_info_cuda(unit);
-    wm_build_info_kv(stdout, unit, "ulp_mode", wm_ulp_mode_name(WM_ULP_MODE_DEFAULT));
+    bench_build_info_cuda(unit);
+    bench_build_info_kv(stdout, unit, "ulp_mode", bench_ulp_mode_name(BENCH_ULP_MODE_DEFAULT));
     snprintf(v, sizeof v, "%d.%d.%d", BOOST_VERSION / 100000, BOOST_VERSION / 100 % 1000,
              BOOST_VERSION % 100);
-    wm_build_info_kv(stdout, unit, "boost", v);
+    bench_build_info_kv(stdout, unit, "boost", v);
+#ifdef GPU_SUPPLIER_BOOST_SOURCE
+    bench_build_info_kv(stdout, unit, "boost_source", GPU_SUPPLIER_BOOST_SOURCE);
+#endif
     typedef boost::math::policies::evaluation<double, boost::math::policies::policy<> >::type eval_t;
-    wm_build_info_kv(stdout, unit, "boost_eval_type",
+    bench_build_info_kv(stdout, unit, "boost_eval_type",
                      sizeof(eval_t) > sizeof(double) ? "long double" : "double");
-    wm_boost_shortcut_host_build_info(stdout);
+    bench_boost_shortcut_host_build_info(stdout);
 }
 
 int main(int argc, char **argv)
@@ -102,14 +105,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "boost_shortcut_gpu: no CUDA device -- rows absent by design\n");
         return 0;
     }
-    if (wm_boost_shortcut_host_version() != BOOST_VERSION) {
+    if (bench_boost_shortcut_host_version() != BOOST_VERSION) {
         fprintf(stderr, "boost_shortcut_gpu: host object built on Boost %d, device TU on %d -- "
                         "the rows would differ in VERSION, which is not what they compare\n",
-                wm_boost_shortcut_host_version(), BOOST_VERSION);
+                bench_boost_shortcut_host_version(), BOOST_VERSION);
         return 1;
     }
     std::vector<double> kh(N), kp(N), ka(N);
-    wm_boost_shortcut_host(nu.data(), z.data(), kh.data(), N);
+    bench_boost_shortcut_host(nu.data(), z.data(), kh.data(), N);
     double *dn, *dz, *dk;
     cudaMalloc(&dn, N * 8); cudaMalloc(&dz, N * 8); cudaMalloc(&dk, N * 8);
     cudaMemcpy(dn, nu.data(), N * 8, cudaMemcpyHostToDevice);
@@ -131,20 +134,20 @@ int main(int argc, char **argv)
     snprintf(ver, sizeof ver, "%d.%d.%d", BOOST_VERSION / 100000, BOOST_VERSION / 100 % 1000, BOOST_VERSION % 100);
     const std::string s_h = std::string("boost-") + ver, s_p = std::string("boost-gpu-") + ver,
                       s_a = s_p + "-adapted";
-    const char *ph = wm_boost_shortcut_host_promoted() ? "long-double" : "double";
+    const char *ph = bench_boost_shortcut_host_promoted() ? "long-double" : "double";
     struct { const char *dev, *prec; const std::string *sup; const std::vector<double> *k; } R[] = {
         {"cpu", ph, &s_h, &kh}, {"cuda", "double", &s_p, &kp}, {"cuda", "double", &s_a, &ka}};
-    /* Columns: docs/benchmark.md, "Output"; `ulp` is wm_ulp_signed, as in the
+    /* Columns: docs/benchmark.md, "Output"; `ulp` is bench_ulp_signed, as in the
      * accuracy rows. */
     printf("schema,device,supplier,precision,law,nu,delta,z,k,rel,ref_bits,ulp_mode,ulp\n");
     for (auto &r : R)
         for (int i = 0; i < N; i++) {
             const double k = (*r.k)[i];
             const double rel = std::isfinite(k) ? fabs((k - hi[i]) - lo[i]) / fabs(hi[i]) : NAN;
-            const double ulp = std::isfinite(k) ? wm_ulp_signed(k, hi[i], lo[i], WM_ULP_MODE_DEFAULT) : NAN;
+            const double ulp = std::isfinite(k) ? bench_ulp_signed(k, hi[i], lo[i], BENCH_ULP_MODE_DEFAULT) : NAN;
             printf("%d,%s,%s,%s,boost_shortcut,%a,%a,%a,%a,%.17g,%ld,%s,%.17g\n", SCHEMA, r.dev,
                    r.sup->c_str(), r.prec, nu[i], nu[i] - 2.5, z[i], k, rel, bits[i],
-                   wm_ulp_mode_name(WM_ULP_MODE_DEFAULT), ulp);
+                   bench_ulp_mode_name(BENCH_ULP_MODE_DEFAULT), ulp);
         }
     return 0;
 }

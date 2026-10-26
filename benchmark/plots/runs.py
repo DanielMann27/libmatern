@@ -6,7 +6,7 @@ import csv, os, platform, re
 # style imports this module only inside a function, so there is no import cycle.
 import style as _style
 
-# SCHEMA_EXPECTED equals wm_metrics.h WM_SCHEMA; a schema-10 ladder row has no ladder_mode
+# SCHEMA_EXPECTED equals bench_metrics.h BENCH_SCHEMA; a schema-10 ladder row has no ladder_mode
 # and is read as `rung`.
 SCHEMA_EXPECTED = 11
 SCHEMA_ACCEPTED = (10, 11)
@@ -208,17 +208,17 @@ def read_csv(path):
     return rows
 
 
-# Accuracy detail sidecars (wm_metrics.h wm_detail_emit), plain or .gz, one per scoring process:
+# Accuracy detail sidecars (bench_metrics.h bench_detail_emit), plain or .gz, one per scoring process:
 #     accuracy_detail.<backend> (accuracy.csv), .suppliers.<supplier> (suppliers.csv),
 #     .gpu_kernels (gpu_kernels.csv), .gpu (gpu.csv); the Levin A/B sidecars are not read.
 # A block is keyed like its accuracy row, (device, supplier, family, law, backend), per run.
-# DETAIL_HEADER must match the header wm_detail_open writes.
+# DETAIL_HEADER must match the header bench_detail_open writes.
 DETAIL_HEADER = ["device", "supplier", "family", "law", "backend", "kind", "key",
                  "sign", "lo_log2", "hi_log2", "count", "ulp", "nu", "arg",
                  "aux", "value", "ref", "bits", "index", "reason"]
 DETAIL_SKIP = ("accuracy_detail.levin_", "accuracy_detail.gpu_levin_")
 
-# Histogram layout; must match wm_metrics.h WM_HIST_* (bin 0 zero, bin 49 overflow).
+# Histogram layout; must match bench_metrics.h BENCH_HIST_* (bin 0 zero, bin 49 overflow).
 HIST_BINS = 48
 HIST_LO_LOG = -10.0
 HIST_HI_LOG = 10.0
@@ -227,7 +227,7 @@ _DETAIL_CACHE = {}
 
 
 def hist_edges(b):
-    """(lo_log2, hi_log2) of histogram bin `b`, as wm_hist_bin assigns it."""
+    """(lo_log2, hi_log2) of histogram bin `b`, as bench_hist_bin assigns it."""
     inf = float("inf")
     step = (HIST_HI_LOG - HIST_LO_LOG) / HIST_BINS
     if b == 0:
@@ -335,7 +335,7 @@ def read_accuracy_detail(run_dir):
             problems.append(f"{fn}: {bad}")
             continue
         for key, e in blocks.items():
-            # wm_detail_emit writes every bin of both signs, empty or not
+            # bench_detail_emit writes every bin of both signs, empty or not
             e["incomplete"] = len(e["seen"]) != 2 * nb
             del e["seen"]
             e["counts"] = [p + q for p, q in zip(e["pos"], e["neg"])]
@@ -387,7 +387,7 @@ def detail_for(row):
 
 def hist_share_below(entry, log2_edge=0.0):
     """Share of points in bins wholly below 2^log2_edge, which must be a bin edge; a point
-    within a rounding error below the edge is binned above it (wm_hist_bin takes the log2)."""
+    within a rounding error below the edge is binned above it (bench_hist_bin takes the log2)."""
     if not entry or not entry["total"]:
         return float("nan")
     below = sum(c for b, c in enumerate(entry["counts"])

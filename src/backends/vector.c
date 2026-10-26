@@ -1,8 +1,6 @@
-/* vector.c -- entry point of the vector backends: runs of half-integer order go to the
- * closed form, everything else to the routing pipeline (see the accompanying paper, CPU
- * implementation and SIMD strategy).  At width 1 (matched, matched_fma) the points are
- * evaluated one by one instead, without a workspace, except that continued-fraction points
- * still run four at a time. */
+/* vector.c -- entry point of the vector backends (see the accompanying paper, CPU
+ * implementation and SIMD strategy): half-integer runs go to the closed form, the rest to
+ * the routing pipeline; width 1 works per point, continued-fraction points four at a time. */
 #include <stddef.h>
 
 #include "internal.h"
@@ -50,18 +48,14 @@
 #endif
 
 #ifdef MATERN_TARGET_SCALAR
-/* Width 1.  The routing pipeline exists to give a vector's lanes the same work; with one
- * lane its tiling, region sort and scatter are overhead, so every point is evaluated on its
- * own: a half-integer order within the ceiling takes the closed form, any other point is
- * classified by the pipeline's classifier, evaluated by its region's one-vector cell and
- * clamped as in phase D.  The exception is the continued fraction, whose four-vector block
- * runs four independent points side by side and is worth more than the pipeline costs: its
- * points wait in four-slot queues on the stack, one per value of the driver's sort key
- * (continued_fraction_bucket_of, so that the four points sharing the block's exits have
- * similar z), and run four at a time through continued_fraction_cell_x4.  A queue left with
- * fewer than four points at the end takes continued_fraction_cell_x1 per point, as the
- * driver's remainder does.  Which points share a block depends on the batch, so the last
- * bits of a continued-fraction point can too; every other point gets what it gets alone. */
+/* Width 1: a half-integer order within the ceiling takes the closed form; any other point
+ * is classified by matern_classify, evaluated by its region's one-vector cell and clamped
+ * as in phase D, except continued-fraction points.  These wait in four-slot queues, one per
+ * value of continued_fraction_bucket_of (the driver's sort key, so that the points sharing
+ * a block have similar z), and run four at a time through continued_fraction_cell_x4; a
+ * queue left with fewer than four points at the end runs continued_fraction_cell_x1 per
+ * point.  Which points share a block depends on the batch, so the last bits of a
+ * continued-fraction point can too; every other point gets the result it gets alone. */
 #define CONTINUED_FRACTION_QUEUES 32                 /* the range of continued_fraction_bucket_of */
 
 /* The closed form's per-run setup (matern_half_integer_run), kept for the last order seen. */
@@ -177,7 +171,7 @@ int MATERN_VECTOR_ENTRY(double *out, const double *h, const double *nu,
                         matern_workspace *workspace)
 {
     (void)workspace;
-    (void)matern_half_integer_run;                   /* replaced per point by one_point_half_integer */
+    (void)matern_half_integer_run;                   /* width 1 uses one_point_half_integer */
     if (n == 0)
         return MATERN_OK;
     if (!out || !h || !nu || !scale)

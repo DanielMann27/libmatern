@@ -1,9 +1,6 @@
-/* cuda_device.cu -- include/matern_device.cuh and the device-pointer entries give the bits
- * of the CUDA entries: (1) a kernel of this file on matern_covariance_device(), run before
- * any library call, so nothing has been set up on the host; (2) a kernel of a second
- * translation unit on matern_covariance_z_device(); (3) matern_covariance_cuda_device()
- * and _device_z() on a non-blocking stream of their own; (4) their argument checks.
- * Each is compared with matern_covariance_cuda() / _z() in SYNC mode, bit for bit. */
+/* cuda_device.cu -- matern_device.cuh in a kernel here and one in cuda_device_second.cu, both
+ * before any library call, and the device-pointer entries on a non-blocking stream, each bit
+ * for bit against matern_covariance_cuda() / _z() in SYNC mode; then argument checks. */
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>

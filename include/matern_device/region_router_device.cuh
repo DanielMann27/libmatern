@@ -14,37 +14,42 @@
 #include "half_integer_closed_form_device.cuh"
 
 /* Routing flags, the compile-time template argument F.  The values are reported by
- * matern_cuda_route_flags and must not be renumbered; 4 and 16 are unused.  Every set
- * contains PRIME = Z|G|B|T|X; A, D and L are switches; any other bit does not compile. */
-#define MATERN_ROUTE_Z    1    /* flat large-argument cap min(C,22) for nu <= 30      */
-#define MATERN_ROUTE_G    2    /* the large-argument order cap, nu <= 30               */
-#define MATERN_ROUTE_T    8    /* Temme with the Matern prefactor folded in           */
-#define MATERN_ROUTE_L   32    /* route the Levin band to the Levin kernel            */
-#define MATERN_ROUTE_B   64    /* small-z <-> Debye border at nu <= 26                */
-#define MATERN_ROUTE_X  128    /* invalid input NaN, z = 0 gives 1, extended range    */
-#define MATERN_ROUTE_A  256    /* the elementary half-integer closed form             */
-#define MATERN_ROUTE_D  512    /* direct argument: `zc` is z, no derivation           */
+ * matern_cuda_route_flags (cuda.cu, under MATERN_CUDA_BENCHMARK_HOOKS) and must not be
+ * renumbered; 4 and 16 are unused.  Every set contains the five bits of
+ * MATERN_ROUTE_FLAGS_BASE; the LEVIN, HALF_INTEGER and DIRECT_ARGUMENT bits are switches;
+ * any other bit does not compile. */
+#define MATERN_ROUTE_LARGE_ARGUMENT_Z_FLOOR_BIT      1  /* flat large-argument cap min(C,22) for nu <= 30   */
+#define MATERN_ROUTE_LARGE_ARGUMENT_ORDER_CAP_BIT    2  /* the large-argument order cap, nu <= 30           */
+#define MATERN_ROUTE_TEMME_FOLD_BIT                  8  /* Temme with the Matern prefactor folded in        */
+#define MATERN_ROUTE_LEVIN_BIT                      32  /* route the Levin band to the Levin kernel         */
+#define MATERN_ROUTE_SMALL_ARGUMENT_ORDER_MAX_BIT   64  /* small-z <-> Debye border at nu <= 26             */
+#define MATERN_ROUTE_FULL_DOMAIN_BIT               128  /* invalid input NaN, z = 0 gives 1, extended range */
+#define MATERN_ROUTE_HALF_INTEGER_BIT              256  /* the elementary half-integer closed form          */
+#define MATERN_ROUTE_DIRECT_ARGUMENT_BIT           512  /* direct argument: `zc` is z, no derivation        */
 
-/* "Tier A" in identifiers: the half-integer closed form, nu = p + 1/2 for p <= this cap. */
-#define MATERN_ROUTE_TIER_A_CAP      29
+/* The half-integer closed form, nu = p + 1/2 for p <= this cap. */
+#define MATERN_ROUTE_HALF_INTEGER_CAP         29
 /* The large-argument term cap is two-sided: more terms can pass the series' minimum term. */
-#define MATERN_ROUTE_LARGE_Z_TERMS   50
-#define MATERN_ROUTE_CF_SERIES_TERMS 50
-#define MATERN_ROUTE_CF_LENTZ_TERMS  50
+#define MATERN_ROUTE_LARGE_ARGUMENT_MAX_TERMS 50
+#define MATERN_ROUTE_CF_SERIES_TERMS          50
+#define MATERN_ROUTE_CF_LENTZ_TERMS           50
 
 /* The shipped flag sets. */
-#define MATERN_ROUTE_FLAGS_PRIME   (MATERN_ROUTE_Z | MATERN_ROUTE_G | MATERN_ROUTE_B \
-                                    | MATERN_ROUTE_T | MATERN_ROUTE_X)
-#define MATERN_ROUTE_FLAGS_PRIMEA  (MATERN_ROUTE_FLAGS_PRIME | MATERN_ROUTE_A)
-#define MATERN_ROUTE_FLAGS_PRIMEAZ (MATERN_ROUTE_FLAGS_PRIMEA | MATERN_ROUTE_D)
+#define MATERN_ROUTE_FLAGS_BASE      (MATERN_ROUTE_LARGE_ARGUMENT_Z_FLOOR_BIT \
+                                      | MATERN_ROUTE_LARGE_ARGUMENT_ORDER_CAP_BIT \
+                                      | MATERN_ROUTE_SMALL_ARGUMENT_ORDER_MAX_BIT \
+                                      | MATERN_ROUTE_TEMME_FOLD_BIT | MATERN_ROUTE_FULL_DOMAIN_BIT)
+#define MATERN_ROUTE_FLAGS_DEFAULT   (MATERN_ROUTE_FLAGS_BASE | MATERN_ROUTE_HALF_INTEGER_BIT)
+#define MATERN_ROUTE_FLAGS_DEFAULT_Z (MATERN_ROUTE_FLAGS_DEFAULT | MATERN_ROUTE_DIRECT_ARGUMENT_BIT)
 
-/* Levin variants: without MATERN_ROUTE_L the Levin band goes to the continued fraction. */
-#define MATERN_ROUTE_FLAGS_PRIMEAL  (MATERN_ROUTE_FLAGS_PRIMEA  | MATERN_ROUTE_L)
-#define MATERN_ROUTE_FLAGS_PRIMEAZL (MATERN_ROUTE_FLAGS_PRIMEAZ | MATERN_ROUTE_L)
+/* Levin variants: without MATERN_ROUTE_LEVIN_BIT the Levin band goes to the continued fraction. */
+#define MATERN_ROUTE_FLAGS_DEFAULT_LEVIN   (MATERN_ROUTE_FLAGS_DEFAULT   | MATERN_ROUTE_LEVIN_BIT)
+#define MATERN_ROUTE_FLAGS_DEFAULT_LEVIN_Z (MATERN_ROUTE_FLAGS_DEFAULT_Z | MATERN_ROUTE_LEVIN_BIT)
 
 #define MATERN_ROUTE_FLAGS_VALID(F) \
-    (((F) & MATERN_ROUTE_FLAGS_PRIME) == MATERN_ROUTE_FLAGS_PRIME && \
-     ((F) & ~(MATERN_ROUTE_FLAGS_PRIME | MATERN_ROUTE_L | MATERN_ROUTE_A | MATERN_ROUTE_D)) == 0)
+    (((F) & MATERN_ROUTE_FLAGS_BASE) == MATERN_ROUTE_FLAGS_BASE && \
+     ((F) & ~(MATERN_ROUTE_FLAGS_BASE | MATERN_ROUTE_LEVIN_BIT | MATERN_ROUTE_HALF_INTEGER_BIT \
+              | MATERN_ROUTE_DIRECT_ARGUMENT_BIT)) == 0)
 
 /* lx2 = ln(z/2) from the inputs, read by the Temme kernel only where Zh is subnormal or 0. */
 template<int F>
@@ -52,7 +57,7 @@ static __device__ __forceinline__ double matern_route_at_argument_device(double 
                                                                          double lx2)
 {
     static_assert(MATERN_ROUTE_FLAGS_VALID(F),
-                  "a routing flag set is MATERN_ROUTE_FLAGS_PRIME plus any of L, A and D");
+                  "a routing flag set is MATERN_ROUTE_FLAGS_BASE plus any of the LEVIN, HALF_INTEGER and DIRECT_ARGUMENT bits");
 
     /* the large-argument border C(nu), flattened to min(C, 22) for nu <= 30 */
     double C = nuc * nuc / 36.0 + 18.0;
@@ -67,7 +72,7 @@ static __device__ __forceinline__ double matern_route_at_argument_device(double 
 
     if (lz)
         return matern_large_argument_dd_argument_device(Zh, Zl, nuc, pref,
-                                MATERN_ROUTE_LARGE_Z_TERMS, DBL_EPSILON);
+                                MATERN_ROUTE_LARGE_ARGUMENT_MAX_TERMS, DBL_EPSILON);
 
     if (Zh < 1.0){
         if (nuc <= 26.0)
@@ -79,8 +84,8 @@ static __device__ __forceinline__ double matern_route_at_argument_device(double 
     if (nuc >= 30.0)
         return matern_debye_fold_dd_argument_device(Zh, Zl, nuc);
     /* The Levin band sits where region_partition.h places it, immediately before the
-     * continued fraction, so MATERN_ROUTE_L changes nothing else. */
-    if (F & MATERN_ROUTE_L) {
+     * continued fraction, so MATERN_ROUTE_LEVIN_BIT changes nothing else. */
+    if (F & MATERN_ROUTE_LEVIN_BIT) {
         const double Lfloor = fma(nuc * nuc, (nuc * nuc) / 2401.0, 1.5);
         if (nuc <= 15.0 && Zh > Lfloor)
             return matern_levin_fold_dd_argument_device(Zh, Zl, nuc);
@@ -92,38 +97,39 @@ template<int F>
 static __device__ __forceinline__ double matern_route_device(double zc, double nuc, double scalec)
 {
     static_assert(MATERN_ROUTE_FLAGS_VALID(F),
-                  "a routing flag set is MATERN_ROUTE_FLAGS_PRIME plus any of L, A and D");
-    /* Order: validity, z = 0, then the exponential range.  Under MATERN_ROUTE_D z is an
-     * input, so there is no scale to test and no sign cancellation. */
+                  "a routing flag set is MATERN_ROUTE_FLAGS_BASE plus any of the LEVIN, HALF_INTEGER and DIRECT_ARGUMENT bits");
+    /* Order: validity, z = 0, then the exponential range.  Under MATERN_ROUTE_DIRECT_ARGUMENT_BIT
+     * z is an input, so there is no scale to test and no sign cancellation. */
     /* An infinite nu or s is invalid, as on the CPU backends. */
-    const bool bad = (F & MATERN_ROUTE_D) ? (!(nuc > 0.0 && nuc <= DBL_MAX) || !(zc >= 0.0))
+    const bool bad = (F & MATERN_ROUTE_DIRECT_ARGUMENT_BIT) ? (!(nuc > 0.0 && nuc <= DBL_MAX) || !(zc >= 0.0))
                                  : (!(nuc > 0.0 && nuc <= DBL_MAX) || !(scalec > 0.0 && scalec <= DBL_MAX)
                                     || !(zc >= 0.0));
     if (bad)
         return __longlong_as_double(0x7ff8000000000000LL);   /* NaN */
     if (!(zc > 0.0)) return 1.0;
-    /* the single derivation site; under MATERN_ROUTE_D z is taken with a zero low word */
+    /* the single derivation site; under MATERN_ROUTE_DIRECT_ARGUMENT_BIT z is taken with a
+     * zero low word */
     double Zh, Zl;
-    if (F & MATERN_ROUTE_D){ Zh = zc; Zl = 0.0; }
+    if (F & MATERN_ROUTE_DIRECT_ARGUMENT_BIT){ Zh = zc; Zl = 0.0; }
     else          { matern_derive_argument_device(nuc, zc, scalec, &Zh, &Zl); }
     /* The half-integer closed form precedes the exponential-range test and carries its
      * own: e^-z P(z) below the limit, the exp-log form above.  No clamp is needed: c_j > 0
      * and Zh >= 0 give s >= 1, and e^-Zh >= DBL_MIN below the limit, so the result is
      * finite, positive and mathematically at most 1. */
-    if (F & MATERN_ROUTE_A){
-        const int pA = matern_tier_a_order_device(nuc);
-        if (pA >= 0 && pA <= MATERN_ROUTE_TIER_A_CAP)          /* precision border, not the table bound */
-            return (Zh <= MATERN_EXP_RANGE_MAX_DEVICE) ? matern_tier_a_device(Zh, Zl, pA)
-                                    : matern_tier_a_exp_log_device(Zh, Zl, pA);
+    if (F & MATERN_ROUTE_HALF_INTEGER_BIT){
+        const int p = matern_half_integer_degree_device(nuc);
+        if (p >= 0 && p <= MATERN_ROUTE_HALF_INTEGER_CAP)          /* precision border, not the table bound */
+            return (Zh <= MATERN_EXP_RANGE_MAX_DEVICE) ? matern_half_integer_direct_form_device(Zh, Zl, p)
+                                    : matern_half_integer_exp_log_device(Zh, Zl, p);
     }
     if (!(Zh <= MATERN_EXP_RANGE_MAX_DEVICE))                      /* folded tail */
-        return matern_large_argument_fold_device(Zh, Zl, nuc, MATERN_ROUTE_LARGE_Z_TERMS);
+        return matern_large_argument_fold_device(Zh, Zl, nuc, MATERN_ROUTE_LARGE_ARGUMENT_MAX_TERMS);
     /* Below DBL_MIN the derived z has lost bits or underflowed to 0, and at z = 2^-1074
      * the Temme kernel's z/2 rounds to 0; it then takes ln(z/2) formed here from the
      * inputs.  At small nu, M = 1 - O((z/2)^(2nu)) can differ from 1 even at such z. */
     double lx2 = 0.0;
     if (!(Zh >= DBL_MIN))
-        lx2 = ((F & MATERN_ROUTE_D) ? log(zc)
+        lx2 = ((F & MATERN_ROUTE_DIRECT_ARGUMENT_BIT) ? log(zc)
                                     : log(zc) - log(scalec) + 0.5 * log(2.0 * nuc)) - M_LN2;
     double v = matern_route_at_argument_device<F>(Zh, Zl, nuc, lx2);
     if (!(v > 0.0)) return 0.0;

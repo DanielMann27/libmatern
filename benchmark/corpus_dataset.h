@@ -1,6 +1,6 @@
 /* corpus_dataset.h -- reads one law of the evaluation corpus (data/z_nu/, data/h_nu_s/
  * or the files directly in data/; one binary file per column, benchmark/corpus_bin.h)
- * into a wm_dataset (common/dataset.h). */
+ * into a bench_dataset (common/dataset.h). */
 #ifndef MATERN_CORPUS_DATASET_H
 #define MATERN_CORPUS_DATASET_H
 
@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 typedef struct {
-    wm_dataset set;          /* inputs and reference                            */
+    bench_dataset set;          /* inputs and reference                            */
     int    *accuracy_bits;     /* the corpus `bits` column, one per point         */
     size_t  file_points;       /* points on disk, before any subsampling          */
     size_t  stride;            /* 1: the whole law is read                        */

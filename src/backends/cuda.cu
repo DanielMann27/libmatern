@@ -1,7 +1,6 @@
 /* cuda.cu -- CUDA backend (see the accompanying paper, GPU implementation and divergence
- * strategy): the matern_covariance_cuda* entries, one thread per point, the transfer modes
- * SYNC, ASYNC_DIRECT, ASYNC_RING and ASYNC_MAPPED (the async modes own nothing across calls),
- * and the device-pointer entries.  The per-point code is include/matern_device.cuh. */
+ * strategy): the matern_covariance_cuda* entries (modes SYNC, ASYNC_DIRECT, ASYNC_RING and
+ * ASYNC_MAPPED) and the device-pointer entries, one thread per point (matern_device.cuh). */
 #include <cuda_runtime.h>
 #include <limits.h>
 #include <string.h>
@@ -12,13 +11,13 @@
 #include "../../include/matern_device.cuh"
 
 /* Routing for the (h, nu, s) and (z, nu) entries; override both together.  Levin variant:
- *   -DMATERN_CUDA_FLAGS=MATERN_ROUTE_FLAGS_PRIMEAL
- *   -DMATERN_CUDA_FLAGS_Z=MATERN_ROUTE_FLAGS_PRIMEAZL */
+ *   -DMATERN_CUDA_FLAGS=MATERN_ROUTE_FLAGS_DEFAULT_LEVIN
+ *   -DMATERN_CUDA_FLAGS_Z=MATERN_ROUTE_FLAGS_DEFAULT_LEVIN_Z */
 #ifndef MATERN_CUDA_FLAGS
-#define MATERN_CUDA_FLAGS   MATERN_ROUTE_FLAGS_PRIMEA
+#define MATERN_CUDA_FLAGS   MATERN_ROUTE_FLAGS_DEFAULT
 #endif
 #ifndef MATERN_CUDA_FLAGS_Z
-#define MATERN_CUDA_FLAGS_Z MATERN_ROUTE_FLAGS_PRIMEAZ
+#define MATERN_CUDA_FLAGS_Z MATERN_ROUTE_FLAGS_DEFAULT_Z
 #endif
 
 #ifndef MATERN_CUDA_BLOCK
@@ -83,7 +82,8 @@ static __global__ void matern_cuda_kernel(const double *h, const double *nu,
     if (i < n) out[i] = matern_route_device<MATERN_CUDA_FLAGS>(h[i], nu[i], scale[i]);
 }
 
-/* The direct-argument kernel: under MATERN_ROUTE_D the first argument is z, with no scale. */
+/* The direct-argument kernel: under MATERN_ROUTE_DIRECT_ARGUMENT_BIT the first argument is z,
+ * with no scale. */
 static __global__ void matern_cuda_kernel_z(const double *z, const double *nu,
                                             double *out, long n, long base)
 {
@@ -174,10 +174,10 @@ extern "C" const char *matern_cuda_device_name(void)
 
 #ifdef MATERN_CUDA_BENCHMARK_HOOKS
 /* The compiled-in routing; no device probe, so it answers without a GPU.  The benchmark
- * reads the Levin band as bit 32, MATERN_ROUTE_L. */
+ * reads the Levin band as bit 32, MATERN_ROUTE_LEVIN_BIT. */
 extern "C" int matern_cuda_route_flags(void)
 {
-    static_assert(MATERN_ROUTE_L == 32, "benchmark/benchmark_gpu.cu reads the Levin band as bit 32");
+    static_assert(MATERN_ROUTE_LEVIN_BIT == 32, "benchmark/benchmark_gpu.cu reads the Levin band as bit 32");
     return MATERN_CUDA_FLAGS;
 }
 #endif

@@ -15,7 +15,7 @@
 
 #include <math.h>
 #include <float.h>
-#include "cpu_wm.h"
+#include "cpu_supplier.h"
 #include "cpu_bessels_shared.h"
 
 
@@ -221,8 +221,8 @@ static double bjl_besselkx(double v, double x)
 static double sup_kv (double nu, double z) { return bjl_besselk (nu, z); }
 static double sup_kxv(double nu, double z) { return bjl_besselkx(nu, z); }
 
-const wmc_supplier wmc_bessels_jl = {
+const cpu_supplier cpu_supplier_bessels_jl = {
     "Bessels.jl besselk, commit 009b615 (MIT)",
-    WMC_LOG_SCALED,        /* besselkx exists, so log K = log(Kx) - z         */
+    CPU_SUPPLIER_LOG_SCALED,        /* besselkx exists, so log K = log(Kx) - z         */
     sup_kv, sup_kxv, NULL
 };

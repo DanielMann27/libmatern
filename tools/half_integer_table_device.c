@@ -1,9 +1,6 @@
-/* half_integer_table_device.c -- prints the coefficients of the device half-integer table
- * (matern_tier_a_coefficients_device): c_0 .. c_p of every degree p <= 32, built by the
- * ratio recurrence in long double and rounded once to double, as hexadecimal literals.
- * The first line states long double's mantissa width; the table was generated where it is
- * 64 (x86-64), and `make audit` compares the header against this output there.
- *   cc -O2 -o build/half_integer_table_device tools/half_integer_table_device.c */
+/* half_integer_table_device.c -- prints matern_half_integer_coefficients_device: c_0 .. c_p of each
+ * degree p <= 32 by the ratio recurrence in long double, rounded once to double, as hexadecimal
+ * literals.  The first line gives LDBL_MANT_DIG; make audit compares where it is 64. */
 #include <float.h>
 #include <stdio.h>
 

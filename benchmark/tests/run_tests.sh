@@ -6,18 +6,18 @@ cd "$(dirname "$0")/../.." || exit 1
 B=benchmark; TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 # Runs go to a private temporary root, not benchmark/runs/; the figure tests run a copy
 # of the generator, so nothing is written into benchmark/plots/ either.
-export WM_RUNS_DIR="$TMP/runs"
+export BENCH_RUNS_DIR="$TMP/runs"
 # run_gpu.sh defaults to LADDER_SET=large (the 2^25 ladder); the suite pins the small set
 # so that no test or inherited environment starts it.
 export LADDER_SET=small
 # The full-run notice (benchmark/tools/full_run.sh) is for measuring commands only.
-export WM_FULLRUN_NOTICE=shown
+export BENCH_FULL_RUN_NOTICE=shown
 # The suite reads the whole corpus, the 2^25 files included.
 DATA=data sh tools/corpus.sh need "make benchmark-test" || exit 2
 # One probe of the missing external software (benchmark/tools/missing.sh) serves the suite.
 _mx=$(bash benchmark/tools/missing.sh probe) && mv -f "$_mx" "$TMP/missing.txt"
-export WM_MISSING_CACHE="$TMP/missing.txt"
-RUNSDIR="$WM_RUNS_DIR"
+export BENCH_MISSING_CACHE="$TMP/missing.txt"
+RUNSDIR="$BENCH_RUNS_DIR"
 export RUNSDIR
 mkdir -p "$RUNSDIR"
 CC=${CC:-gcc}; CFLAGS="-std=c11 -O2 -Wall -Wextra -ffp-contract=fast"
@@ -26,10 +26,10 @@ pass=0; fail=0
 # PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the source tree.
 export PYTHONDONTWRITEBYTECODE=1
 
-# The CSV schema number is read from wm_metrics.h, not hardcoded.
-SCHEMA=$(sed -n 's/^#define WM_SCHEMA  *\([0-9][0-9]*\).*/\1/p' \
-         benchmark/common/wm_metrics.h | head -1)
-[ -n "$SCHEMA" ] || { echo "cannot read WM_SCHEMA from wm_metrics.h"; exit 1; }
+# The CSV schema number is read from bench_metrics.h, not hardcoded.
+SCHEMA=$(sed -n 's/^#define BENCH_SCHEMA  *\([0-9][0-9]*\).*/\1/p' \
+         benchmark/common/bench_metrics.h | head -1)
+[ -n "$SCHEMA" ] || { echo "cannot read BENCH_SCHEMA from bench_metrics.h"; exit 1; }
 export SCHEMA
 echo "  (schema under test: $SCHEMA)"
 
@@ -113,8 +113,8 @@ echo "== unit: NUMA binding (degrades, never fails) =="
 cat > "$TMP/tn.c" <<'X'
 #include "numa_bind.h"
 #include <stdio.h>
-int main(int c,char**v){char w[256];int nn=0;int b=(c>1)?atoi(v[1]):wm_best_node(&nn);
- int st=wm_bind_node(b<0?0:b,w,sizeof w);
+int main(int c,char**v){char w[256];int nn=0;int b=(c>1)?atoi(v[1]):bench_best_node(&nn);
+ int st=bench_bind_node(b<0?0:b,w,sizeof w);
  printf("nodes=%d node=%d st=%d %s\n",nn,b,st,w); return 0;}
 X
 $CC $CFLAGS $INC -o "$TMP/tn" "$TMP/tn.c" 2>/dev/null
@@ -324,7 +324,7 @@ run "sha256 mismatch -> STATUS warning (ctrl)" bash -c '
     b=$(od -A n -t u1 -j 100 -N 1 "$d/$f" | tr -d " ")
     if [ "$b" = 255 ]; then printf "\000"; else printf "\377"; fi |
         dd of="$d/$f" bs=1 seek=100 conv=notrunc 2>/dev/null
-    WM_RUNS_DIR="'"$TMP"'/runs_flip" DATA="$d" STAGES=record \
+    BENCH_RUNS_DIR="'"$TMP"'/runs_flip" DATA="$d" STAGES=record \
         bash benchmark/run_benchmark.sh >/dev/null 2>&1
     r=$(ls -td "'"$TMP"'"/runs_flip/*/ | head -1); rm -rf "$d"
     grep -q "^STATUS   complete" "$r/STATUS" &&
@@ -555,7 +555,7 @@ run "suppliers: a capped row shows n < n_file" bash -c '
 sys.exit(0 if r and all(int(x[\"n\"])<int(x[\"n_file\"]) for x in r) else 1)"'
 fi
 run "accuracy detail agrees with its row" bash -c '
-    WM_ACC_DETAIL="'"$TMP"'/det" "'"$TMP/bcpu"'" --family z_nu,h_nu_s --law large_nu \
+    BENCH_ACCURACY_DETAIL="'"$TMP"'/det" "'"$TMP/bcpu"'" --family z_nu,h_nu_s --law large_nu \
         --backend $BK --metric accuracy --reps 2 --format csv \
         > "'"$TMP"'/det.csv" 2>/dev/null
     "'"$PY"'" - "'"$TMP"'" <<PYEOF
@@ -795,9 +795,9 @@ run "STAGES accepts levin and threads" bash -c '
 
 # STAGES=record writes the run record only; the run is complete with both CPU stages skipped.
 run "STAGES=record measures nothing on the CPU" bash -c '
-    STAGES=record SCOPE=record-test WM_GPU_PIPELINE=1 NOTIFY=none \
+    STAGES=record SCOPE=record-test BENCH_GPU_PIPELINE=1 NOTIFY=none \
         bash benchmark/run_benchmark.sh >/dev/null 2>&1 || exit 1
-    d=$(ls -d "$WM_RUNS_DIR"/*_record-test 2>/dev/null | tail -1)
+    d=$(ls -d "$BENCH_RUNS_DIR"/*_record-test 2>/dev/null | tail -1)
     [ -n "$d" ] && [ -s "$d/PROVENANCE.txt" ] && [ -s "$d/MANIFEST.txt" ] && [ -s "$d/detect.txt" ] || exit 1
     ! ls "$d" | grep -Eq "^(accuracy|ladder|suppliers|timing_raw)" || { ls "$d"; exit 1; }
     grep -q "^STATUS   complete" "$d/STATUS" &&
@@ -832,7 +832,7 @@ run "levin build refuses identical arms" bash -c '
     grep -q "two arms report the same routing" Makefile'
 run "levin stage refuses identical arms" bash -c '
     grep -q "refusing to measure" benchmark/run_benchmark.sh'
-# MATERN_WITHOUT_LEVIN (vector) and WMS_LEVIN (scalar) are independent, so both are reported.
+# MATERN_WITHOUT_LEVIN (vector) and MATERN_SCALAR_WITH_LEVIN (scalar) are independent, so both are reported.
 run "benchmark_cpu reports BOTH routers" bash -c '
     o=$(./build/benchmark_cpu --print-build);
     printf "%s" "$o" | grep -qE "^levin_vector=(on|off)$" &&
@@ -841,7 +841,7 @@ run "shipped build: vector on, scalar off" bash -c '
     ./build/benchmark_cpu --print-build \
       | tr "\n" " " | grep -q "levin_vector=on levin_scalar=off"'
 run "the scalar Levin band is a real opt-in" bash -c '
-    grep -q "#ifdef WMS_LEVIN" src/backends/scalar/region_router.c'
+    grep -q "#ifdef MATERN_SCALAR_WITH_LEVIN" src/backends/scalar/region_router.c'
 run "levin A/B builds three arms" bash -c '
     grep -q "benchmark_cpu_base"  Makefile &&
     grep -q "benchmark_cpu_novec" Makefile &&
@@ -854,16 +854,18 @@ run "levin stage cross-checks macro independence" bash -c '
 run "both CUDA flag macros are overridable" bash -c '
     grep -q "#ifndef MATERN_CUDA_FLAGS$"   src/backends/cuda.cu &&
     grep -q "#ifndef MATERN_CUDA_FLAGS_Z$" src/backends/cuda.cu'
-run "the Levin variants add ROUTE_L, not remove" bash -c '
-    grep -q "MATERN_ROUTE_FLAGS_PRIMEAL  (MATERN_ROUTE_FLAGS_PRIMEA  | MATERN_ROUTE_L)" \
-        src/router/region_router_device.cuh &&
-    grep -q "MATERN_ROUTE_FLAGS_PRIMEAZL (MATERN_ROUTE_FLAGS_PRIMEAZ | MATERN_ROUTE_L)" \
-        src/router/region_router_device.cuh'
-# cuda.cu static-asserts the public Levin bit; this check needs no CUDA toolchain.
-run "public Levin bit mirrors the router" bash -c '
-    a=$(sed -n "s/^#define MATERN_ROUTE_LEVIN_BIT  *\([0-9][0-9]*\).*/\1/p" include/matern.h);
-    b=$(sed -n "s/^#define MATERN_ROUTE_L  *\([0-9][0-9]*\).*/\1/p" src/router/region_router_device.cuh);
-    [ -n "$a" ] && [ "$a" = "$b" ]'
+run "the Levin variants add MATERN_ROUTE_LEVIN_BIT, not remove" bash -c '
+    grep -q "MATERN_ROUTE_FLAGS_DEFAULT_LEVIN   (MATERN_ROUTE_FLAGS_DEFAULT   | MATERN_ROUTE_LEVIN_BIT)" \
+        include/matern_device/region_router_device.cuh &&
+    grep -q "MATERN_ROUTE_FLAGS_DEFAULT_LEVIN_Z (MATERN_ROUTE_FLAGS_DEFAULT_Z | MATERN_ROUTE_LEVIN_BIT)" \
+        include/matern_device/region_router_device.cuh'
+# benchmark_gpu.cu reads the Levin bit as a literal, and cuda.cu static-asserts that value
+# only in a CUDA build; this check compares both with the router without a CUDA toolchain.
+run "benchmark_gpu reads the router Levin bit" bash -c '
+    b=$(sed -n "s/^#define MATERN_ROUTE_LEVIN_BIT  *\([0-9][0-9]*\).*/\1/p" include/matern_device/region_router_device.cuh);
+    [ -n "$b" ] &&
+    grep -q "levin=%s.*(f & $b) ? \"on\" : \"off\"" benchmark/benchmark_gpu.cu &&
+    grep -q "static_assert(MATERN_ROUTE_LEVIN_BIT == $b," src/backends/cuda.cu'
 
 if make build/threads_cpu >/dev/null 2>&1; then
   run "threads_cpu emits its header" bash -c '
@@ -892,8 +894,8 @@ run "fold stage has no supplier side" grep -qF \
     '[ "$STAGES" = threads ] || [ "$STAGES" = fold ] || [ "$STAGES" = record ]; then' benchmark/run_benchmark.sh
 # The Makefile refuses the twin's switches in XCF, so they never reach the shipped build.
 run "the twin is refused in XCF" bash -c '
-    grep -q "WMS_UNFOLDED and WM_FOLD belong to the build/fold_cpu rules" Makefile &&
-    ! make -s -n XCF=-DWMS_UNFOLDED=1 all >/dev/null 2>&1'
+    grep -q "MATERN_SCALAR_UNFOLDED and BENCH_FOLD belong to the build/fold_cpu rules" Makefile &&
+    ! make -s -n XCF=-DMATERN_SCALAR_UNFOLDED=1 all >/dev/null 2>&1'
 if make build/fold_cpu >/dev/null 2>&1; then
   run "fold_cpu reports fold=on and both routers" bash -c '
       o=$(./build/fold_cpu --print-build | tr "\n" " ");
@@ -968,16 +970,16 @@ else
   echo "  fold_cpu                           SKIPPED (did not build)"
 fi
 
-echo "== stage 5w: the workspace is INSIDE every library timing but the ladder's decomposition =="
+echo "== stage 5w: the workspace in the avx512 and avx2 timings (not the ladder's reused series) =="
 # Only the ladder's `reused` series times a warm workspace.
 run "accuracy-row timing builds a workspace per rep" bash -c '
-    awk "/^static wm_time time_accuracy_law/,/^}/" benchmark/benchmark_cpu.c |
+    awk "/^static bench_time time_accuracy_law/,/^}/" benchmark/benchmark_cpu.c |
       awk "/for \\(int r = 0; r < reps; r\\+\\+\\)/,/t\\[r\\] =/" |
       grep -q "matern_workspace_create"'
 # Positive control for the check above: a body with a warm workspace must fail it.
 run "  ...and the check sees a warm body" bash -c '
-    ! printf "static wm_time time_accuracy_law(void)\n{\n    matern_workspace_create(&ws, 0);\n    for (int r = 0; r < reps; r++) {\n        evaluate();\n        t[r] = 1;\n    }\n}\n" |
-      awk "/^static wm_time time_accuracy_law/,/^}/" |
+    ! printf "static bench_time time_accuracy_law(void)\n{\n    matern_workspace_create(&ws, 0);\n    for (int r = 0; r < reps; r++) {\n        evaluate();\n        t[r] = 1;\n    }\n}\n" |
+      awk "/^static bench_time time_accuracy_law/,/^}/" |
       awk "/for \\(int r = 0; r < reps; r\\+\\+\\)/,/t\\[r\\] =/" |
       grep -q "matern_workspace_create"'
 run "ladder carries the build series distribution" bash -c '
@@ -993,7 +995,7 @@ run "build median >= build min, > reused min at 2^8" bash -c '
          END { exit (bad || !seen) }"'
 # Only the build series is dumped: 13 rungs x 3 reps, not 2 x that.
 run "timing_raw holds ONE series per rung" bash -c '
-    f=$(mktemp); WM_RAW_REPS=$f ./build/benchmark_cpu --family z_nu --law size_half \
+    f=$(mktemp); BENCH_TIMING_RAW=$f ./build/benchmark_cpu --family z_nu --law size_half \
         --backend $BK --metric speed --ladder --reps 3 --max-reps 3 --format csv \
         --data-dir data >/dev/null 2>&1
     n=$(awk -F, "NR>1 && \$6==256" "$f.$BK" | wc -l); rm -f "$f" "$f.$BK"
@@ -1036,27 +1038,32 @@ run "the figure plots the measurement" bash -c '
 run "the setup panel is not per-element" bash -c '
     ! grep -q "ns_workspace\") / _f(r, \"n\")" benchmark/plots/paper_figures.py'
 run "all three timings are warmed" bash -c '
-    awk "/^static wm_time time_workspace/,/^}/" benchmark/benchmark_cpu.c |
-        grep -q "for (int w = 0; w < WM_WARMUP_REPS; w++)" &&
-    awk "/^static wm_time time_call\\(/,/^}/" benchmark/benchmark_cpu.c |
-        grep -q "for (int w = 0; w < WM_WARMUP_REPS; w++)" &&
-    awk "/^static wm_time time_call_ws_reused/,/^}/" benchmark/benchmark_cpu.c |
-        grep -q "for (int w = 0; w < WM_WARMUP_REPS; w++)"'
+    awk "/^static bench_time time_workspace/,/^}/" benchmark/benchmark_cpu.c |
+        grep -q "for (int w = 0; w < BENCH_WARMUP_REPS; w++)" &&
+    awk "/^static bench_time time_call\\(/,/^}/" benchmark/benchmark_cpu.c |
+        grep -q "for (int w = 0; w < BENCH_WARMUP_REPS; w++)" &&
+    awk "/^static bench_time time_call_ws_reused/,/^}/" benchmark/benchmark_cpu.c |
+        grep -q "for (int w = 0; w < BENCH_WARMUP_REPS; w++)"'
 
 echo "== stage 5b: the workspace exemption =="
 
 $CC $CFLAGS $INC -o "$TMP/t_wsneed" $B/tests/test_workspace_need.c \
     build/libmatern_internal.a -lm 2>/dev/null
-run "scalar needs none, matched does"  "$TMP/t_wsneed"
-# The harness exempts the scalar builds only; `matched` needs a workspace.
-run "harness exempts scalar only" bash -c '
-    grep -q "return strncmp(backend, \"scalar\", 6) != 0;" benchmark/benchmark_cpu.c &&
-    ! grep -q "matched.*!= 0;" benchmark/benchmark_cpu.c'
+run "scalar and matched* need none"  "$TMP/t_wsneed"
+# dispatch.c gives a workspace to avx512 and avx2 only (set_vector: every vector backend but
+# matched and matched_fma; choose_scalar: none); benchmark_cpu.c and threads_cpu.c build one
+# for the same backends, and benchmark_cpu.c has no test on the scalar prefix.
+run "harnesses build one on avx only" bash -c '
+    grep -q "c->needs_workspace = strncmp(name, \"matched\", 7) != 0;" src/backends/dispatch.c &&
+    grep -q "return strncmp(backend, \"avx\", 3) == 0;" benchmark/benchmark_cpu.c &&
+    grep -q "strncmp(matern_backend_name(), \"avx\", 3) == 0;" benchmark/threads_cpu.c &&
+    ! grep -q "strncmp(backend, \"scalar\"" benchmark/benchmark_cpu.c'
 run "timed region is gated on that" bash -c '
     grep -q "if (ws_needed) matern_workspace_create" benchmark/benchmark_cpu.c &&
     grep -q "if (ws_needed) matern_workspace_destroy" benchmark/benchmark_cpu.c'
-run "the figure drops it from the setup panel" bash -c '
-    grep -q "^NO_WORKSPACE = {\"scalar\"}" benchmark/plots/paper_figures.py'
+run "the figure drops them from the setup panel" bash -c '
+    grep -q "^NO_WORKSPACE = {\"scalar\"}" benchmark/plots/paper_figures.py &&
+    grep -q "if _no_workspace(b, rows):" benchmark/plots/paper_figures.py'
 
 echo "== stage 5d: paper mode =="
 
@@ -1097,6 +1104,36 @@ d = tempfile.mkdtemp()
 open(os.path.join(d,\"PROVENANCE.txt\"),\"w\").write(
     \"cpu AMD EPYC 9454\ngpu none -- no nvidia-smi on this machine (CPU run, no device rows)\n\")
 raise SystemExit(0 if \"nvidia\" not in mp.arch_label(d,\"x_y\")[1] else 1)"'
+# The build records name the Boost copy with its origin (boost_detect.sh --where cpu|gpu);
+# HARDWARE.md keeps the origin and cuts a private directory to its last component.
+run "Boost/GSL copy shown with origin" bash -c '
+    mkdir -p "'"$TMP"'/where/boost"
+    echo "#define BOOST_VERSION 107500" > "'"$TMP"'/where/boost/version.hpp"
+    w=$(BOOST_CPU_ROOT="'"$TMP"'/where" bash benchmark/tools/boost_detect.sh --where cpu)
+    [ "$w" = "'"$TMP"'/where (BOOST_CPU_ROOT)" ] || { echo "where cpu: $w"; exit 1; }
+    cd benchmark/plots && python3 -c "
+import make_paper_figures as f
+B, G, U = f.SOURCE_KEYS
+got = [f._hardware_value(k, v) for k, v in (
+    (B, \"/home/a/b175 (BOOST_CPU_ROOT)\"), (B, \"/srv/t/references/boost/1.75.0 (make externals)\"),
+    (G, \"/usr/include (pkg-config)\"), (G, \" (pkg-config)\"), (B, \"/home/a/include\"),
+    (U, \"/opt/m/boost/1.87.0 (BOOST_ROOT)\"), (U, \"/srv/t/references/boost/1.87.0 (make externals)\"))]
+want = [\"b175 (BOOST_CPU_ROOT)\", \"references/boost/1.75.0 (make externals)\",
+        \"/usr/include (pkg-config)\", \"(pkg-config)\", \"include\",
+        \"/opt/m/boost/1.87.0 (BOOST_ROOT)\", \"references/boost/1.87.0 (make externals)\"]
+raise SystemExit(0 if got == want else str(got))"'
+# The GSL library record (gsl_flags.sh --library): HARDWARE.md shortens its file as it does a
+# `_source` directory and keeps the fields after it.
+run "GSL library file shown with origin" bash -c '
+    cd benchmark/plots && python3 -c "
+import make_paper_figures as f
+L, t = f.LIBRARY_KEY, \"; package p; fused multiply-adds: 0 in the Bessel functions, 0 in the library\"
+got = [f._hardware_value(L, v + t) for v in (
+    \"/usr/lib64/libgsl.so.25.0.0 (pkg-config)\", \"/home/a/gsl/lib/libgsl.so.25 (pkg-config)\",
+    \"/srv/t/references/gsl/2.6/lib/libgsl.a (make externals)\")]
+want = [v + t for v in (\"/usr/lib64/libgsl.so.25.0.0 (pkg-config)\", \"libgsl.so.25 (pkg-config)\",
+                        \"references/gsl/2.6/lib/libgsl.a (make externals)\")]
+raise SystemExit(0 if got == want else str(got))"'
 run "no legend bypasses the stamp band" bash -c '
     ! grep -q "bbox_to_anchor=(0.5, -0" benchmark/plots/paper_figures.py'
 
@@ -1240,6 +1277,185 @@ run "threads: T=1 identical is n/a, not yes" bash -c '
     one=$(echo "$out" | awk -F, -v c="$ci" "\$7==1{print \$c}" | head -1)
     two=$(echo "$out" | awk -F, -v c="$ci" "\$7==2{print \$c}" | head -1)
     [ "$one" = "n/a" ] && [ "$two" = "yes" ]'
+
+echo "== stage 7: the switches of make pipeline and make reproduce (DRY=yes) =="
+# DRY=yes probes and prints, and downloads, builds and runs nothing.  Each invocation runs
+# without a terminal, on an empty corpus directory, with the answer switches of the caller
+# removed (from the environment, and from MAKEFLAGS, which carries those of a make command
+# line); its output and exit status go to $TMP/dry_<name>.
+mkdir -p "$TMP/nocorpus"
+dry(){ local n=$1; shift
+       env -u SETTINGS -u EXTERNALS -u KAUST -u CORPUS MAKEFLAGS= make --no-print-directory "$@" \
+           DRY=yes DATA="$TMP/nocorpus" </dev/null >"$TMP/dry_$n" 2>&1
+       echo "rc=$?" >> "$TMP/dry_$n"; }
+dry pipeline  pipeline
+dry settings  pipeline SETTINGS=full
+dry reproduce reproduce KAUST=no
+# make pipeline keeps the settings given and asks for the full ones and the corpus.
+run "pipeline: settings as given"   bash -c '
+    f="'"$TMP"'/dry_pipeline"; grep -q "^rc=0$" "$f" && grep -q "^  LADDER_SET  *small" "$f" &&
+    grep -q "^  \[1/4\] settings  *Switch to the full benchmark settings?" "$f" &&
+    grep -q "^  \[4/4\] corpus  *Download the missing files" "$f"'
+run "pipeline: SETTINGS=full applied" bash -c '
+    f="'"$TMP"'/dry_settings"; grep -q "^rc=0$" "$f" && grep -q "^  LADDER_SET  *large" "$f" &&
+    grep -q "^  \[1/4\] settings  *not asked: those of the full benchmark (SETTINGS=full)" "$f" &&
+    grep -q "^  run parameters .*SUPPLIERS=all SUP_LADDER_BUDGET=1500" "$f"'
+# SETTINGS=full answers neither the corpus nor the KAUST question.
+run "SETTINGS=full: corpus and KAUST open" bash -c '
+    f="'"$TMP"'/dry_settings"
+    grep -q "^  corpus .*the pipeline stops before anything runs" "$f" &&
+    grep -q "^  \[3/4\] KAUST  *\(not asked: ported\|the copyright notice of CuBesselK\)" "$f"'
+# With the KAUST port in place, KAUST=no is refused after the plan (exit status 2).
+if [ -f references/build/kaust/kaust_derived.h ]; then rc_kno=2; else rc_kno=0; fi
+run "reproduce: settings, externals, corpus" bash -c '
+    f="'"$TMP"'/dry_reproduce"; grep -q "^rc='"$rc_kno"'$" "$f" &&
+    grep -q "^  \[1/4\] settings  *not asked: those of the full benchmark (SETTINGS=full)" "$f" &&
+    grep -q "^  \[2/4\] externals  *not asked: make externals runs first (EXTERNALS=yes)" "$f" &&
+    grep -q "^  \[4/4\] corpus  *not asked: .*(CORPUS=yes)$" "$f" &&
+    grep -q "^  corpus .*downloaded at the start of the run" "$f"'
+run "reproduce: KAUST=no answers [3/4]" bash -c '
+    grep -q "^  \[3/4\] KAUST  *not asked: \(KAUST=no, but the port exists\|not downloaded (KAUST=no)\)" "'"$TMP"'/dry_reproduce"'
+run "DRY=yes downloads nothing"     bash -c '[ -z "$(ls -A "'"$TMP"'/nocorpus")" ]'
+# Without a terminal and without the port, make reproduce needs KAUST=yes or KAUST=no.
+if [ -f references/build/kaust/kaust_derived.h ]; then
+skip "reproduce: no KAUST answer refused" "the KAUST port exists, so no KAUST answer is needed"
+skip "reproduce: KAUST=yes, nothing fetched" "the KAUST port exists"
+run "reproduce: KAUST=no, port refused" bash -c '
+    f="'"$TMP"'/dry_reproduce"; grep -q "^rc=2$" "$f" &&
+    grep -q "KAUST=no, but the KAUST port exists" "$f" && grep -q "^make reproduce: nothing was run" "$f"'
+else
+dry refuse  reproduce
+ls -l references/kaust_logbesselk/upstream > "$TMP/kaust_before" 2>&1
+dry kaustyes reproduce KAUST=yes
+run "reproduce: no KAUST answer refused" bash -c '
+    f="'"$TMP"'/dry_refuse"; grep -q "^rc=2$" "$f" &&
+    grep -q "give KAUST=yes or KAUST=no" "$f" && grep -q "^make reproduce: nothing was run" "$f"'
+run "pipeline: no KAUST answer (ctrl)" bash -c '
+    f="'"$TMP"'/dry_settings"; grep -q "^rc=0$" "$f" && ! grep -q "give KAUST=yes or KAUST=no" "$f"'
+run "reproduce: KAUST=yes, nothing fetched" bash -c '
+    f="'"$TMP"'/dry_kaustyes"; grep -q "^rc=0$" "$f" &&
+    grep -q "^  \[3/4\] KAUST  *not asked: KAUST=yes: the copyright notice of CuBesselK" "$f" &&
+    [ ! -f references/build/kaust/kaust_derived.h ] &&
+    ls -l references/kaust_logbesselk/upstream 2>&1 | cmp -s - "'"$TMP"'/kaust_before"'
+fi
+# SETTINGS=full keeps GPU=no where a GPU part can run; stubs of nvcc and nvidia-smi report one
+# GPU, and GPU=auto is the control.
+mkdir -p "$TMP/gpustub"
+printf '#!/bin/sh\ncase "$*" in *--version*) echo "Cuda compilation tools, release 12.8, V12.8.61" ;; esac\nexit 0\n' \
+    > "$TMP/gpustub/nvcc"
+printf '#!/bin/sh\ncase "$*" in *-L*) echo "GPU 0: stub (UUID: GPU-0)" ;; *query-gpu*) echo "stub, 8.0" ;; esac\nexit 0\n' \
+    > "$TMP/gpustub/nvidia-smi"
+chmod +x "$TMP/gpustub/nvcc" "$TMP/gpustub/nvidia-smi"
+dry gpuauto pipeline SETTINGS=full GPU=auto NVCC="$TMP/gpustub/nvcc" NVIDIA_SMI="$TMP/gpustub/nvidia-smi"
+dry gpuno   pipeline SETTINGS=full GPU=no   NVCC="$TMP/gpustub/nvcc" NVIDIA_SMI="$TMP/gpustub/nvidia-smi"
+run "SETTINGS=full: GPU part (ctrl)" bash -c '
+    f="'"$TMP"'/dry_gpuauto"; grep -q "^rc=0$" "$f" && grep -q "^  GPU pipeline  *yes  (GPU=auto; nvcc: yes, GPU visible: yes)" "$f"'
+dry repgno  reproduce KAUST=no GPU=no NVCC="$TMP/gpustub/nvcc" NVIDIA_SMI="$TMP/gpustub/nvidia-smi"
+run "SETTINGS=full: GPU=no kept" bash -c '
+    f="'"$TMP"'/dry_gpuno"; grep -q "^rc=0$" "$f" && grep -q "^  GPU pipeline  *no  (GPU=no; nvcc: yes, GPU visible: yes)" "$f" &&
+    grep -q "^  \[1/4\] settings  *not asked: those of the full benchmark (SETTINGS=full); GPU=no is kept" "$f"'
+run "reproduce: GPU=no kept" bash -c '
+    f="'"$TMP"'/dry_repgno"; grep -q "^rc='"$rc_kno"'$" "$f" &&
+    grep -q "^  GPU pipeline  *no  (GPU=no; nvcc: yes, GPU visible: yes)" "$f" &&
+    grep -q "^  \[1/4\] settings  *not asked: .*GPU=no is kept, so no GPU part runs" "$f"'
+# EXTERNALS=yes fetches no Boost 1.75.0 or GSL 2.6 that the system has: BOOST_CPU_ROOT names a
+# directory with that BOOST_VERSION, a pkg-config stub reports the GSL version.  With other
+# versions GSL 2.6 is fetched (control) and Boost 1.75.0 is not, since the CPU row then uses
+# BOOST_CPU_ROOT only.  Each half is skipped where references/ holds a copy the plan would take.
+for _sv in 107500:2.6 108300:2.7; do
+    mkdir -p "$TMP/sys_${_sv%%:*}/boost" "$TMP/pc_${_sv#*:}"
+    printf '#define BOOST_VERSION %s\n' "${_sv%%:*}" > "$TMP/sys_${_sv%%:*}/boost/version.hpp"
+    printf '#!/bin/sh\ncase "$*" in *--modversion*) echo %s ;; *includedir*) echo /stub/include ;; *--libs*) echo -lgsl ;; esac\nexit 0\n' \
+        "${_sv#*:}" > "$TMP/pc_${_sv#*:}/pkg-config"
+    chmod +x "$TMP/pc_${_sv#*:}/pkg-config"
+done
+PATH="$TMP/pc_2.6:$PATH" dry syscopy pipeline SETTINGS=full EXTERNALS=yes BOOST_CPU_ROOT="$TMP/sys_107500"
+PATH="$TMP/pc_2.7:$PATH" dry othercopy pipeline SETTINGS=full EXTERNALS=yes BOOST_CPU_ROOT="$TMP/sys_108300"
+if [ -f references/boost/1.75.0/boost/version.hpp ]; then
+skip "externals: system Boost not fetched" "references/ holds Boost 1.75.0"
+skip "externals: BOOST_CPU_ROOT, no fetch" "references/ holds Boost 1.75.0"
+else
+run "externals: system Boost not fetched" bash -c '
+    f="'"$TMP"'/dry_syscopy"; grep -q "^rc=0$" "$f" && grep -q "^  download externals  *yes (" "$f" &&
+    ! grep "^  download externals" "$f" | grep -q "Boost 1.75.0"'
+run "externals: BOOST_CPU_ROOT, no fetch" bash -c '
+    f="'"$TMP"'/dry_othercopy"; grep -q "^rc=0$" "$f" && grep -q "^  download externals  *yes (" "$f" &&
+    ! grep "^  download externals" "$f" | grep -q "Boost 1.75.0"'
+fi
+if ls references/gsl/*/lib/libgsl.a >/dev/null 2>&1; then
+skip "externals: system GSL not fetched" "references/gsl/ holds a GSL"
+skip "externals: other GSL, 2.6 fetched" "references/gsl/ holds a GSL"
+else
+run "externals: system GSL not fetched" bash -c '
+    f="'"$TMP"'/dry_syscopy"; grep -q "^rc=0$" "$f" && grep -q "^  download externals  *yes (" "$f" &&
+    ! grep "^  download externals" "$f" | grep -q "GSL 2.6"'
+run "externals: other GSL, 2.6 fetched" bash -c '
+    f="'"$TMP"'/dry_othercopy"; grep -q "^rc=0$" "$f" && grep "^  download externals" "$f" | grep -q "GSL 2.6"'
+fi
+# Without EXTERNALS=yes, a system GSL of another version is not asked for, and the plan and
+# [2/4] name it as the GSL of the gsl row; GSL 2.6 is the control.  GPU=no, FIGURES=no and the
+# Boost 1.75.0 of BOOST_CPU_ROOT leave GSL the only external this run could lack.
+if ls references/gsl/*/lib/libgsl.a >/dev/null 2>&1; then
+skip "externals: other GSL named, not asked" "references/gsl/ holds a GSL"
+skip "externals: GSL 2.6, not asked (ctrl)" "references/gsl/ holds a GSL"
+else
+PATH="$TMP/pc_2.7:$PATH" dry gslother pipeline GPU=no FIGURES=no BOOST_CPU_ROOT="$TMP/sys_107500"
+PATH="$TMP/pc_2.6:$PATH" dry gsl26    pipeline GPU=no FIGURES=no BOOST_CPU_ROOT="$TMP/sys_107500"
+run "externals: other GSL named, not asked" bash -c '
+    f="'"$TMP"'/dry_gslother"
+    s="the gsl row uses the system GSL 2\.7 (row gsl-2\.7); EXTERNALS=yes or make reproduce build GSL 2\.6$"
+    grep -q "^rc=0$" "$f" && grep -q "^  download externals  *no; $s" "$f" &&
+    grep -q "^  \[2/4\] externals  *not asked: nothing missing to download; $s" "$f"'
+run "externals: GSL 2.6, not asked (ctrl)" bash -c '
+    f="'"$TMP"'/dry_gsl26"; grep -q "^rc=0$" "$f" && grep -q "^  download externals  *no$" "$f" &&
+    grep -q "^  \[2/4\] externals  *not asked: nothing missing to download$" "$f"'
+fi
+# Where neither references/ nor the system holds Boost 1.75.0, it is fetched.
+if [ -f references/boost/1.75.0/boost/version.hpp ] ||
+   [ -n "$(BOOST_CPU_ROOT= bash benchmark/tools/boost_detect.sh --select cpu 2>/dev/null)" ]; then
+skip "externals: absent Boost fetched" "references/ or the system holds Boost 1.75.0"
+else
+dry noboost pipeline SETTINGS=full EXTERNALS=yes BOOST_CPU_ROOT=
+run "externals: absent Boost fetched" bash -c '
+    f="'"$TMP"'/dry_noboost"; grep -q "^rc=0$" "$f" && grep "^  download externals" "$f" | grep -q "Boost 1.75.0 headers"'
+fi
+# With a GPU part (the GPU stubs), Boost 1.87.0 is fetched only where boost_detect.sh selects no
+# Boost for the GPU rows and BOOST_ROOT is not none: BOOST_ROOT names a directory with GPU
+# support, or none.  Skipped where references/ holds Boost 1.87.0.
+mkdir -p "$TMP/gpu_108700/boost/math/special_functions"
+printf '#define BOOST_VERSION 108700\n' > "$TMP/gpu_108700/boost/version.hpp"
+printf '#define BOOST_MATH_GPU_ENABLED\n' > "$TMP/gpu_108700/boost/math/special_functions/bessel.hpp"
+gpu_dry(){ local n=$1; shift
+           dry "$n" pipeline SETTINGS=full EXTERNALS=yes \
+               NVCC="$TMP/gpustub/nvcc" NVIDIA_SMI="$TMP/gpustub/nvidia-smi" "$@"; }
+if [ -f references/boost/1.87.0/boost/version.hpp ]; then
+skip "externals: GPU Boost, no 1.87.0" "references/ holds Boost 1.87.0"
+skip "externals: BOOST_ROOT=none, no 1.87.0" "references/ holds Boost 1.87.0"
+else
+gpu_dry gpuboost BOOST_ROOT="$TMP/gpu_108700"
+gpu_dry gpunone  BOOST_ROOT=none
+run "externals: GPU Boost, no 1.87.0" bash -c '
+    f="'"$TMP"'/dry_gpuboost"; grep -q "^rc=0$" "$f" && grep -q "^  GPU pipeline  *yes " "$f" &&
+    grep -q "^  download externals  *yes (" "$f" && ! grep "^  download externals" "$f" | grep -q "Boost 1.87.0"'
+run "externals: BOOST_ROOT=none, no 1.87.0" bash -c '
+    f="'"$TMP"'/dry_gpunone"; grep -q "^rc=0$" "$f" && grep -q "^  GPU pipeline  *yes " "$f" &&
+    grep -q "^  download externals  *yes (" "$f" && ! grep "^  download externals" "$f" | grep -q "Boost 1.87.0"'
+fi
+# Where neither references/ nor the system holds a Boost with GPU support, 1.87.0 is fetched.
+if [ -f references/boost/1.87.0/boost/version.hpp ] ||
+   [ -n "$(BOOST_ROOT= bash benchmark/tools/boost_detect.sh --select gpu 2>/dev/null)" ]; then
+skip "externals: absent GPU Boost fetched" "references/ or the system holds a Boost with GPU support"
+else
+gpu_dry nogpuboost BOOST_ROOT=
+run "externals: absent GPU Boost fetched" bash -c '
+    f="'"$TMP"'/dry_nogpuboost"; grep -q "^rc=0$" "$f" && grep -q "^  GPU pipeline  *yes " "$f" &&
+    grep "^  download externals" "$f" | grep -q "Boost 1.87.0 headers"'
+fi
+run "invalid SETTINGS, KAUST, CORPUS refused" bash -c '
+    for a in SETTINGS=foo KAUST=maybe CORPUS=maybe; do
+        env -u SETTINGS -u KAUST -u CORPUS MAKEFLAGS= make --no-print-directory pipeline DRY=yes "$a" \
+            </dev/null >/dev/null 2>&1; [ $? -eq 2 ] || { echo "$a accepted"; exit 1; }
+    done'
 
 echo
 echo "  $pass passed, $fail failed"

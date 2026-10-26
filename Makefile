@@ -15,13 +15,14 @@
 #   make cuda-device      check of include/matern_device.cuh and the device-pointer
 #                         entries against the CUDA entries (needs a GPU)
 #   make clean
-#   parameters: CC, CFLAGS (replaces the defaults), OPTIMISE (default -O2), XCF (adds
+#   parameters: CC, CXX, CFLAGS (replaces the defaults), OPTIMISE (default -O2), XCF (adds
 #     flags), FMA=yes|no (default no; yes is for measurements and needs FMA3 wherever
 #     the library runs), V=yes (prints every build command; by default each build
 #     prints one short line), AR, PREFIX, DESTDIR, NVCC, GPU_ARCH (default sm_80),
 #     NVCCFLAGS, XNVCF
 #
 # The parts of make check, one at a time
+#   make headers          every kernel header compiled on its own (also part of make)
 #   make contract | h-zero | crosscheck | positive-definite | direct-argument | threads
 #   make exports | audit | neutral | readme-example
 #   make strict           pedantic warning pass over the portable sources
@@ -31,11 +32,20 @@
 #
 # The benchmark (docs/benchmark.md)
 #   make requirements     external software: present, what it enables, how to add it
+#   make reproduce        the full benchmark behind the published results on this machine:
+#                         make pipeline with SETTINGS=full, EXTERNALS=yes and CORPUS=yes
+#                         (about 18 hours with an A100 GPU, downloads not included;
+#                         GPU=no runs the CPU part only); on a terminal it asks about
+#                         KAUST after its copyright notice, without one it needs KAUST=yes
+#                         or KAUST=no while the port is absent; the cross-machine figure
+#                         needs a second run on a CPU of the other vendor
+#                         (docs/benchmark.md, "Replicating the published results")
 #   make pipeline         everything in one command: builds, CPU run, optional Levin,
 #                         prefactor-fold, thread and GPU stages, figures, tables; on a
 #                         terminal it first asks whether to switch to the full run
-#                         behind the published results (more than a day) and whether to
-#                         download the missing externals, KAUST and the corpus
+#                         behind the published results (about 18 hours) and whether to
+#                         download the missing externals, KAUST and the corpus; without
+#                         a terminal it asks nothing, and the switches give the answers
 #   make benchmark-build  the drivers build/detect and build/benchmark_cpu
 #   make build/suppliers  the driver of the external CPU suppliers; without it make
 #                         benchmark skips the supplier stages
@@ -43,10 +53,12 @@
 #                         of benchmark-build, not build/suppliers
 #   make benchmark-test   the benchmark's test suite: unit tests and reduced runs of
 #                         run_benchmark.sh (20+ min; needs the whole corpus)
-#   make paper-figures | paper-figures-final | paper-tables | paper-tables-check
+#   make paper-figures | paper-figures-final | paper-tables
 #                         the paper set: the figures the paper includes and the tables
 #                         its own tables are taken from; FULL=yes writes every figure
 #                         and table
+#   make paper-tables-check
+#                         compiles every generated table in one document (needs pdflatex)
 #   make python-info      the Python the generators use
 #   make build/threads_cpu                     the thread-scaling driver (STAGES=threads)
 #   make build/fold_cpu                        the prefactor-fold driver (STAGES=fold)
@@ -66,9 +78,14 @@
 #   make corpus-tools     build/corpus_convert, the corpus converter (docs/benchmark.md, The corpus)
 #   parameters (switches take yes or no; also 1/0, on/off, true/false, y/n):
 #     drivers    CXX, V=yes (prints every build command)
-#     pipeline   EXTERNALS LEVIN FOLD THREADS CHECK FIGURES TABLES_CHECK FULL=yes|no,
-#                GPU=auto|yes|no, GPU_STAGES=core,levin,threads|all (+ call-large,
-#                never in all), DRY=yes (prints the plan and its questions, runs nothing)
+#     pipeline   SETTINGS=full, EXTERNALS=yes, KAUST=yes|no, CORPUS=yes (the answers
+#                to the four questions, also without a terminal), LEVIN FOLD THREADS
+#                CHECK FIGURES TABLES_CHECK FULL=yes|no (FULL=yes: every figure and
+#                table, not the full benchmark), GPU=auto|yes|no,
+#                GPU_STAGES=core,levin,threads|all (+ call-large, never in all),
+#                DRY=yes (prints the plan, the notice and the questions; downloads,
+#                builds and runs nothing; exit status 2 where the run would refuse to
+#                start)
 #     runs       REPS FAMILIES BACKENDS STAGES LADDER_SET LADDER_PASS_FROM SUPPLIERS
 #                SUP_LADDER SUP_LADDER_BUDGET THREADS_MAX NOTIFY ... ("Run parameters")
 #     corpus     DATA=<dir> (the corpus root, default data/), CORPUS_URL=<mirror or
@@ -86,8 +103,8 @@
 #                         v<version> tag, libmatern-<describe>.tar.gz at another commit
 #   make clean-clone      build and check a copy of the committed tree (git archive HEAD)
 #
-# Used by other targets and scripts: headers (part of make: every kernel header
-# compiled on its own), supplier-objects, externals-missing.  make help prints this.
+# Used by other targets and scripts: supplier-objects, externals-missing.  make help
+# prints this.
 # Parameters are given as `make <target> NAME=value`; in full, with their defaults:
 # docs/benchmark.md, "Make parameters".
 # ===========================================================================
@@ -146,10 +163,9 @@ XCF =
 # Appended outside CFLAGS, so overriding CFLAGS cannot remove them.
 ALL_CFLAGS = $(CFLAGS) $(OPTIMISE) $(FP_MODEL) $(CONTRACTION) $(PIC) $(XCF) $(DEPFLAGS)
 
-# Scalar objects only: their short inner loops run up to 1.4x slower when a loop head
-# falls so that the loop straddles a 64-byte line, which unrelated code edits decide.
-# 64-byte loop heads fix the placement; no result changes.  Dropped for a compiler
-# without the option.
+# Scalar objects only: loop heads aligned to 64 bytes, so that unrelated code edits do
+# not move their short inner loops across a 64-byte line; no result changes.  Dropped
+# for a compiler without the option.
 LOOP_ALIGN = $(eval LOOP_ALIGN := $(shell $(CC) -falign-loops=64 -x c -c /dev/null \
     -o /dev/null >/dev/null 2>&1 && echo -falign-loops=64))$(LOOP_ALIGN)
 
@@ -225,21 +241,21 @@ SOVERSION = 0
 SONAME    = libmatern.so.$(SOVERSION)
 
 # The unfolded twin of the scalar backend (src/backends/scalar/scalar_internal.h),
-# -DWMS_UNFOLDED=1 (direct) or =2 (exp-log), and `control`, the shipped source built
+# -DMATERN_SCALAR_UNFOLDED=1 (direct) or =2 (exp-log), and `control`, the shipped source built
 # the same way: objects for build/fold_cpu only, never in a library or a check.
 FOLD_ISAS     = avx512 avx2 fma portable
 FOLD_VARIANTS = control unfolded_direct unfolded_explog
 FOLD_DEF_control         =
-FOLD_DEF_unfolded_direct = -DWMS_UNFOLDED=1
-FOLD_DEF_unfolded_explog = -DWMS_UNFOLDED=2
+FOLD_DEF_unfolded_direct = -DMATERN_SCALAR_UNFOLDED=1
+FOLD_DEF_unfolded_explog = -DMATERN_SCALAR_UNFOLDED=2
 FLAGS_SCALAR_portable    = $(PORTABLE_ARCH) $(FLAGS_FMA)
 $(foreach v,$(FOLD_VARIANTS),$(foreach i,$(FOLD_ISAS),\
     $(eval FLAGS_SCALAR_$(v)_$(i) = $$(FLAGS_SCALAR_$(i)) $$(FOLD_DEF_$(v)))))
 OBJECTS_FOLD = $(foreach v,$(FOLD_VARIANTS),$(foreach i,$(FOLD_ISAS),build/backends/scalar_$(v)_$(i).o))
 
 # In XCF or CFLAGS the twin's switches would reach the shipped objects.
-ifneq ($(findstring WMS_UNFOLDED,$(XCF) $(CFLAGS))$(findstring WM_FOLD,$(XCF) $(CFLAGS)),)
-$(error WMS_UNFOLDED and WM_FOLD belong to the build/fold_cpu rules; remove them from XCF and CFLAGS)
+ifneq ($(findstring MATERN_SCALAR_UNFOLDED,$(XCF) $(CFLAGS))$(findstring BENCH_FOLD,$(XCF) $(CFLAGS)),)
+$(error MATERN_SCALAR_UNFOLDED and BENCH_FOLD belong to the build/fold_cpu rules; remove them from XCF and CFLAGS)
 endif
 
 # The backends every check runs on (MATERN_BACKEND); not named BACKENDS, the run
@@ -261,12 +277,14 @@ endif
         benchmark-gpu benchmark levin-ab-build levin-ab-build-gpu \
         paper-figures paper-figures-final paper-tables paper-tables-check \
         benchmark-test python-info requirements supplier-objects boost-headers pipeline externals \
-        corpus-tools corpus-check kaust externals-missing corpus dist help
+        corpus-tools corpus-check kaust externals-missing corpus dist help reproduce
 
 all: headers $(LIBRARY)
 
 # Every kernel header compiled on its own (as C, the ISA-specific ones also as C++);
-# -Wno-unused-function since a lone header leaves its static functions uncalled.
+# -Wno-unused-function since a lone header leaves its static functions uncalled.  The C++
+# pass is one shell line, so that its skip ends the recipe where $(CXX) does not compile a
+# minimal C++17 program.
 HEADER_WARNINGS = $(WARNINGS) -Wno-unused-function
 HEADERS_AVX512 = $(wildcard src/*/*_avx512.h)
 HEADERS_AVX2   = $(wildcard src/*/*_avx2.h)
@@ -292,19 +310,22 @@ headers:
 	        -fsyntax-only build/.header_check.c || exit 1 ; \
 	done
 	@rm -f build/.header_check.c
-	@command -v $(CXX) >/dev/null 2>&1 || { echo "headers ok (no C++ compiler for the second pass)"; exit 0; }
-	@for header in $(HEADERS_AVX512) ; do \
+	@printf 'int main(){return 0;}\n' > build/.header_check.cpp; \
+	if ! $(CXX) -std=c++17 -fsyntax-only build/.header_check.cpp >/dev/null 2>&1; then \
+	    rm -f build/.header_check.cpp; \
+	    echo "headers ok (no C++17 compiler for the second pass)"; exit 0; fi; \
+	for header in $(HEADERS_AVX512) ; do \
 	    printf '#include "%s"\nint main(){return 0;}\n' "$$header" > build/.header_check.cpp ; \
 	    $(CXX) -std=c++17 $(HEADER_WARNINGS) $(FLAGS_AVX512) $(INCLUDES) -I. \
 	        -fsyntax-only build/.header_check.cpp || exit 1 ; \
-	done
-	@for header in $(HEADERS_AVX2) ; do \
+	done; \
+	for header in $(HEADERS_AVX2) ; do \
 	    printf '#include "%s"\nint main(){return 0;}\n' "$$header" > build/.header_check.cpp ; \
 	    $(CXX) -std=c++17 $(HEADER_WARNINGS) $(FLAGS_AVX2) $(INCLUDES) -I. \
 	        -fsyntax-only build/.header_check.cpp || exit 1 ; \
-	done
-	@rm -f build/.header_check.cpp
-	@echo "headers ok: $(words $(HEADERS_AVX512)) AVX-512, $(words $(HEADERS_AVX2)) AVX2, $(words $(HEADERS_NEUTRAL)) ISA-neutral (each at both), as C; the ISA-specific headers also as C++"
+	done; \
+	rm -f build/.header_check.cpp; \
+	echo "headers ok: $(words $(HEADERS_AVX512)) AVX-512, $(words $(HEADERS_AVX2)) AVX2, $(words $(HEADERS_NEUTRAL)) ISA-neutral (each at both), as C; the ISA-specific headers also as C++"
 
 # Archives are written from scratch with `ar ...D` (zero dates and owners), so
 # identical objects give an identical archive.
@@ -432,6 +453,8 @@ example: $(LIBRARY)
 
 # Per-backend tests run on each backend of CHECK_BACKENDS this CPU runs.
 check: $(LIBRARY)
+	@echo "== kernel headers ==========================================="
+	@$(MAKE) --no-print-directory headers
 	@echo "== contract ================================================="
 	@$(MAKE) --no-print-directory contract
 	@echo "== h = 0 ====================================================="
@@ -505,8 +528,8 @@ direct-argument: $(LIBRARY) build/backend_name
 	@$(call per_backend,./build/direct_argument)
 
 # The positive control (one workspace shared by all threads) must fail, by differing
-# results or a crash.  It runs on the automatic backend, and is skipped where that is
-# matched or matched_fma, which use no workspace (as scalar does not).
+# results or a crash.  It runs on the automatic backend and is skipped where that is
+# matched or matched_fma, which use no workspace.
 threads: $(LIBRARY) build/backend_name
 	@mkdir -p build
 	@$(CC) $(ALL_CFLAGS) -MT build/thread_safety -MF build/thread_safety.d \
@@ -564,7 +587,7 @@ exports: $(LIBRARY)
 	     extra=$$(LC_ALL=C comm -13 build/exports_map.txt build/exports_cuda.txt); \
 	     if [ -n "$$extra" ]; then echo "  FAIL  build/cuda.o exports names that matern.map does not list:"; \
 	         echo "$$extra" | sed 's/^/          /'; exit 1; fi; \
-	     echo "  ok    build/cuda.o exports $$(wc -l < build/exports_cuda.txt) names, all of matern.map"; \
+	     echo "  ok    build/cuda.o exports $$(wc -l < build/exports_cuda.txt) names, each listed in matern.map"; \
 	 fi
 
 # The README.md example must compile and print the output shown there.
@@ -578,9 +601,9 @@ strict:
 	        || exit 1; \
 	done
 	@for v in 1 2; do for source in $(SOURCES_SCALAR); do \
-	    echo "== $$source (WMS_UNFOLDED=$$v)"; \
-	    $(CC) $(STANDARD) $(WARNINGS_STRICT) $(INCLUDES) -DWMS_UNFOLDED=$$v \
-	        -DMATERN_SCALAR_ENTRY=wms_strict -DMATERN_SCALAR_ENTRY_Z=wms_strict_z \
+	    echo "== $$source (MATERN_SCALAR_UNFOLDED=$$v)"; \
+	    $(CC) $(STANDARD) $(WARNINGS_STRICT) $(INCLUDES) -DMATERN_SCALAR_UNFOLDED=$$v \
+	        -DMATERN_SCALAR_ENTRY=matern_evaluate_scalar_strict -DMATERN_SCALAR_ENTRY_Z=matern_evaluate_scalar_strict_z \
 	        -fsyntax-only $$source || exit 1; \
 	done; done
 	@echo "strict warning pass clean"
@@ -776,6 +799,7 @@ cuda-device: build/cuda.o $(LIBRARY) test/cuda_device.cu test/cuda_device_second
 # `make references` fetches the public upstream sources and reports every supplier;
 # its status is fetch.sh's (a digest mismatch fails, an absent supplier does not).
 REQ_ENV = PYTHON="$(PYTHON)" PYTHON_CANDIDATES="$(PYTHON_CANDIDATES)" CC="$(CC)" CXX="$(CXX)" NVCC="$(NVCC)" \
+          NVIDIA_SMI="$(NVIDIA_SMI)" \
           BOOST_CPU_ROOT="$(BOOST_CPU_ROOT)" BOOST_ROOT="$(BOOST_ROOT)" \
           PYTHON_ORIGIN="$(origin PYTHON)" CC_ORIGIN="$(origin CC)" CXX_ORIGIN="$(origin CXX)" \
           NVCC_ORIGIN="$(origin NVCC)" DATA="$(DATA)"
@@ -805,7 +829,8 @@ requirements:
 
 # KAUST CuBesselK ("All rights reserved", not distributed): prints the copyright
 # notice; DOWNLOAD=yes downloads and ports it, CLEAN=yes deletes the port.  It is
-# downloaded only on an explicit yes: DOWNLOAD=yes here or the question of make pipeline.
+# downloaded only on an explicit yes: DOWNLOAD=yes here, or KAUST=yes or the question of
+# make pipeline and make reproduce.
 kaust:
 	@case "$(call yes_no,DOWNLOAD)$(call yes_no,CLEAN)" in \
 	   yesyes) echo "make kaust: DOWNLOAD=yes and CLEAN=yes exclude each other"; exit 2 ;; \
@@ -840,7 +865,7 @@ BENCH_HDRS  := $(wildcard benchmark/common/*.h) benchmark/corpus_dataset.h bench
 # The make variables as resolved here (value, origin, compiler), read into
 # PROVENANCE.txt by run_benchmark.sh.  Rewritten only when its content changes and
 # order-only, so a change does not relink the drivers.
-build/BUILD_KNOBS: wm-build-knobs-force
+build/BUILD_KNOBS: build-knobs-force
 	@mkdir -p build
 	@{ printf '%-18s %s (origin %s) -> %s: %s\n' make_cc '$(CC)' '$(origin CC)' \
 	       "$$(command -v $(firstword $(CC)) 2>/dev/null || echo 'not found')" \
@@ -853,15 +878,15 @@ build/BUILD_KNOBS: wm-build-knobs-force
 	   printf '%-18s %s (origin %s)\n' make_fma '$(FMA_STATE)' '$(origin FMA)'; \
 	   printf '%-18s %s\n' make_cflags '$(strip $(CFLAGS) $(OPTIMISE) $(CONTRACTION) $(XCF))'; \
 	   printf '%-18s %s\n' make_loop_align '$(or $(LOOP_ALIGN),none) -- scalar objects only'; \
-	   printf '%-18s %s -- build/cuda.o, the library device object (NVCCFLAGS: %s)\n' \
+	   printf '%-18s %s -- build/cuda.o, build/cuda_bench.o and build/kaust_dev.o (NVCCFLAGS: %s)\n' \
 	       make_gpu_arch '$(GPU_ARCH)' '$(NVCCFLAGS)'; \
 	   printf '%-18s %s -- the GPU drivers (from nvidia-smi at build time, else GPU_ARCH)\n' \
 	       make_gpu_arch_use '$(GPU_ARCH_USE)'; \
 	 } > $@.tmp
 	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv -f $@.tmp $@
 
-.PHONY: wm-build-knobs-force
-wm-build-knobs-force:
+.PHONY: build-knobs-force
+build-knobs-force:
 
 # The corpus converter: text <-> binary and the byte-exact round-trip check.
 corpus-tools: build/corpus_convert
@@ -888,16 +913,16 @@ build/benchmark_cpu: benchmark/benchmark_cpu.c benchmark/corpus_dataset.c $(LIBR
 	$(Q)$(CC) $(BENCH_CFLAGS) $(BENCH_INC) -o $@ benchmark/benchmark_cpu.c \
 	    benchmark/corpus_dataset.c $(LIBRARY) -lm
 
-# STAGES=fold: benchmark_cpu.c with -DWM_FOLD, so the twin backends are scored and
+# STAGES=fold: benchmark_cpu.c with -DBENCH_FOLD, so the twin backends are scored and
 # timed by the accuracy stage's own code; links LIBRARY_INTERNAL, as detect does.
 build/fold_cpu: benchmark/benchmark_cpu.c benchmark/corpus_dataset.c $(LIBRARY) $(LIBRARY_INTERNAL) $(OBJECTS_FOLD) $(BENCH_HDRS) | build/BUILD_KNOBS
 	@mkdir -p build
 	$(call say,CC)
-	$(Q)$(CC) $(BENCH_CFLAGS) -DWM_FOLD $(BENCH_INC) -o $@ benchmark/benchmark_cpu.c \
+	$(Q)$(CC) $(BENCH_CFLAGS) -DBENCH_FOLD $(BENCH_INC) -o $@ benchmark/benchmark_cpu.c \
 	    benchmark/corpus_dataset.c $(OBJECTS_FOLD) $(LIBRARY_INTERNAL) -lm
 
 # The supplier drivers print a summary line; V=yes prints their compile commands.
-SUP_WITH = Bessels.jl $$(sed -e 's/-DWMC_WITH_CXX/std/' -e 's/-DWMC_WITH_BOOST/Boost/' -e 's/-DWMC_WITH_//g' references/build/defines.txt)
+SUP_WITH = Bessels.jl $$(sed -e 's/-DCPU_SUPPLIER_WITH_CXX/std/' -e 's/-DCPU_SUPPLIER_WITH_BOOST/Boost/' -e 's/-DCPU_SUPPLIER_WITH_//g' references/build/defines.txt)
 
 build/threads_cpu: benchmark/threads_cpu.c benchmark/corpus_dataset.c $(LIBRARY) $(BENCH_HDRS) supplier-objects
 	@mkdir -p build
@@ -927,12 +952,25 @@ GPU_ARCH_USE = $(if $(GPU_ARCH_DETECTED),sm_$(GPU_ARCH_DETECTED),$(GPU_ARCH))
 
 # Device suppliers: KAUST (when ported) and Boost >= 1.87 (BOOST_MATH_GPU_ENABLED).
 ifneq ($(KAUST_PORT),)
-KAUST_GPU_DEF := -DWMG_WITH_KAUST
+KAUST_GPU_DEF := -DGPU_SUPPLIER_WITH_KAUST
 endif
 # The device Boost (boost_detect.sh --select gpu): BOOST_ROOT when GPU-capable (none
 # disables the row), else the highest Boost with BOOST_MATH_GPU_ENABLED; resolved once.
+# BOOST_GPU_WHERE (--where gpu), the directory and its origin, goes into the build records.
 BOOST_GPU_DIR = $(eval BOOST_GPU_DIR := $(shell CXX="$(CXX)" BOOST_ROOT="$(BOOST_ROOT)" bash benchmark/tools/boost_detect.sh --select gpu))$(BOOST_GPU_DIR)
-BOOST_GPU_DEF = $(if $(BOOST_GPU_DIR),-DWMG_WITH_BOOST -I$(BOOST_GPU_DIR))
+BOOST_GPU_WHERE = $(eval BOOST_GPU_WHERE := $(shell CXX="$(CXX)" BOOST_ROOT="$(BOOST_ROOT)" bash benchmark/tools/boost_detect.sh --where gpu))$(BOOST_GPU_WHERE)
+BOOST_GPU_DEF = $(if $(BOOST_GPU_DIR),-DGPU_SUPPLIER_WITH_BOOST -I$(BOOST_GPU_DIR))
+BOOST_GPU_SOURCE_DEF = $(if $(BOOST_GPU_DIR),-DGPU_SUPPLIER_BOOST_SOURCE='"$(BOOST_GPU_WHERE)"')
+
+# Configuration stamp of the device Boost, rewritten only on change: another Boost, another
+# origin of the same directory, or none rebuilds the drivers compiled against it.  make
+# rebuilds only on a strictly newer prerequisite and some file systems store whole seconds,
+# so stamp_newer makes a rewritten stamp newer than a listed file written in the same second.
+stamp_newer = for f in $(1); do [ ! -e $$f ] || [ $@ -nt $$f ] || { sleep 1; touch $@; break; }; done
+build/boost_gpu.config: build-knobs-force
+	@mkdir -p build
+	@echo "$(BOOST_GPU_WHERE)" | cmp -s - $@ || { echo "$(BOOST_GPU_WHERE)" > $@; \
+	    $(call stamp_newer,build/suppliers_gpu build/boost_shortcut_host.o build/boost_shortcut_gpu); }
 
 # The KAUST port compiled as CUDA, so CPU and GPU rows run the same source.
 build/kaust_dev.o: references/kaust_logbesselk/kaust_port.c $(KAUST_DERIVED)
@@ -944,14 +982,15 @@ build/kaust_dev.o: references/kaust_logbesselk/kaust_port.c $(KAUST_DERIVED)
 	    -Ireferences/build/kaust \
 	    $< -o $@
 
-build/suppliers_gpu: benchmark/suppliers_gpu.cu benchmark/corpus_dataset.c build/cuda_bench.o $(LIBRARY) $(BENCH_HDRS) $(if $(KAUST_GPU_DEF),build/kaust_dev.o) | build/BUILD_KNOBS
+build/suppliers_gpu: benchmark/suppliers_gpu.cu benchmark/corpus_dataset.c build/cuda_bench.o $(LIBRARY) $(BENCH_HDRS) $(if $(KAUST_GPU_DEF),build/kaust_dev.o) \
+                     build/boost_gpu.config | build/BUILD_KNOBS
 	@mkdir -p build
 	@echo "  gpu suppliers: kaust=$(if $(KAUST_GPU_DEF),yes,no) boost=$(if $(BOOST_GPU_DEF),yes,no)"
 	@$(NVCC_CHECK)
 	$(call say,NVCC)
 	$(Q)$(NVCC) -O2 -arch=$(GPU_ARCH_USE) --expt-relaxed-constexpr \
 	    -Xcompiler -fopenmp,-Wall,-Wextra,-Wformat=2 \
-	    $(KAUST_GPU_DEF) $(BOOST_GPU_DEF) \
+	    $(KAUST_GPU_DEF) $(BOOST_GPU_DEF) $(BOOST_GPU_SOURCE_DEF) \
 	    -Ibenchmark -Ibenchmark/common $(INCLUDES) \
 	    -Ireferences/common -rdc=true \
 	    -o $@ benchmark/suppliers_gpu.cu benchmark/corpus_dataset.c \
@@ -960,19 +999,20 @@ build/suppliers_gpu: benchmark/suppliers_gpu.cu benchmark/corpus_dataset.c build
 # Boost's K_nu at nu = 2.5 + delta, host and device, against data/boost_shortcut/.
 # The host half is a g++ object with the supplier flags of references/Makefile:
 # under nvcc, __CUDACC__ disables Boost's long-double promotion on the host too.
-build/boost_shortcut_host.o: benchmark/boost_shortcut_host.cpp references/common/build_info.h
+# Without a device Boost both rules stop and remove the driver built against another one.
+build/boost_shortcut_host.o: benchmark/boost_shortcut_host.cpp references/common/build_info.h build/boost_gpu.config
 	@mkdir -p build
-	@test -n "$(BOOST_GPU_DIR)" || { echo "boost_shortcut_host: needs Boost >= 1.87 (BOOST_ROOT, or make boost-headers)"; exit 1; }
+	@test -n "$(BOOST_GPU_DIR)" || { rm -f $@ build/boost_shortcut_gpu; echo "boost_shortcut_host: needs Boost >= 1.87 (BOOST_ROOT, or make boost-headers)"; exit 1; }
 	$(call say,CXX)
-	$(Q)$(CXX) -std=c++17 -march=native -O2 -Wall -I$(BOOST_GPU_DIR) -c $< -o $@
+	$(Q)$(CXX) -std=c++17 -march=native -O2 -Wall -I$(BOOST_GPU_DIR) $(BOOST_GPU_SOURCE_DEF) -c $< -o $@
 
 build/boost_shortcut_gpu: benchmark/boost_shortcut_gpu.cu benchmark/common/boost_adapted.h benchmark/corpus_bin.h \
-                          benchmark/common/build_info_cuda.h build/boost_shortcut_host.o
+                          benchmark/common/build_info_cuda.h build/boost_shortcut_host.o build/boost_gpu.config
 	@mkdir -p build
-	@test -n "$(BOOST_GPU_DEF)" || { echo "boost_shortcut_gpu: needs Boost >= 1.87 (BOOST_ROOT, or make boost-headers)"; exit 1; }
+	@test -n "$(BOOST_GPU_DEF)" || { rm -f $@; echo "boost_shortcut_gpu: needs Boost >= 1.87 (BOOST_ROOT, or make boost-headers)"; exit 1; }
 	@$(NVCC_CHECK)
 	$(call say,NVCC)
-	$(Q)$(NVCC) -O2 -arch=$(GPU_ARCH_USE) --expt-relaxed-constexpr -I$(BOOST_GPU_DIR) \
+	$(Q)$(NVCC) -O2 -arch=$(GPU_ARCH_USE) --expt-relaxed-constexpr -I$(BOOST_GPU_DIR) $(BOOST_GPU_SOURCE_DEF) \
 	    -Ibenchmark -Ibenchmark/common -o $@ benchmark/boost_shortcut_gpu.cu build/boost_shortcut_host.o -lm
 
 build/threads_gpu: benchmark/threads_gpu.cu benchmark/corpus_dataset.c build/cuda_bench.o $(LIBRARY) $(BENCH_HDRS)
@@ -1009,8 +1049,8 @@ AB_DIR = build-ab
 AB_LOG   = $(if $(Q),V=yes >$(AB_DIR)/build-$(1).log 2>&1 || { echo "  arm $(1) FAILED; end of $(AB_DIR)/build-$(1).log:"; \
            tail -25 $(AB_DIR)/build-$(1).log; exit 1; })
 AB_CLEAN = $(MAKE) --no-print-directory clean $(if $(Q),>/dev/null)
-LEVIN_GPU_FLAGS = -DMATERN_CUDA_FLAGS=MATERN_ROUTE_FLAGS_PRIMEAL \
-                  -DMATERN_CUDA_FLAGS_Z=MATERN_ROUTE_FLAGS_PRIMEAZL
+LEVIN_GPU_FLAGS = -DMATERN_CUDA_FLAGS=MATERN_ROUTE_FLAGS_DEFAULT_LEVIN \
+                  -DMATERN_CUDA_FLAGS_Z=MATERN_ROUTE_FLAGS_DEFAULT_LEVIN_Z
 
 levin-ab-build:
 	+@mkdir -p $(AB_DIR)
@@ -1022,9 +1062,9 @@ levin-ab-build:
 	@$(AB_CLEAN)
 	@$(MAKE) --no-print-directory build/benchmark_cpu XCF=-DMATERN_WITHOUT_LEVIN $(call AB_LOG,novec)
 	@cp build/benchmark_cpu $(AB_DIR)/benchmark_cpu_novec
-	@echo "levin-ab-build: arm scal  (-DWMS_LEVIN)"
+	@echo "levin-ab-build: arm scal  (-DMATERN_SCALAR_WITH_LEVIN)"
 	@$(AB_CLEAN)
-	@$(MAKE) --no-print-directory build/benchmark_cpu XCF=-DWMS_LEVIN $(call AB_LOG,scal)
+	@$(MAKE) --no-print-directory build/benchmark_cpu XCF=-DMATERN_SCALAR_WITH_LEVIN $(call AB_LOG,scal)
 	@cp build/benchmark_cpu $(AB_DIR)/benchmark_cpu_scal
 	@echo "levin-ab-build: restoring the shipped build"
 	@$(AB_CLEAN)
@@ -1040,7 +1080,8 @@ levin-ab-build:
 	 echo "                novec [$$b]"; \
 	 echo "                scal  [$$c]"
 
-# Only the device objects carry the routing, so only they and the binary are rebuilt.
+# Only the device objects carry the routing: both are removed, and build/cuda_bench.o and
+# the binary are rebuilt.
 levin-ab-build-gpu:
 	+@mkdir -p $(AB_DIR)
 	@echo "levin-ab-build-gpu: arm nolevin (shipped routing)"
@@ -1063,15 +1104,36 @@ levin-ab-build-gpu:
 
 # make benchmark notifies once (benchmark/tools/notify.sh), after the tables or on a
 # failed run; a failed figure or table step fails the target, the run stays recorded.
-RUNS_DIR = $(or $(WM_RUNS_DIR),benchmark/runs)
+RUNS_DIR = $(or $(BENCH_RUNS_DIR),benchmark/runs)
 # Non-empty under make -n, where a $(MAKE) line still runs; it is tested before notifying.
 DRY_RUN = $(findstring n,$(firstword -$(MAKEFLAGS)))
 # Passes every run parameter through except STAGES and the reduced-run caps.
 pipeline:
 	@NVCC="$(NVCC)" NVIDIA_SMI="$(NVIDIA_SMI)" MAKE="$(MAKE)" bash benchmark/pipeline.sh
 
+# The published results on this machine: make pipeline with the full settings, the externals
+# and the corpus download; GPU is auto unless given (GPU=no: the CPU part only).  KAUST is
+# asked on a terminal (after the copyright notice); without one KAUST=yes or KAUST=no is
+# required while the port is absent.  The recipe is recursive (+, so that make -j reaches the
+# nested builds) and runs nothing under make -n, -q or -t.
+REPRODUCE_NOEXEC = $(strip $(foreach f,n q t,$(findstring $(f),$(firstword -$(MAKEFLAGS)))))
+# SETTINGS, EXTERNALS and CORPUS given on the command line with another value than the one
+# make reproduce sets.
+REPRODUCE_IGNORED = $(strip \
+    $(if $(filter command line,$(origin SETTINGS)),$(if $(filter full FULL Full,$(SETTINGS)),,SETTINGS=$(SETTINGS))) \
+    $(if $(filter command line,$(origin EXTERNALS)),$(if $(filter $(YES_WORDS),$(EXTERNALS)),,EXTERNALS=$(EXTERNALS))) \
+    $(if $(filter command line,$(origin CORPUS)),$(if $(filter $(YES_WORDS),$(CORPUS)),,CORPUS=$(CORPUS))))
+reproduce:
+	+@if [ -n "$(REPRODUCE_NOEXEC)" ]; then \
+	     echo "make reproduce: not run under make -n, -q or -t (make reproduce DRY=yes prints the plan)"; \
+	     exit 0; fi; \
+	 ign='$(REPRODUCE_IGNORED)'; [ -z "$$ign" ] || echo "make reproduce: $$ign not used: it sets" \
+	     "SETTINGS=full, EXTERNALS=yes and CORPUS=yes (make pipeline takes them)" >&2; \
+	 NVCC="$(NVCC)" NVIDIA_SMI="$(NVIDIA_SMI)" MAKE="$(MAKE)" SETTINGS=full EXTERNALS=yes CORPUS=yes \
+	     bash benchmark/pipeline.sh reproduce
+
 benchmark: benchmark-build
-	@WM_NOTIFY_SKIP=1 WM_FULLRUN_ENTRY="make benchmark" bash benchmark/run_benchmark.sh; rc=$$?; \
+	@BENCH_NOTIFY_SKIP=1 BENCH_FULL_RUN_ENTRY="make benchmark" bash benchmark/run_benchmark.sh; rc=$$?; \
 	 if [ $$rc -ne 0 ]; then \
 	     bash benchmark/tools/notify.sh "make benchmark" \
 	         "run $$(sed -n 's/^STATUS *//p' $(RUNS_DIR)/latest/STATUS 2>/dev/null | head -1) -- figures and tables not made; see $(RUNS_DIR)/latest/STATUS"; \

@@ -39,7 +39,7 @@ esac
 # LADDER_MAX=<N> caps every ladder's top rung, as in run_benchmark.sh.
 _LADDER_MAX_ARG=(); [ -n "${LADDER_MAX:-}" ] && _LADDER_MAX_ARG=(--ladder-max "$LADDER_MAX")
 export LADDER_SET LADDER_LAWS
-RUNS_ROOT="${WM_RUNS_DIR:-benchmark/runs}"
+RUNS_ROOT="${BENCH_RUNS_DIR:-benchmark/runs}"
 
 echo "=============================================================="
 echo "DEVICE    cuda"
@@ -58,14 +58,23 @@ build(){
     tail -n 20 "$log" | sed 's/^/   /'
     return 1
 }
-build library all             || exit 1
-build bench   benchmark-build || exit 1
+build library build/libmatern.a || exit 1
+build bench   benchmark-build   || exit 1
 # nvcc as the Makefile resolves it: NVCC, else PATH, else the CUDA default location.
 _nvcc="${NVCC:-$(command -v nvcc 2>/dev/null || ls /usr/local/cuda/bin/nvcc 2>/dev/null)}"
 if [ -z "$_nvcc" ] || ! command -v "${_nvcc%% *}" >/dev/null 2>&1; then
   echo "!! no nvcc on this machine -- a GPU run cannot be produced here"
   _add=$(bash benchmark/tools/missing.sh lines nvcc | cut -f2)
   echo "   nvcc: ${_add:-install the NVIDIA CUDA toolkit, or pass NVCC=<path> (make requirements)}"
+  exit 3
+fi
+# nvidia-smi as the Makefile resolves it: NVIDIA_SMI, else PATH, else the WSL location.  A GPU
+# is visible when `nvidia-smi -L` succeeds, the test of make pipeline.
+_smi="${NVIDIA_SMI:-$(command -v nvidia-smi 2>/dev/null || ls /usr/lib/wsl/lib/nvidia-smi 2>/dev/null)}"
+if [ -z "$_smi" ] || ! "$_smi" -L >/dev/null 2>&1; then
+  echo "!! nvcc found, but no NVIDIA GPU visible: a GPU run cannot be produced here"
+  echo "   nvidia-smi: ${_smi:+$_smi -L fails}${_smi:-not found} (NVIDIA_SMI=<path> names another)"
+  echo "   make pipeline or make reproduce runs the CPU part alone with GPU=auto or GPU=no"
   exit 3
 fi
 # `all` selects the stages of the published run; call-large is selected by name only.
@@ -77,15 +86,12 @@ want_gpu(){
 echo "[$((SECONDS-t0))s] gpu stages requested: $GPU_STAGES"
 # One probe of the missing software before any timing (make pipeline passes its own), then
 # the full-run notice, silent under make pipeline and not repeated by the CPU reference run.
-if [ -z "${WM_MISSING_CACHE:-}" ]; then
-    WM_MISSING_CACHE=$(bash benchmark/tools/missing.sh probe); export WM_MISSING_CACHE
-    trap 'rm -f "$WM_MISSING_CACHE"' EXIT
+if [ -z "${BENCH_MISSING_CACHE:-}" ]; then
+    BENCH_MISSING_CACHE=$(bash benchmark/tools/missing.sh probe); export BENCH_MISSING_CACHE
+    trap 'rm -f "$BENCH_MISSING_CACHE"' EXIT
 fi
 bash benchmark/tools/full_run.sh --entry "bash benchmark/run_gpu.sh" --gpu "$GPU_STAGES"
-export WM_FULLRUN_NOTICE=shown
-if ! nvidia-smi -L >/dev/null 2>&1; then
-  echo "!! no NVIDIA GPU visible (nvidia-smi) -- the GPU stages cannot run on this machine"
-fi
+export BENCH_FULL_RUN_NOTICE=shown
 
 # The pipeline's fixed repetition count, forwarded to every device stage.
 REPS="${REPS:-65}"
@@ -121,14 +127,14 @@ FAILED=""
 if [ "$CALL_LARGE_ONLY" = 1 ]; then
     # The run record alone (provenance, manifest, detect), no CPU measurement.
     echo "[$((SECONDS-t0))s] cpu reference: not made (GPU_STAGES=call-large times the device only); run record alone"
-    SCOPE="${SCOPE:-gpu-call-large}" STAGES=record BACKENDS="${BACKENDS:-avx512}" WM_GPU_PIPELINE=1 \
+    SCOPE="${SCOPE:-gpu-call-large}" STAGES=record BACKENDS="${BACKENDS:-avx512}" BENCH_GPU_PIPELINE=1 \
         bash benchmark/run_benchmark.sh
     _rc=$?
     [ "$_rc" -eq 0 ] || FAILED="$FAILED run-record(rc=$_rc)"
     echo "[$((SECONDS-t0))s] run record done (exit status $_rc)"
 else
     echo "[$((SECONDS-t0))s] cpu reference backend: ${BACKENDS:-avx512}"
-    SCOPE="${SCOPE:-gpu}" BACKENDS="${BACKENDS:-avx512}" WM_GPU_PIPELINE=1 \
+    SCOPE="${SCOPE:-gpu}" BACKENDS="${BACKENDS:-avx512}" BENCH_GPU_PIPELINE=1 \
         bash benchmark/run_benchmark.sh
     _rc=$?
     [ "$_rc" -eq 0 ] || FAILED="$FAILED cpu-reference(rc=$_rc)"
@@ -138,13 +144,13 @@ _latest=$(readlink "$RUNS_ROOT/latest" 2>/dev/null)
 [ -n "$_latest" ] && [ -d "$RUNS_ROOT/$_latest" ] || { echo "!! no run directory under $RUNS_ROOT"; exit 1; }
 R="$RUNS_ROOT/$_latest"
 
-# snapshot: with WM_COPY_RUNS_TO set, the run directory (with the load log WM_LOADLOG) is
+# snapshot: with BENCH_COPY_RUNS_TO set, the run directory (with the load log BENCH_LOAD_LOG) is
 # copied there after each stage, so an interrupted job loses at most the stage in progress.
 snapshot() {
-    [ -n "${WM_COPY_RUNS_TO:-}" ] || return 0
-    mkdir -p "$WM_COPY_RUNS_TO" 2>/dev/null
-    [ -n "${WM_LOADLOG:-}" ] && cp "$WM_LOADLOG" "$R/loadavg.tsv" 2>/dev/null
-    cp -r "$R" "$WM_COPY_RUNS_TO/" 2>/dev/null && return 0
+    [ -n "${BENCH_COPY_RUNS_TO:-}" ] || return 0
+    mkdir -p "$BENCH_COPY_RUNS_TO" 2>/dev/null
+    [ -n "${BENCH_LOAD_LOG:-}" ] && cp "$BENCH_LOAD_LOG" "$R/loadavg.tsv" 2>/dev/null
+    cp -r "$R" "$BENCH_COPY_RUNS_TO/" 2>/dev/null && return 0
     echo "!! snapshot failed after stage ${1:-?}"
     return 1
 }
@@ -171,7 +177,7 @@ note_stage() {   # note_stage <name> <csv> <attempted 0|1>
 
 if want_gpu core; then
 # core: the library on the device as a whole call; without --time-points every point is timed.
-WM_RAW_REPS="$R/timing_raw.gpu" WM_ACC_DETAIL="$R/accuracy_detail.gpu" \
+BENCH_TIMING_RAW="$R/timing_raw.gpu" BENCH_ACCURACY_DETAIL="$R/accuracy_detail.gpu" \
 ./build/benchmark_gpu --family z_nu,h_nu_s --law all --format csv --reps "$REPS" \
     --data-dir "$DATA" > "$R/gpu.csv" 2>"$R/gpu.err"
 note_stage gpu "$R/gpu.csv" 1
@@ -179,7 +185,7 @@ snapshot gpu
   echo "[$((SECONDS-t0))s] gpu: $(grep -c '^[0-9]' "$R/gpu.csv" 2>/dev/null || true) rows"
 
 # The device ladder (time against N).
-WM_RAW_REPS="$R/timing_raw.gpu_ladder" \
+BENCH_TIMING_RAW="$R/timing_raw.gpu_ladder" \
 ./build/benchmark_gpu --family z_nu,h_nu_s --law "$LADDER_LAWS" \
     --ladder ${_LADDER_MAX_ARG[@]+"${_LADDER_MAX_ARG[@]}"} --reps "$REPS" --format csv \
     --data-dir "$DATA" > "$R/gpu_ladder.csv" 2>"$R/gpu_ladder.err"
@@ -193,7 +199,7 @@ snapshot gpu-ladder
 if [ "$SUP_GPU_BUILT" = 1 ] && [ -x build/suppliers_gpu ]; then
   bash benchmark/tools/missing.sh rows "[$((SECONDS-t0))s] gpu suppliers (kernels compared kernel-only)" \
       gpu "" "" "$(./build/suppliers_gpu --list 2>/dev/null)"
-  WM_RAW_REPS="$R/timing_raw.gpu_kernels" WM_ACC_DETAIL="$R/accuracy_detail.gpu_kernels" \
+  BENCH_TIMING_RAW="$R/timing_raw.gpu_kernels" BENCH_ACCURACY_DETAIL="$R/accuracy_detail.gpu_kernels" \
   ./build/suppliers_gpu --family z_nu,h_nu_s --law all --format csv --reps "$REPS" \
       --data-dir "$DATA" > "$R/gpu_kernels.csv" 2>"$R/gpu_kernels.err"
   note_stage gpu-kernels "$R/gpu_kernels.csv" 1
@@ -210,7 +216,7 @@ if [ "$SUP_GPU_BUILT" = 1 ] && [ -x build/suppliers_gpu ]; then
   else
     echo "[$((SECONDS-t0))s] gpu check of Boost's K_nu short cut: skipped (needs Boost >= 1.87 with GPU support; see above)"
   fi
-  WM_RAW_REPS="$R/timing_raw.gpu_kernels_ladder" \
+  BENCH_TIMING_RAW="$R/timing_raw.gpu_kernels_ladder" \
   ./build/suppliers_gpu --family z_nu,h_nu_s --law "$LADDER_LAWS" --ladder ${_LADDER_MAX_ARG[@]+"${_LADDER_MAX_ARG[@]}"} \
       --reps "$REPS" --format csv --data-dir "$DATA" > "$R/gpu_kernels_ladder.csv" 2>"$R/gpu_kernels_ladder.err"
   note_stage gpu-kernels-ladder "$R/gpu_kernels_ladder.csv" 1
@@ -236,7 +242,7 @@ if want_gpu levin; then
         levin)   v=levin_on;  sh=no  ;;   # the variant: the device does not ship it
         nolevin) v=levin_off; sh=yes ;;   # the shipped device routing
       esac
-      WM_RAW_REPS="$R/timing_raw.gpu_levin_$arm" WM_ACC_DETAIL="$R/accuracy_detail.gpu_levin_$arm" \
+      BENCH_TIMING_RAW="$R/timing_raw.gpu_levin_$arm" BENCH_ACCURACY_DETAIL="$R/accuracy_detail.gpu_levin_$arm" \
       ./build-ab/benchmark_gpu_"$arm" --family z_nu,h_nu_s --law all --format csv --reps "$REPS" \
           --data-dir "$DATA" > "$R/gpu_levin_$arm.csv" 2>>"$R/gpu_levin.err"
       awk -v v="$v" -v sh="$sh" -v f="$first" '
@@ -259,7 +265,7 @@ if want_gpu threads; then
   if build gpu-threads build/threads_gpu; then
     : > "$R/gpu_threads.csv"; : > "$R/gpu_threads.err"; first=1
     for fam in z_nu h_nu_s; do
-      WM_RAW_REPS="$R/timing_raw.gpu_threads_$fam" \
+      BENCH_TIMING_RAW="$R/timing_raw.gpu_threads_$fam" \
       ./build/threads_gpu --family "$fam" --law size_random --format csv --reps "$REPS" \
           --data-dir "$DATA" > "$R/gpu_threads_$fam.csv" 2>>"$R/gpu_threads.err"
       awk -v f="$first" 'NR==1 { if (f==1) print; next } { print }' \
@@ -283,7 +289,7 @@ if want_gpu call-large; then
   if [ "$SUP_GPU_BUILT" = 1 ] && [ -x build/suppliers_gpu ]; then
     bash benchmark/tools/missing.sh rows "[$((SECONDS-t0))s] gpu call-large (whole calls at 2^25)" \
         gpu "" "" "$(./build/suppliers_gpu --list 2>/dev/null)"
-    WM_RAW_REPS="$R/timing_raw.gpu_call_large" \
+    BENCH_TIMING_RAW="$R/timing_raw.gpu_call_large" \
     ./build/suppliers_gpu --family z_nu,h_nu_s --law size_random_large,size_half_large \
         --call-only --format csv --reps "$REPS" --data-dir "$DATA" \
         > "$R/gpu_call_large.csv" 2>"$R/gpu_call_large.err"
@@ -296,12 +302,12 @@ if want_gpu call-large; then
 fi
 
 echo "[$((SECONDS-t0))s] recorded: $R"
-if [ -n "${WM_COPY_RUNS_TO:-}" ]; then
+if [ -n "${BENCH_COPY_RUNS_TO:-}" ]; then
   snapshot final || { echo "!! COPY-BACK FAILED -- the run exists only in $R"; exit 2; }
   if [ "$CALL_LARGE_ONLY" = 1 ]; then
-    echo "copied back: $WM_COPY_RUNS_TO/$_latest"
+    echo "copied back: $BENCH_COPY_RUNS_TO/$_latest"
   else
-    echo "copied back: $(grep -c '^[0-9]' "$WM_COPY_RUNS_TO/$_latest/gpu.csv" 2>/dev/null || true) gpu rows"
+    echo "copied back: $(grep -c '^[0-9]' "$BENCH_COPY_RUNS_TO/$_latest/gpu.csv" 2>/dev/null || true) gpu rows"
   fi
 fi
 echo "TOTAL ${SECONDS}s"

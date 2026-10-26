@@ -22,7 +22,7 @@ typedef struct {
 
     double *reference_high;     /* the reference is reference_high + reference_low */
     double *reference_low;
-} wm_dataset;
+} bench_dataset;
 
 #ifdef __cplusplus
 }

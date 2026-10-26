@@ -75,7 +75,7 @@ SIMD_TYPE_FLOAT debye_cell(SIMD_TYPE_FLOAT Z, SIMD_TYPE_FLOAT ZL, SIMD_TYPE_FLOA
      * beyond, Eh is still the rounded sum, so the first-order factor stays small. */
     { const SIMD_TYPE_FLOAT Es = VEC_ADD(Eh, El); El = VEC_SUB(El, VEC_SUB(Es, Eh)); Eh = Es; }
     SIMD_TYPE_FLOAT eE;
-    /* The exponential engine is valid on [-708, 708] and E reaches far below it, so
+    /* The exponential engine is valid on [ln DBL_MIN, 708] and E reaches far below it, so
      * the three cases of the large-argument extended assembly apply:
      *   Eh >= -708.396        : the engine directly;
      *   -745.2 <= Eh < -708.4 : (engine(Eh/2))^2, reaching the subnormal band;

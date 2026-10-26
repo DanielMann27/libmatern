@@ -63,7 +63,8 @@ FOLD_COLOR = {"scalar": "#c1121f", "scalar-control": "#c1121f",
               "scalar-unfolded-explog": "#8a8a8a"}
 FOLD_MARK = {"scalar": "o", "scalar-control": "o",
              "scalar-unfolded-direct": "^", "scalar-unfolded-explog": "s"}
-# Marker sizes (pt): the triangle reads small at one size with the circle and the square.
+# Marker sizes (pt): a triangle looks smaller than a circle or square of the same size,
+# so it is drawn largest.
 FOLD_MS = {"scalar": 4.0, "scalar-control": 4.0,
            "scalar-unfolded-direct": 6.0, "scalar-unfolded-explog": 5.0}
 FAMILY_LS   = {"z_nu": "-", "h_nu_s": "--"}
@@ -72,14 +73,14 @@ FAMILY_MARK = {"z_nu": "o", "h_nu_s": "s"}
 ULP_ONE  = 1.0
 
 # Figures are drawn at the width they are printed at, so a type size here is the size on
-# the page.  LATEX_LINEWIDTH is the paper's \linewidth (A4, 2.4 cm margins: 16.2 cm);
-# TEXT_W stays under it so a tight bounding box is never scaled down.  TEXT_H_MAX leaves
-# room for a caption under a full-page figure.
-LATEX_LINEWIDTH = 6.38
-TEXT_W          = 6.3
+# the page.  LATEX_LINEWIDTH is the paper's \linewidth in inches: 156 mm, the width of A4
+# less the two 27 mm side margins.  TEXT_W is 0.08 in under it, leaving room for the tight
+# bounding box.  TEXT_H_MAX leaves room for a caption under a full-page figure.
+LATEX_LINEWIDTH = 6.14
+TEXT_W          = 6.06
 TEXT_H_MAX      = 8.3
 
-# The type scale, in points on the page; FS_MIN is the smallest size the checker accepts.
+# The type scale, in points on the page; size_report flags text under FS_MIN.
 FS_TICK   = 7.5
 FS_LABEL  = 8.5
 FS_TITLE  = 8.5
@@ -141,12 +142,13 @@ def apply_display_caps(fig):
             t.set_text(display_caps(s))
 
 
-# The file formats save() writes; make_paper_figures.py drops the PNG for the paper set.
+# The file formats save() writes; make_paper_figures.py --paper without --full writes the
+# PDF only.
 FORMATS = ("pdf", "png")
 
 
 def save(fig, outdir, stem):
-    """Write `fig` in each of FORMATS (`<stem>.pdf`, `<stem>.png`) in `outdir`; in paper
+    """Write `fig` in `outdir` as `<stem>.<ext>`, one file per listed format; in paper
     mode record its printed size (check_size)."""
     import os
     apply_display_caps(fig)
@@ -167,7 +169,8 @@ SIZES = []
 def check_size(fig, pdf):
     """Record the size `pdf` prints at when included at \\linewidth, and its smallest text.
 
-    The saved page, not `figsize`, is measured: a tight bounding box crops or grows it.
+    The size is read from the saved page, which a tight bounding box crops or grows
+    relative to `figsize`.
     LaTeX scales the page to LATEX_LINEWIDTH, so every type size is scaled by the same
     factor."""
     import re
@@ -200,8 +203,9 @@ def check_size(fig, pdf):
 
 
 def size_report(root):
-    """Lines describing SIZES, paths relative to `root`; a line starts with `!!` when the
-    figure is taller than TEXT_H_MAX or prints text under FS_MIN."""
+    """Lines describing the recorded sizes (check_size), paths relative to `root`; a line
+    starts with `!!` when the figure is taller than TEXT_H_MAX or prints text under
+    FS_MIN."""
     import os
     out = []
     for pdf, w, h, pt, what, scale in SIZES:

@@ -1,4 +1,4 @@
-/* debye_uniform_order.c -- scalar uniform-order (Debye) kernel for nu >= 30 at every z,
+/* debye_uniform_order.c -- scalar uniform-order (Debye) kernel for nu >= 30 (region_router.c),
  * M = exp(nu G + cc) POLY / sqrt(t) with cc the Stirling tail of -lnGamma(nu) (see the
  * accompanying paper, large-order formulation). */
 #include <math.h>
@@ -26,14 +26,14 @@ double matern_scalar_debye(double z, double nu){
     double POLY = poly[SCALAR_DEBYE_TOP];
     for (int k = SCALAR_DEBYE_TOP - 1; k >= 0; k--) POLY = POLY * in + poly[k];
 
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
     /* The twin: K_nu(nu x) = sqrt(pi/2nu) e^{-nu eta} / (1 + x^2)^{1/4} POLY with
      * eta = t + ln(x / (1 + t)) as written; the router applies the prefactor. */
     const double eta = t + log(x / (1.0 + t));
-#  if WMS_UNFOLDED == 2
-    return 0.5 * log(WMS_PI_2 / nu) - nu * eta - 0.5 * log(t) + log(POLY);
+#  if MATERN_SCALAR_UNFOLDED == 2
+    return 0.5 * log(MATERN_SCALAR_PI_2 / nu) - nu * eta - 0.5 * log(t) + log(POLY);
 #  else
-    return sqrt(WMS_PI_2 / nu) * exp(-nu * eta) / sqrt(t) * POLY;
+    return sqrt(MATERN_SCALAR_PI_2 / nu) * exp(-nu * eta) / sqrt(t) * POLY;
 #  endif
 #else
 
@@ -42,10 +42,10 @@ double matern_scalar_debye(double z, double nu){
 
     /* Stirling tail of -lnGamma(nu) */
     const double rn = 1.0/nu, rn2 = rn*rn;
-    static const double WMS_STIRL[6] = { -1.0/12.0, 1.0/360.0, -1.0/1260.0,
-                                         1.0/1680.0, -1.0/1188.0, 691.0/360360.0 };
-    double cc = WMS_STIRL[SCALAR_STIRLING_TERMS-1];
-    for (int j = SCALAR_STIRLING_TERMS-2; j >= 0; j--) cc = cc*rn2 + WMS_STIRL[j];
+    static const double MATERN_SCALAR_STIRLING_COEFFICIENTS[6] = { -1.0/12.0, 1.0/360.0, -1.0/1260.0,
+                                                                   1.0/1680.0, -1.0/1188.0, 691.0/360360.0 };
+    double cc = MATERN_SCALAR_STIRLING_COEFFICIENTS[SCALAR_STIRLING_TERMS-1];
+    for (int j = SCALAR_STIRLING_TERMS-2; j >= 0; j--) cc = cc*rn2 + MATERN_SCALAR_STIRLING_COEFFICIENTS[j];
     cc = rn * cc;
 
     const double E = nu * G + cc;

@@ -22,8 +22,9 @@ data/*.part
 data/*.bad
 data/*/*.bad
 
-# Not in the release: the paper PDF, the corpus files (make corpus) and site-specific launchers.
+# Not in the release: the paper sources and PDF, the corpus files (make corpus) and site-specific launchers.
 docs/Paper*.pdf
+docs/Paper*.tex
 benchmark/slurm/
 data/*.bin
 data/*/*.bin

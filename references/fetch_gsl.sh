@@ -1,7 +1,8 @@
 #!/bin/bash
 # fetch_gsl.sh [2.6] -- fetches GSL from the first host below that answers, checks its
 # SHA-256 digest and builds a static library only (so no LD_LIBRARY_PATH is needed) into
-# references/gsl/<version>/ (make externals), where benchmark/tools/gsl_flags.sh finds it.
+# references/gsl/<version>/ (make externals), where benchmark/tools/gsl_flags.sh finds it;
+# references/gsl/<version>/build-flags.txt records the compiler and flags of the build.
 set -u
 cd "$(dirname "$0")" || exit 1
 
@@ -53,6 +54,22 @@ for v in "$@"; do
          ./configure --prefix="$dest" --disable-shared --enable-static CC="${CC:-cc}" &&
          make -j"$jobs" && make install ) > "$log" 2>&1; then
         echo "  verified  references/gsl/$v (sha256; static library)"
+        # build-flags.txt, read by benchmark/tools/gsl_flags.sh --library where the library
+        # has no debugging information: the compile command of specfunc/bessel_Knu.c from the
+        # build log (the CC and CFLAGS the build used, a CFLAGS passed down by make included)
+        # without GSL's own -DHAVE_CONFIG_H and -I options and the dependency and file
+        # options, and the version line of that compiler (after a leading ccache or distcc).
+        cmd=$(sed -n 's/^libtool: compile:  *//p' "$log" | grep -m1 ' bessel_Knu\.c' | awk '{
+                  for (i = 1; i <= NF; i++) {
+                      if ($i ~ /^-(MT|MF|o)$/) { i++; continue }
+                      if ($i ~ /^(-DHAVE_CONFIG_H|-I\.|-I\.\.|-MD|-MP|-c|bessel_Knu\.c)$/) continue
+                      printf "%s%s", s, $i; s = " "
+                  } }')
+        cver=""
+        cc1=$(echo "$cmd" | awk '{ print ($1 ~ /(^|\/)(ccache|distcc)$/) ? $2 : $1 }')
+        [ -z "$cc1" ] || cver=$($cc1 --version 2>/dev/null | head -1)
+        printf 'bessel_Knu.c  %s\ncompiler      %s\n' "${cmd:-not found in the build log}" \
+            "${cver:-not determined}" > "$dest/build-flags.txt"
     else
         rm -rf "$dest"
         cp "$log" "$PWD/gsl/build-$v.log" 2>/dev/null

@@ -13,7 +13,7 @@ double matern_scalar_continued_fraction(double z, double nu){
     const double zh = z * 0.5, z4 = zh * zh;          /* z/2 and (z/2)^2 */
     /* S, T: current terms; O1, O2: partial sums.  The term ratios (z/2)^2/(k(nu+k)) and
      * (z/2)^2/(k(nu+k-1)) differ by one index, so both series share one loop. */
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
     /* The twin keeps gnu in the seeds, so O1 = I_nu(z) and O2 = I_(nu-1)(z). */
     const double gnu = pow(zh, nu) / tgamma(nu);
     double S = gnu/nu, T = gnu/zh, O1 = 0.0, O2 = 0.0;
@@ -44,9 +44,9 @@ double matern_scalar_continued_fraction(double z, double nu){
         C += 1.0;
     }
     const double D = nun + z + 0.5 + low1;            /* z K_nu / K_(nu-1)        */
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
     const double K = 1.0 / (z * (O2 + O1 * z / D));   /* K_nu, by the Wronskian   */
-    return WMS_K_RESULT(K);
+    return MATERN_SCALAR_K_RESULT(K);
 #else
     return 2.0 / (z * (O2 + O1 * z / D));             /* the covariance, as above */
 #endif

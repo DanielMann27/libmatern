@@ -954,7 +954,7 @@ def tab_distribution(acc, outdir, runs_note, family="z_nu", backend=None,
 
 
 # ULP distribution of every implementation, by law
-# The quantiles are the harness's own (benchmark/common/wm_metrics.h, nearest
+# The quantiles are the harness's own (benchmark/common/bench_metrics.h, nearest
 # rank), read from the CSV row; the share below 1 ulp is summed from the detail
 # histogram (runs.detail_for), refused when its total differs from `n_scored`.
 QUANTILE_COLS = [("u_min", "min"), ("u_q1", r"$q_1$"), ("u_med", "median"),
@@ -1509,8 +1509,9 @@ def tab_throughput(lad, slad, outdir, runs_note, arch, family="z_nu",
                        + pf.CONV_SUPPLIED.get(family, esc(family)) + ".",
                        "The cost columns give the cost in nanoseconds per "
                        "element for the " + pf._and(pf._size_set(l) for l in laws)
-                       + r" datasets, for the library rows including the "
-                       r"creation and destruction of the workspace in each call; "
+                       + r" datasets, for the library rows of the \texttt{avx512} "
+                       r"and \texttt{avx2} backends, which use a workspace, including "
+                       r"its creation and destruction in each call; "
                        r"the ratio columns give the speedup of the "
                        r"\texttt{" + esc(backends[-1]) + r"} backend over each "
                        "external implementation, computed from the corresponding "
@@ -1523,7 +1524,8 @@ def tab_throughput(lad, slad, outdir, runs_note, arch, family="z_nu",
     for b in backends:
         cells = [text(f"{LIB} ({b})")]
         for l in laws:
-            # Workspace creation and destruction are timed (`ns_ws_per_call_*`).
+            # On avx512 and avx2 the workspace creation and destruction are timed
+            # (`ns_ws_per_call_*`).
             v = ns_at(lad, "ns_ws_per_call_med", N, backend=b, family=family, law=l)
             cells.append(num(v))
             if b == backends[-1]:
@@ -1565,10 +1567,11 @@ def tab_throughput(lad, slad, outdir, runs_note, arch, family="z_nu",
            else r"--: not applicable. "))
     t.provenance(
         runs_note,
-        r"Each cell is the median over repetitions of one call. For this "
-        r"library every repetition creates and destroys its workspace inside "
-        r"the timed region (\texttt{ns\_ws\_per\_call\_med}); the externals "
-        r"have no workspace.",
+        r"Each cell is the median over repetitions of one call. On the "
+        r"\texttt{avx512} and \texttt{avx2} backends of this library every "
+        r"repetition creates and destroys the workspace inside the timed region "
+        r"(\texttt{ns\_ws\_per\_call\_med}); the other backends and the externals "
+        r"use no workspace.",
         r"$N$ is the largest rung every row reached: an external's ladder "
         r"stops when a rung exceeds its wall-clock budget, so the comparison "
         r"covers $N$ up to this value.",
@@ -1800,8 +1803,8 @@ def _cache_keys(machines):
               .replace("U", "") + " cache") for k in sorted(seen)]
 
 
-# A key absent or empty in a run is filled from the first key listed for it: a
-# run without a build_* key carries the run-time toolchain key, and the driver
+# A key absent or empty in a run is filled from the first non-empty key listed for
+# it: a run without a build_* key carries the run-time toolchain key, and the driver
 # API that nvidia-smi did not report is the one the device programs recorded
 # (cudaDriverGetVersion, the same number).
 ENV_FALLBACK = {
@@ -1815,7 +1818,8 @@ ENV_FALLBACK = {
 
 
 def _env_with_fallback(pv):
-    """`pv` with each absent ENV_FALLBACK key filled from its run-time key."""
+    """`pv` with each absent or empty ENV_FALLBACK key filled from the first non-empty
+    key listed for it."""
     out = dict(pv)
     for new, olds in ENV_FALLBACK.items():
         if out.get(new) in (None, ""):
@@ -2789,12 +2793,12 @@ def tab_levin(lev, outdir, runs_note, arch, device="cpu", backend="avx512"):
     if not both:
         return _skip(stem, f"no (law, convention) cell carries both arms on "
                            f"backend {backend}")
-    # Only the datasets with points in the band (pf.levin_reaches).
+    # Only the datasets on which an accuracy column differs (pf.levin_reaches).
     keys = [k for k in both if pf.levin_reaches(on[k], off[k])]
     omitted = [k for k in both if k not in keys]
     if not keys:
-        return _skip(stem, f"no dataset has points in the Levin band on "
-                           f"backend {backend}")
+        return _skip(stem, f"no dataset differs between the arms in an accuracy "
+                           f"column on backend {backend}")
     shipped = {r.get("variant") for r in rows if r.get("shipped") == "yes"}
     ship = "included" if "levin_on" in shipped else \
            ("excluded" if "levin_off" in shipped else "unrecorded")
@@ -2806,8 +2810,8 @@ def tab_levin(lev, outdir, runs_note, arch, device="cpu", backend="avx512"):
     t = Table(stem,
               _caption("Maximum ULP error and runtime cost per element with the "
                        "Levin band included and excluded, on " + on_what
-                       + ", by argument convention, for the datasets with "
-                       "points in the band.",
+                       + ", by argument convention, for the datasets on which "
+                       "the two builds differ in an accuracy statistic.",
                        ("In the default build of this backend the band is %s."
                         % ship) if ship != "unrecorded" else "",
                        "Costs are medians over the timed repetitions and "
@@ -2837,8 +2841,7 @@ def tab_levin(lev, outdir, runs_note, arch, device="cpu", backend="avx512"):
     t.provenance(
         runs_note,
         r"A ratio above one favours including the band.",
-        (r"Omitted, with every accuracy statistic identical in both builds and "
-         r"therefore no point in the band: "
+        (r"Omitted, with every accuracy statistic identical in both builds: "
          + ", ".join(f"{esc(f)} / {esc(l)}" for f, l in omitted) + ".")
         if omitted else "",
         (f"The worst case differs on {moved} of {len(keys)} datasets.")
@@ -3042,10 +3045,11 @@ def tab_threads(thr, outdir, runs_note, arch, family="z_nu"):
                            f"needs at least two")
     by = {(r["backend"], _i(r, "threads")): r for r in rows}
     nb = len(backends)
-    # One cost group: `ns_per_elem` includes workspace creation.
+    # One cost group: `ns_per_elem` includes workspace creation on avx512 and avx2
+    # (threads_cpu.c).
     ng = 2
     head = ["threads"] + [esc(b) for b in backends] * ng
-    groups = [(2, 1 + nb, "ns / element, workspace per call"),
+    groups = [(2, 1 + nb, "ns / element"),
               (2 + nb, 1 + 2 * nb, "efficiency")]
     t = Table(stem,
               _caption("Runtime cost per element and parallel efficiency of the "
@@ -3074,10 +3078,11 @@ def tab_threads(thr, outdir, runs_note, arch, family="z_nu"):
         r"barrier).",
         # Result identity and ULP invariance across thread counts.
         pf.thread_integrity(thr, family)[0].strip(),
-        r"The cost includes the workspace: every thread creates and destroys "
-        r"its own inside the timed region on every repetition, and all threads "
-        r"allocate at the same time, so the cost includes allocator "
-        r"contention. External suppliers allocate no workspace.",
+        r"On the \texttt{avx512} and \texttt{avx2} backends the cost includes the "
+        r"workspace: every thread creates and destroys its own inside the timed "
+        r"region on every repetition, and all threads allocate at the same time, "
+        r"so the cost includes allocator contention. The other backends and the "
+        r"external suppliers allocate no workspace.",
         _why_no_suppliers(thr, family),
         _machine(arch))
     return t.write(outdir)
@@ -3194,11 +3199,12 @@ def tab_threads_throughput(thr, outdir, runs_note, arch, family="z_nu"):
 
 
 # Preview: one compiled document per directory, whose overfull boxes drive
-# fit_to_column.  Its geometry must equal the manuscript's (11pt, a4paper,
-# 2.4cm margins), so that a table fits the preview when it fits the paper.
+# fit_to_column.  Its class and geometry must equal the manuscript's, so that a
+# table that fits the preview fits the paper.
 PREVIEW_PREAMBLE = r"""\documentclass[11pt,a4paper]{article}
-% The manuscript's class and geometry (a4paper, 2.4cm margins).
-\usepackage[margin=2.4cm]{geometry}
+% The manuscript's class and geometry.
+\usepackage{geometry}
+\geometry{left=27mm,right=27mm,top=25mm,bottom=26mm}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{booktabs}
@@ -3211,9 +3217,9 @@ PREVIEW_PREAMBLE = r"""\documentclass[11pt,a4paper]{article}
 % overrides; the environment is therefore redefined to discard the optional
 % argument and use `H`.
 \makeatletter
-\let\WMtable\table
-\let\WMendtable\endtable
-\renewenvironment{table}[1][]{\WMtable[H]}{\WMendtable}
+\let\savedtable\table
+\let\savedendtable\endtable
+\renewenvironment{table}[1][]{\savedtable[H]}{\savedendtable}
 \makeatother
 \setlength{\parindent}{0pt}
 \begin{document}

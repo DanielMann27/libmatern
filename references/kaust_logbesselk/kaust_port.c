@@ -4,7 +4,7 @@
 
 #include <math.h>
 #include <float.h>
-#include "cpu_wm.h"
+#include "cpu_supplier.h"
 
 /* Under nvcc every internal function and table is a device object; the tables
  * need it because ka_cheb holds a pointer to one. */
@@ -105,7 +105,7 @@ KA_FN double ka_kv(double nu, double x, int fix, int iv, int adapt)
                            : ka_trapezoid_log(nu, x, iv));
 }
 
-/* ln K_nu(x): the quadrature's logarithm before its final exp. */
+/* ln K_nu(x): for x > 0.1 the quadrature's logarithm before its final exp. */
 KA_FN double ka_logkv(double nu, double x, int fix, int iv, int adapt)
 {
     if (x <= 0) return INFINITY;
@@ -123,9 +123,9 @@ KA_FN double ka_logkv(double nu, double x, int fix, int iv, int adapt)
 #if defined(__CUDACC__)
 /* The device entry points, called across translation units with -rdc=true by
  * benchmark/suppliers_gpu.cu. */
-__device__ double wmk_dev_kv   (double nu, double x, int fix, int iv, int adapt)
+__device__ double gpu_supplier_kaust_kv   (double nu, double x, int fix, int iv, int adapt)
 { return ka_kv(nu, x, fix, iv, adapt); }
-__device__ double wmk_dev_logkv(double nu, double x, int fix, int iv, int adapt)
+__device__ double gpu_supplier_kaust_logkv(double nu, double x, int fix, int iv, int adapt)
 { return ka_logkv(nu, x, fix, iv, adapt); }
 #else
 #define KA_SUPPLIER_FNS(SUF, FIX, IV, AD)                                             \
@@ -136,21 +136,21 @@ KA_SUPPLIER_FNS(_128,   0, KA_BINS_DEFAULT, 0)
 KA_SUPPLIER_FNS(_40,    0, KA_BINS_COARSE,  0)
 KA_SUPPLIER_FNS(_128k4, 1, KA_BINS_DEFAULT, 1)
 
-const wmc_supplier wmc_kaust = {
+const cpu_supplier cpu_supplier_kaust_128 = {
     "CuBesselK logbesselk.cu @94ec9ca, 128 panels, as released",
-    WMC_LOG_NATIVE,
+    CPU_SUPPLIER_LOG_NATIVE,
     sup_kv_128, NULL, sup_logkv_128
 };
 
-const wmc_supplier wmc_kaust40 = {
+const cpu_supplier cpu_supplier_kaust_40 = {
     "CuBesselK logbesselk.cu @94ec9ca, setIntervals(40), as released",
-    WMC_LOG_NATIVE,
+    CPU_SUPPLIER_LOG_NATIVE,
     sup_kv_40, NULL, sup_logkv_40
 };
 
-const wmc_supplier wmc_kaust4 = {
+const cpu_supplier cpu_supplier_kaust_adaptive = {
     "CuBesselK logbesselk.cu @94ec9ca, 128 panels + e10 + stable log cosh + Eq.(7) range",
-    WMC_LOG_NATIVE,
+    CPU_SUPPLIER_LOG_NATIVE,
     sup_kv_128k4, NULL, sup_logkv_128k4
 };
 #endif

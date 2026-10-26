@@ -68,7 +68,7 @@ static void set_vector(backend_choice *c, evaluate_function f, evaluate_function
                        const char *name)
 {
     c->backend = f; c->direct = fz; c->name = name;
-    /* the width-1 entries (matched, matched_fma) evaluate point by point and use none */
+    /* matched and matched_fma, the names with that prefix, use no workspace */
     c->scalar_isa = "none"; c->needs_workspace = strncmp(name, "matched", 7) != 0;
 }
 

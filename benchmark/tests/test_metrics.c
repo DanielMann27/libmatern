@@ -1,8 +1,8 @@
-/* test_metrics.c -- unit test of the accuracy statistics in wm_metrics.h on fixtures with
+/* test_metrics.c -- unit test of the accuracy statistics in bench_metrics.h on fixtures with
  * known errors.  Run by benchmark/tests/run_tests.sh; exit status 1 on any failure. */
 #include <stdio.h>
 #include <math.h>
-#include "wm_metrics.h"
+#include "bench_metrics.h"
 static int fails=0;
 static void chk(const char*w,double got,double want){
     int ok=(got==want)||(want!=0&&fabs(got-want)/fabs(want)<1e-12);
@@ -22,8 +22,8 @@ int main(void){
     v[10] = NAN;                       /* non-finite -> excluded      */
     hi[11]= 0.0; lo[11]=0.0; v[11]=0.0;/* zero reference, value 0     */
 
-    wm_metrics M;
-    wm_metrics_compute(&M, v, hi, lo, bits, nu, arg, NULL, N, WM_ULP_UP);
+    bench_metrics M;
+    bench_metrics_compute(&M, v, hi, lo, bits, nu, arg, NULL, N, BENCH_ULP_UP);
 
     puts("[population]");
     chkl("n",              (long)M.n, N);
@@ -47,7 +47,7 @@ int main(void){
     chk("u_med_nontrivial (10 pts -> index 5)", M.u_med_nontrivial, 5.0);
 
     puts("[histogram: signed, exact bucket separate]");
-    long pos=0,neg=0; for(int b=0;b<WM_HIST_BINS+2;b++){pos+=M.hist_pos[b];neg+=M.hist_neg[b];}
+    long pos=0,neg=0; for(int b=0;b<BENCH_HIST_BINS+2;b++){pos+=M.hist_pos[b];neg+=M.hist_neg[b];}
     chkl("total histogram entries == n_scored", pos+neg, (long)M.n_scored);
     chkl("exact bucket (bin 0) holds the 2 zeros", M.hist_pos[0], 2);
     chkl("nothing negative here", neg, 0);
@@ -60,8 +60,8 @@ int main(void){
     puts("[sign is kept]");
     double v2[3]={0,0,0}, h2[3]={1.0,1.0,1.0}, l2[3]={0,0,0}, n2[3]={1,1,1}, a2[3]={1,1,1};
     v2[0]=nextafter(1.0,0.0); v2[1]=nextafter(1.0,2.0); v2[2]=1.0;
-    wm_metrics M2; wm_metrics_compute(&M2,v2,h2,l2,NULL,n2,a2,NULL,3,WM_ULP_UP);
-    long n2neg=0,n2pos=0; for(int b=1;b<WM_HIST_BINS+2;b++){n2neg+=M2.hist_neg[b];n2pos+=M2.hist_pos[b];}
+    bench_metrics M2; bench_metrics_compute(&M2,v2,h2,l2,NULL,n2,a2,NULL,3,BENCH_ULP_UP);
+    long n2neg=0,n2pos=0; for(int b=1;b<BENCH_HIST_BINS+2;b++){n2neg+=M2.hist_neg[b];n2pos+=M2.hist_pos[b];}
     chkl("one below the reference -> hist_neg", n2neg, 1);
     chkl("one above the reference -> hist_pos", n2pos, 1);
 
@@ -69,19 +69,19 @@ int main(void){
     /* 64 points at -1..-64 steps, then one exact point.  Eviction compares |ulp|
      * with |ulp| of the last kept entry, so the exact point must not displace the
      * smallest negative error. */
-    enum { NW = WM_WORST_KEEP + 1 };
+    enum { NW = BENCH_WORST_KEEP + 1 };
     static double vw[NW], hw[NW], lw[NW], nw[NW], aw[NW];
     for (int i=0;i<NW;i++){ hw[i]=1.0; lw[i]=0.0; nw[i]=i; aw[i]=i; }
-    for (int i=0;i<WM_WORST_KEEP;i++){ vw[i]=1.0; for(int k=0;k<=i;k++) vw[i]=nextafter(vw[i],0.0); }
-    vw[WM_WORST_KEEP]=1.0;             /* exact, arrives last */
-    wm_metrics MW; wm_metrics_compute(&MW,vw,hw,lw,NULL,nw,aw,NULL,NW,WM_ULP_UP);
-    chkl("n_worst", (long)MW.n_worst, WM_WORST_KEEP);
+    for (int i=0;i<BENCH_WORST_KEEP;i++){ vw[i]=1.0; for(int k=0;k<=i;k++) vw[i]=nextafter(vw[i],0.0); }
+    vw[BENCH_WORST_KEEP]=1.0;             /* exact, arrives last */
+    bench_metrics MW; bench_metrics_compute(&MW,vw,hw,lw,NULL,nw,aw,NULL,NW,BENCH_ULP_UP);
+    chkl("n_worst", (long)MW.n_worst, BENCH_WORST_KEEP);
     /* one step below 1.0 is half an ulp of the reference (the binade below) */
-    chk("worst[63] is |-1 step| = 0.5 ulp, not the exact point", fabs(MW.worst[WM_WORST_KEEP-1].ulp), 0.5);
+    chk("worst[63] is |-1 step| = 0.5 ulp, not the exact point", fabs(MW.worst[BENCH_WORST_KEEP-1].ulp), 0.5);
     chk("worst[0] is |-64 steps| = 32 ulp", fabs(MW.worst[0].ulp), 32.0);
 
     puts("[empty input does not crash or divide by zero]");
-    wm_metrics M3; wm_metrics_compute(&M3,v,hi,lo,bits,nu,arg,NULL,0,WM_ULP_UP);
+    bench_metrics M3; bench_metrics_compute(&M3,v,hi,lo,bits,nu,arg,NULL,0,BENCH_ULP_UP);
     chkl("n_scored", (long)M3.n_scored, 0);
 
     printf("\n%s (%d failures)\n", fails?"FAILURES":"ALL PASS", fails);

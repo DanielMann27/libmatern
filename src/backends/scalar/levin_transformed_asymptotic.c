@@ -1,6 +1,6 @@
 /* levin_transformed_asymptotic.c -- scalar Levin transform of the large-argument series by
- * the difference-table recursion; compiled, but routed only under -DWMS_LEVIN (see the
- * accompanying paper, numerical evaluation of the modified Bessel function). */
+ * the difference-table recursion; compiled, but routed only under -DMATERN_SCALAR_WITH_LEVIN
+ * (see the accompanying paper, numerical evaluation of the modified Bessel function). */
 #include <math.h>
 
 #include "scalar_internal.h"

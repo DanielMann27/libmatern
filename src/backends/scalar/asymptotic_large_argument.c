@@ -41,10 +41,10 @@ double matern_scalar_large_argument_at(double zh, double nu){
         s += t;
         if (fabs(t) <= DBL_EPSILON * fabs(s)) break;     /* per-element exit, relative */
     }
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
     /* matern_scalar_compose_unfolded writes the prefactor as the branch below does, so the
      * direct twin equals this backend bit for bit in this region. */
-#  if WMS_UNFOLDED == 2
+#  if MATERN_SCALAR_UNFOLDED == 2
     return 0.5 * log(M_PI_2 / zh) - zh + log(s);
 #  else
     const double kn   = sqrt(M_PI_2 / zh) * s * exp(-zh);
@@ -78,8 +78,8 @@ double matern_scalar_large_argument_folded_at(double zh, double nu)
     /* Every factor goes into one exponent, so only the answer must be representable:
      *   E = (nu - 1/2) ln z - z - lnGamma(nu) + (1-nu) ln 2 + 1/2 ln(pi/2),  M = e^E * S.
      * lgamma, not log(tgamma): tgamma overflows past nu ~ 171.6. */
-#ifdef WMS_UNFOLDED
-#  if WMS_UNFOLDED == 2
+#ifdef MATERN_SCALAR_UNFOLDED
+#  if MATERN_SCALAR_UNFOLDED == 2
     return 0.5 * log(M_PI_2 / zh) - zh + log(S);
 #  else
     return sqrt(M_PI_2 / zh) * S * exp(-zh);
@@ -94,10 +94,10 @@ double matern_scalar_large_argument_folded_at(double zh, double nu)
 #endif
 }
 
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
 /* The twin's assembly.  The direct prefactor is written as in
  * matern_scalar_large_argument_at; the exp-log sum keeps the evaluation order of the
- * log assembly in references/common/cpu_wm.h. */
+ * log assembly in references/common/cpu_supplier.h. */
 double matern_scalar_log_gamma_unfolded(double nu)
 {
     return scalar_log_gamma(nu);
@@ -105,8 +105,8 @@ double matern_scalar_log_gamma_unfolded(double nu)
 
 double matern_scalar_compose_unfolded(double k, double z, double nu)
 {
-#  if WMS_UNFOLDED == 2
-    return exp((1.0 - nu) * WMS_LN2 - scalar_log_gamma(nu) + nu * log(z) + k);
+#  if MATERN_SCALAR_UNFOLDED == 2
+    return exp((1.0 - nu) * MATERN_SCALAR_LN2 - scalar_log_gamma(nu) + nu * log(z) + k);
 #  else
     const double pref = 2.0 * pow(z*0.5, nu) / tgamma(nu);
     return pref * k;

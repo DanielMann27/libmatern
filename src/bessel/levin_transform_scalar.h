@@ -1,6 +1,6 @@
 /* levin_transform_scalar.h -- width-1 Levin transform for the matched and matched_fma backends.
- * The arithmetic is that of levin_transform_avx2.h, so these backends round as AVX2 does;
- * only LEVIN_INVERSE_INDEX differs, in its width-1 layout. */
+ * The arithmetic is that of levin_transform_avx2.h; only LEVIN_INVERSE_INDEX differs, in
+ * its width-1 layout. */
 #ifndef MATERN_LEVIN_TRANSFORM_SCALAR_H
 #define MATERN_LEVIN_TRANSFORM_SCALAR_H
 

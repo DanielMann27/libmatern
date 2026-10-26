@@ -8,8 +8,8 @@
 
 #include "matern.h"
 #include "corpus_dataset.h"
-#include "common/wm_metrics.h"
-#include "common/wm_timing.h"
+#include "common/bench_metrics.h"
+#include "common/bench_timing.h"
 
 static const struct { int mode; const char *name; } STRATEGIES[] = {
     { MATERN_CUDA_SYNC,         "sync"   },
@@ -22,7 +22,7 @@ enum { STRATEGY_COUNT = (int)(sizeof STRATEGIES / sizeof STRATEGIES[0]) };
 static int call_once(const corpus_dataset *cs, double *out, int z_family, int mode,
                      const matern_cuda_options *o)
 {
-    const wm_dataset *s = &cs->set;
+    const bench_dataset *s = &cs->set;
     if (z_family)
         return matern_covariance_cuda_z_tuned(out, s->argument, s->order, s->count,
                                               mode, o);
@@ -30,33 +30,33 @@ static int call_once(const corpus_dataset *cs, double *out, int z_family, int mo
                                         s->count, mode, o);
 }
 
-/* One configuration, timed under common/wm_timing.h.  The warm-up passes absorb
+/* One configuration, timed under common/bench_timing.h.  The warm-up passes absorb
  * context setup and the ring's pinned allocation; only completed repetitions count. */
-static wm_time time_config(const corpus_dataset *cs, double *out, int z_family,
+static bench_time time_config(const corpus_dataset *cs, double *out, int z_family,
                            int mode, const matern_cuda_options *o, int reps,
                            int *status, const char *family, const char *law,
                            const char *label)
 {
     double *t = (double *)malloc((size_t)(reps > 0 ? reps : 1) * sizeof *t);
-    wm_time z; memset(&z, 0, sizeof z);
+    bench_time z; memset(&z, 0, sizeof z);
     if (!t) { *status = MATERN_OUT_OF_MEMORY; return z; }
 
     *status = MATERN_OK;
-    for (int w = 0; w < WM_WARMUP_REPS && *status == MATERN_OK; w++)
+    for (int w = 0; w < BENCH_WARMUP_REPS && *status == MATERN_OK; w++)
         *status = call_once(cs, out, z_family, mode, o);
     if (*status != MATERN_OK) { free(t); return z; }
 
     const double per = 1e9 / (double)cs->set.count;
     int done = 0;
     for (int r = 0; r < reps; r++) {
-        const double a = wm_now_s();
+        const double a = bench_now_s();
         const int st = call_once(cs, out, z_family, mode, o);
-        const double el = wm_now_s() - a;
+        const double el = bench_now_s() - a;
         if (st != MATERN_OK) { *status = st; break; }
         t[done++] = el * per;
     }
-    wm_raw_emit("cuda", "-", family, law, label, cs->set.count, t, done);
-    const wm_time out_t = wm_time_reduce(t, done);
+    bench_raw_emit("cuda", "-", family, law, label, cs->set.count, t, done);
+    const bench_time out_t = bench_time_reduce(t, done);
     free(t);
     return out_t;
 }
@@ -65,7 +65,7 @@ static wm_time time_config(const corpus_dataset *cs, double *out, int z_family,
  * default-options output (`identical`); a failed configuration gives n/a. */
 static int score_config(const corpus_dataset *cs, double *out, const double *ref,
                         int z_family, int mode, const matern_cuda_options *o,
-                        int status, wm_metrics *M, const char **same)
+                        int status, bench_metrics *M, const char **same)
 {
     const size_t N = cs->set.count;
     memset(M, 0, sizeof *M); M->n = N; M->u_max = NAN;
@@ -74,11 +74,11 @@ static int score_config(const corpus_dataset *cs, double *out, const double *ref
     for (size_t k = 0; k < N; k++) out[k] = NAN;
     const int st = call_once(cs, out, z_family, mode, o);
     if (st != MATERN_OK) return st;
-    wm_metrics_compute(M, out, cs->set.reference_high, cs->set.reference_low,
+    bench_metrics_compute(M, out, cs->set.reference_high, cs->set.reference_low,
                        cs->accuracy_bits, cs->set.order,
                        cs->set.has_length_scale ? cs->set.h : cs->set.argument,
                        cs->set.has_length_scale ? cs->set.length_scale : NULL,
-                       N, WM_ULP_MODE_DEFAULT);
+                       N, BENCH_ULP_MODE_DEFAULT);
     *same = (memcmp(out, ref, N * sizeof *out) == 0) ? "yes" : "no";
     return MATERN_OK;
 }
@@ -87,11 +87,11 @@ static int score_config(const corpus_dataset *cs, double *out, const double *ref
                 "exact,min_bits,u_min,u_q1,u_med,u_q3,u_p99,u_p999,u_max,u_mean," \
                 "u_iqr,u_fence,beyond_fence,u_med_nontrivial,rel_max,abs_max," \
                 "worst_nu,worst_arg"
-static void print_acc(const wm_metrics *M)
+static void print_acc(const bench_metrics *M)
 {
     printf(",%s,%zu,%zu,%zu,%zu,%zu,%zu,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
            "%.17g,%.17g,%.17g,%.17g,%zu,%.17g,%.17g,%.17g,%.17g,%.17g",
-           wm_ulp_mode_name(WM_ULP_MODE_DEFAULT), M->n_scored, M->n_excluded, M->n_nonfinite,
+           bench_ulp_mode_name(BENCH_ULP_MODE_DEFAULT), M->n_scored, M->n_excluded, M->n_nonfinite,
            M->n_ref_zero, M->n_ref_subnormal, M->n_exact, M->min_bits,
            M->u_min, M->u_q1, M->u_med, M->u_q3, M->u_p99, M->u_p999, M->u_max,
            M->u_mean, M->u_iqr, M->u_fence_hi, M->n_beyond_fence,
@@ -112,7 +112,7 @@ int main(int argc, char **argv)
 {
     const char *family = "h_nu_s", *law = "size_random";
     const char *root = "data", *format = "csv";
-    int reps = WM_REPS_MAX_DEFAULT; size_t n = 0;   /* the pipeline's default count */
+    int reps = BENCH_REPS_MAX_DEFAULT; size_t n = 0;   /* the pipeline's default count */
 
     for (int a = 1; a < argc; a++) {
         const int nx = (a + 1 < argc);
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
 
     const int z_family = !strcmp(family, "z_nu");
     /* per-repetition samples, one file per invocation (run_gpu.sh names it) */
-    wm_raw_open(getenv("WM_RAW_REPS"));
+    bench_raw_open(getenv("BENCH_TIMING_RAW"));
 
     corpus_dataset cs;
     /* only the first n points are evaluated, so only they are read */
@@ -182,9 +182,9 @@ int main(int argc, char **argv)
             int status = 0;
             char label[64];
             snprintf(label, sizeof label, "block%d/%s", BLOCKS[i], STRATEGIES[s].name);
-            const wm_time t = time_config(&cs, out, z_family, STRATEGIES[s].mode,
+            const bench_time t = time_config(&cs, out, z_family, STRATEGIES[s].mode,
                                           &o, reps, &status, family, law, label);
-            wm_metrics M; const char *same;
+            bench_metrics M; const char *same;
             status = score_config(&cs, out, ref, z_family, STRATEGIES[s].mode,
                                   &o, status, &M, &same);
             if (strcmp(same, "yes")) rc = 4;
@@ -192,7 +192,7 @@ int main(int argc, char **argv)
             {
                 printf("%d,cuda,-,%s,%s,cuda,block,%d,%s,%zu,%d,%.6f,%.6f,%.6f,%s,%d,"
                        "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,call",
-                       WM_SCHEMA, family, law, BLOCKS[i], STRATEGIES[s].name, N, t.reps,
+                       BENCH_SCHEMA, family, law, BLOCKS[i], STRATEGIES[s].name, N, t.reps,
                        t.min, t.med, t.spread, same, status,
                        t.min, t.q1, t.q3, t.p95, t.max, t.mean, t.iqr, N);
                 print_acc(&M); printf("\n");
@@ -211,9 +211,9 @@ int main(int argc, char **argv)
         int status = 0;
         char label[64];
         snprintf(label, sizeof label, "host_threads%d/ring", MT[i]);
-        const wm_time t = time_config(&cs, out, z_family, MATERN_CUDA_ASYNC_RING,
+        const bench_time t = time_config(&cs, out, z_family, MATERN_CUDA_ASYNC_RING,
                                       &o, reps, &status, family, law, label);
-        wm_metrics M; const char *same;
+        bench_metrics M; const char *same;
         status = score_config(&cs, out, ref, z_family, MATERN_CUDA_ASYNC_RING,
                               &o, status, &M, &same);
         if (strcmp(same, "yes")) rc = 4;
@@ -221,7 +221,7 @@ int main(int argc, char **argv)
         {
             printf("%d,cuda,-,%s,%s,cuda,host_threads,%d,ring,%zu,%d,%.6f,%.6f,%.6f,%s,%d,"
                    "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,call",
-                   WM_SCHEMA, family, law, MT[i], N, t.reps,
+                   BENCH_SCHEMA, family, law, MT[i], N, t.reps,
                    t.min, t.med, t.spread, same, status,
                    t.min, t.q1, t.q3, t.p95, t.max, t.mean, t.iqr, N);
             print_acc(&M); printf("\n");
@@ -231,7 +231,7 @@ int main(int argc, char **argv)
     }
 
     free(out); free(ref);
-    wm_raw_close();
+    bench_raw_close();
     corpus_dataset_free(&cs);
     matern_cuda_release();
     return rc;

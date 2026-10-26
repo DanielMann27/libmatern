@@ -58,7 +58,7 @@ supsum=$(awk -v l="$nlaw" -v f="$nfam" -v S="$sumns" 'BEGIN{printf "%d", S*l/2*f
 nrows=$((13 * nlaw * nfam))
 # SUP_LADDER=all adds the 6 KAUST rows per law and family, modelled as factor 11 on sumns.
 if [ "${SUP_LADDER:-ship}" = all ]; then supsum=$((supsum * 11)); nrows=$((19 * nlaw * nfam)); fi
-# The calibration used REPS=65, i.e. 67 calls with the 2 warm-up calls (WM_WARMUP_REPS).
+# The calibration used REPS=65, i.e. 67 calls with the 2 warm-up calls (BENCH_WARMUP_REPS).
 sup=$(awk -v n="$ntop" -v S="$supsum" -v w="$w" -v k="$calls" 'BEGIN{printf "%d", w*n*65*S*1e-9*k/67}')
 # A row stops after its first rung over the budget: at most 4 x the budget per row.
 cap=$((nrows * 4 * ${SUP_LADDER_BUDGET:-20}))

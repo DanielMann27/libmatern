@@ -1,6 +1,6 @@
 /* exponential_avx2.h -- e^x for four doubles with the reduction, table and polynomial of
  * exponential_avx512.h; the 2^(j/8) table is assembled from 32-bit halves by permutes.
- * Finite x in [-708, 708]. */
+ * Finite x in [ln DBL_MIN, 708]. */
 #ifndef MATERN_EXPONENTIAL_AVX2_H
 #define MATERN_EXPONENTIAL_AVX2_H
 

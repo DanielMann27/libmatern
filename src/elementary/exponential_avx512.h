@@ -1,6 +1,6 @@
 /* exponential_avx512.h -- e^x for eight doubles: Cody-Waite reduction by ln2/8, a 2^(j/8)
  * double-double table read by an in-register permute, degree-7 minimax; finite x in
- * [-708, 708] (callers bound the argument). */
+ * [ln DBL_MIN, 708] (callers bound the argument). */
 #ifndef MATERN_EXPONENTIAL_AVX512_H
 #define MATERN_EXPONENTIAL_AVX512_H
 
@@ -11,7 +11,7 @@
 #endif
 
 /* p * 2^k by an integer add of k << 52 to the bits of p; exact while the biased
- * exponent of p plus k stays in [1, 2046], which holds for x in [-708, 708]. */
+ * exponent of p plus k stays in [1, 2046], which holds for x in [ln DBL_MIN, 708]. */
 static inline __m512d matern_exp_scale_by_power_of_two(__m512d p, __m512i k)
 {
     __m512i bits = _mm512_add_epi64(_mm512_castpd_si512(p), _mm512_slli_epi64(k, 52));

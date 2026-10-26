@@ -7,15 +7,15 @@ set -u
 cd "$(dirname "$0")/../.." || exit 0
 
 # probe: writes the probe into a new temporary file and prints its path; a caller exports it
-# as WM_MISSING_CACHE and removes it at exit.  Without it, rows and lines probe for themselves.
+# as BENCH_MISSING_CACHE and removes it at exit.  Without it, rows and lines probe for themselves.
 probe() {
     local f
-    f=$(mktemp "${TMPDIR:-/tmp}/wm_missing.XXXXXX") || return 0
+    f=$(mktemp "${TMPDIR:-/tmp}/bench_missing.XXXXXX") || return 0
     "${MAKE:-make}" -s --no-print-directory externals-missing > "$f" 2>/dev/null
     printf '%s\n' "$f"
 }
 
-CACHE=${WM_MISSING_CACHE:-}
+CACHE=${BENCH_MISSING_CACHE:-}
 if [ "${1:-}" != probe ] && { [ -z "$CACHE" ] || [ ! -r "$CACHE" ]; }; then
     CACHE=$(probe); trap 'rm -f "$CACHE"' EXIT
 fi

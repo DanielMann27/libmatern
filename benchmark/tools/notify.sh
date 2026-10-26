@@ -1,7 +1,7 @@
 #!/bin/bash
 # notify.sh <title> <message> -- reports the end of a long benchmark step: prints it, rings the
 # bell and shows a desktop notification where possible.  NOTIFY=auto (default) | none | <command>
-# (run by sh with WM_NOTIFY_TITLE and WM_NOTIFY_MESSAGE set).  Always exits 0.
+# (run by sh with BENCH_NOTIFY_TITLE and BENCH_NOTIFY_MESSAGE set).  Always exits 0.
 set -u
 TITLE="${1:-benchmark}"
 MESSAGE="${2:-finished}"
@@ -13,7 +13,7 @@ echo "$TITLE: $MESSAGE"
 case "$MODE" in
     none) exit 0 ;;
     auto) ;;
-    *)    WM_NOTIFY_TITLE="$TITLE" WM_NOTIFY_MESSAGE="$MESSAGE" sh -c "$MODE" >/dev/null 2>&1 &
+    *)    BENCH_NOTIFY_TITLE="$TITLE" BENCH_NOTIFY_MESSAGE="$MESSAGE" sh -c "$MODE" >/dev/null 2>&1 &
           exit 0 ;;
 esac
 

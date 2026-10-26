@@ -12,10 +12,11 @@
 #define HALF_INTEGER_SCALAR_CAP HALF_INTEGER_MAX_DEGREE   /* scalar: no narrowing */
 #define HALF_INTEGER_VECTOR_CAP 29                        /* vector: nu <= 29.5   */
 
-/* AVX-512 and AVX2 entries: a half-integer point takes the closed form inside a
- * constant-order run or a mixed half-integer segment of at least this many points, or one
- * that is the whole remainder; otherwise it goes to the router.  The scalar and width-1
- * entries have no threshold. */
+/* AVX-512 and AVX2 entries scan the batch from its start: a half-integer point within the
+ * cap takes the closed form inside a constant-order run or a mixed half-integer segment of
+ * at least this many points, or one that reaches the end of the batch; otherwise it goes to
+ * the router, as does the rest of the batch from the first shorter run that takes no closed
+ * form.  The scalar and width-1 entries have no threshold. */
 #define HALF_INTEGER_MIN_RUN 256
 
 /* p if nu is exactly p + 1/2 with 0 <= p <= cap, else -1.  The test has no tolerance,

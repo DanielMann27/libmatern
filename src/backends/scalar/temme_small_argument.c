@@ -47,7 +47,7 @@ double matern_scalar_small_argument(double z, double nu){
     const double ee = exp(e);
     double pp = 0.5 * ee / gampl;
     double qq = 0.5 / (ee * gammi);
-#ifndef WMS_UNFOLDED
+#ifndef MATERN_SCALAR_UNFOLDED
     const double zg = 1.0 / pp;          /* F_T */
 #endif
     double c = 1.0;
@@ -67,7 +67,7 @@ double matern_scalar_small_argument(double z, double nu){
     }
     const double K_mu0 = sum;            /* K_mu0(z)     */
 
-#ifdef WMS_UNFOLDED
+#ifdef MATERN_SCALAR_UNFOLDED
     const double K_mu1 = sum1 * 2.0 / z; /* K_(mu0+1)(z) */
     /* The twin: upward recurrence on K itself in nl steps (base order nu for nu < 1/2). */
     double K;
@@ -80,7 +80,7 @@ double matern_scalar_small_argument(double z, double nu){
         }
         K = k_cur;
     }
-    return WMS_K_RESULT(K);
+    return MATERN_SCALAR_K_RESULT(K);
 #else
     /* nu < 1/2: T_0 = F_T mu0 K_mu0, as 1/Gamma(mu0) = mu0/Gamma(1+mu0).  Otherwise
      * T_1 = F_T sum1 at order mu0 + 1 and l_1 = F_T K_mu0 (z/2)^2, in which mu0 cancels, then

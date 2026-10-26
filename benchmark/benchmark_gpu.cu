@@ -9,15 +9,15 @@
 extern "C" {
 #include "corpus_dataset.h"
 }
-#include "common/wm_metrics.h"
-#include "common/wm_timing.h"
+#include "common/bench_metrics.h"
+#include "common/bench_timing.h"
 #include "matern.h"
 
 /* In build/cuda_bench.o, not in matern.h: the device routing compiled in. */
 extern "C" int matern_cuda_route_flags(void);
 
 /* The ULP mode of the scoring call and of the `ulp_mode` column. */
-#define WM_ACC_MODE WM_ULP_MODE_DEFAULT
+#define BENCH_ACCURACY_ULP_MODE BENCH_ULP_MODE_DEFAULT
 #include "common/build_info_cuda.h"
 
 struct mode_entry { int mode; const char *name; };
@@ -37,9 +37,9 @@ static const char *ALL_LAWS[] = { "grid","random","small_z","near_int","half_int
                                   "size_random_large","size_half_large" };
 static const int N_LAWS = (int)(sizeof ALL_LAWS / sizeof *ALL_LAWS);
 
-/* Times the scored call under common/wm_timing.h, transfers included, since the
+/* Times the scored call under common/bench_timing.h, transfers included, since the
  * transfer modes differ in them. */
-static wm_time time_mode(const corpus_dataset *cs, double *out, size_t n,
+static bench_time time_mode(const corpus_dataset *cs, double *out, size_t n,
                          int mode, int has_length_scale, int reps, size_t cap,
                          size_t *timed_points, const char *fam_label,
                          const char *law_label, const char *mode_label)
@@ -48,22 +48,22 @@ static wm_time time_mode(const corpus_dataset *cs, double *out, size_t n,
     if (cap && n > cap) n = cap;
     *timed_points = n;
     double *t = (double *)malloc((size_t)reps * sizeof *t);
-    if (!t) { wm_time z; memset(&z, 0, sizeof z); return z; }
-    for (int w = 0; w < WM_WARMUP_REPS; w++)
+    if (!t) { bench_time z; memset(&z, 0, sizeof z); return z; }
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++)
         has_length_scale ? matern_covariance_cuda(out, cs->set.h, cs->set.order,
                                                   cs->set.length_scale, n, mode)
                          : matern_covariance_cuda_z(out, cs->set.argument, cs->set.order,
                                                     n, mode);
     for (int r = 0; r < reps; r++) {
-        double t0 = wm_now_s();
+        double t0 = bench_now_s();
         has_length_scale ? matern_covariance_cuda(out, cs->set.h, cs->set.order,
                                                   cs->set.length_scale, n, mode)
                          : matern_covariance_cuda_z(out, cs->set.argument, cs->set.order,
                                                     n, mode);
-        t[r] = (wm_now_s() - t0) * 1e9 / (double)n;
+        t[r] = (bench_now_s() - t0) * 1e9 / (double)n;
     }
-    wm_raw_emit("cuda", "-", fam_label, law_label, mode_label, n, t, reps);
-    wm_time R = wm_time_reduce(t, reps);
+    bench_raw_emit("cuda", "-", fam_label, law_label, mode_label, n, t, reps);
+    bench_time R = bench_time_reduce(t, reps);
     free(t);
     return R;
 }
@@ -79,12 +79,12 @@ static void ladder_header(void)
 }
 
 static void ladder_row(const char *fam, const char *law, const char *mode,
-                       size_t n, const wm_time *T, double nu_med, double arg_med)
+                       size_t n, const bench_time *T, double nu_med, double arg_med)
 {
     printf("%d,cuda,-,%s,%s,%s,%zu,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%.17g,%.17g,"
            "call,%zu\n",
-           WM_SCHEMA, fam, law, mode, n,
+           BENCH_SCHEMA, fam, law, mode, n,
            T->min, T->q1, T->med, T->q3, T->p95, T->max, T->mean, T->iqr,
            T->spread, T->reps, nu_med, arg_med, n);
 }
@@ -114,12 +114,12 @@ static void csv_header(void)
 }
 
 static void csv_row(const char *fam, const char *law, const char *mode,
-                    const wm_metrics *M, const wm_time *T, size_t ns_points)
+                    const bench_metrics *M, const bench_time *T, size_t ns_points)
 {
     printf("%d,cuda,-,%s,%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%d,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%zu,call,%zu\n",
-           WM_SCHEMA, fam, law, mode, wm_ulp_mode_name(WM_ACC_MODE),
+           BENCH_SCHEMA, fam, law, mode, bench_ulp_mode_name(BENCH_ACCURACY_ULP_MODE),
            M->n, M->n_scored, M->n_excluded, M->n_nonfinite,
            M->n_ref_zero, M->n_ref_subnormal, M->n_exact, M->min_bits,
            M->u_min, M->u_q1, M->u_med, M->u_q3, M->u_p99, M->u_p999, M->u_max,
@@ -148,14 +148,14 @@ int main(int argc, char **argv)
     size_t ladder_max = (size_t)-1;  /* --ladder-max: the top rung (default: corpus size) */
     int check_modes = 1;
     /* the pipeline's fixed repetition count, settable with --reps */
-    int reps = WM_REPS_MAX_DEFAULT;
+    int reps = BENCH_REPS_MAX_DEFAULT;
 
     /* --build-info, before any device call, so that it runs without a GPU;
      * build/detect relays it into PROVENANCE.txt. */
     for (int a = 1; a < argc; a++)
         if (!strcmp(argv[a], "--build-info")) {
-            wm_build_info_cuda("gpu_benchmark");
-            wm_build_info_kv(stdout, "gpu_benchmark", "ulp_mode", wm_ulp_mode_name(WM_ACC_MODE));
+            bench_build_info_cuda("gpu_benchmark");
+            bench_build_info_kv(stdout, "gpu_benchmark", "ulp_mode", bench_ulp_mode_name(BENCH_ACCURACY_ULP_MODE));
             return 0;
         }
 
@@ -174,7 +174,7 @@ int main(int argc, char **argv)
         /* The routing flags come from the library, where the device routing is fixed. */
         else if (!strcmp(argv[a],"--print-build")) {
             int f = matern_cuda_route_flags();
-            printf("levin=%s\n", (f & 32) ? "on" : "off");   /* MATERN_ROUTE_L */
+            printf("levin=%s\n", (f & 32) ? "on" : "off");   /* MATERN_ROUTE_LEVIN_BIT */
             printf("route_flags=%d\n", f);
             return 0;
         }
@@ -200,8 +200,8 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "benchmark_gpu: device %s\n", matern_cuda_device_name());
 
-    wm_raw_open(getenv("WM_RAW_REPS"));
-    wm_detail_open(getenv("WM_ACC_DETAIL"));
+    bench_raw_open(getenv("BENCH_TIMING_RAW"));
+    bench_detail_open(getenv("BENCH_ACCURACY_DETAIL"));
     if (!strcmp(format,"csv")) { if (ladder) ladder_header(); else csv_header(); }
 
     char famb[64]; snprintf(famb, sizeof famb, "%s", families);
@@ -241,22 +241,22 @@ int main(int argc, char **argv)
                     for (size_t nn = 256; nn <= n && nn <= ladder_max; nn <<= 1) {
                         double *t = (double *)malloc((size_t)reps * sizeof *t);
                         if (!t) break;
-                        for (int w = 0; w < WM_WARMUP_REPS; w++)
+                        for (int w = 0; w < BENCH_WARMUP_REPS; w++)
                             has_length_scale ? matern_covariance_cuda(out, cs.set.h, cs.set.order,
                                                                       cs.set.length_scale, nn, MODES[m].mode)
                                              : matern_covariance_cuda_z(out, cs.set.argument,
                                                                         cs.set.order, nn, MODES[m].mode);
                         for (int r = 0; r < reps; r++) {
-                            double t0 = wm_now_s();
+                            double t0 = bench_now_s();
                             has_length_scale ? matern_covariance_cuda(out, cs.set.h, cs.set.order,
                                                                       cs.set.length_scale, nn, MODES[m].mode)
                                              : matern_covariance_cuda_z(out, cs.set.argument,
                                                                         cs.set.order, nn, MODES[m].mode);
-                            t[r] = (wm_now_s() - t0) * 1e9 / (double)nn;
+                            t[r] = (bench_now_s() - t0) * 1e9 / (double)nn;
                         }
-                        wm_raw_emit("cuda", "-", fs, law, MODES[m].name, nn,
+                        bench_raw_emit("cuda", "-", fs, law, MODES[m].name, nn,
                                     t, reps);
-                        wm_time T = wm_time_reduce(t, reps);
+                        bench_time T = bench_time_reduce(t, reps);
                         free(t);
                         double numed  = med_of(cs.set.order, nn);
                         double argmed = med_of(has_length_scale ? cs.set.h : cs.set.argument, nn);
@@ -302,19 +302,19 @@ int main(int argc, char **argv)
                 }
                 /* Scored against hi + lo: a reference rounded to one double is 0 where
                  * M is below the double range and would score a zero result as exact. */
-                wm_metrics M;
-                wm_metrics_compute(&M, out, cs.set.reference_high, cs.set.reference_low,
+                bench_metrics M;
+                bench_metrics_compute(&M, out, cs.set.reference_high, cs.set.reference_low,
                                    cs.accuracy_bits, cs.set.order,
                                    has_length_scale ? cs.set.h : cs.set.argument,
                                    has_length_scale ? cs.set.length_scale : NULL,
-                                   n, WM_ACC_MODE);
+                                   n, BENCH_ACCURACY_ULP_MODE);
                 M.n_file = cs.file_points;
-                /* the detail sidecar (wm_metrics.h), before the timed loop reuses `out` */
-                wm_detail_emit("cuda", "-", fs, law, MODES[m].name, &M, out,
+                /* the detail sidecar (bench_metrics.h), before the timed loop reuses `out` */
+                bench_detail_emit("cuda", "-", fs, law, MODES[m].name, &M, out,
                                cs.set.order, has_length_scale ? cs.set.h : cs.set.argument,
                                has_length_scale ? cs.set.length_scale : NULL, n);
                 size_t tpts = 0;
-                wm_time T = time_mode(&cs, out, n, MODES[m].mode,
+                bench_time T = time_mode(&cs, out, n, MODES[m].mode,
                                       cs.set.has_length_scale,
                                       reps, time_points, &tpts,
                                       fs, law, MODES[m].name);
@@ -329,8 +329,8 @@ int main(int argc, char **argv)
             corpus_dataset_free(&cs);
         }
     }
-    wm_raw_close();
-    wm_detail_close();
+    bench_raw_close();
+    bench_detail_close();
     matern_cuda_release();
     if (mismatches)
         fprintf(stderr, "benchmark_gpu: %d transfer-mode mismatch(es) -- see above\n",

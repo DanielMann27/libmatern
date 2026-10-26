@@ -2,8 +2,8 @@
 """make_paper_figures.py -- builds the paper figure set from the recorded runs in
 benchmark/runs/ and measures nothing.  Runs from hosts of one CPU model are pooled into one
 machine, and each kind of result comes from that machine's newest run that has it;
---paper writes into plots/paper-final/ with captions.tex.  By default only the figures
-the paper uses are drawn (PAPER_FIGURES); --full draws every figure."""
+--paper writes into plots/paper-final/ with captions.tex.  By default only the paper set
+is drawn (PAPER_FIGURES); --full draws every figure."""
 import argparse, csv, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,8 +36,8 @@ UNREADABLE = []
 
 
 def read_raw_reps(d, rid):
-    """Every per-repetition timing sample (`timing_raw.*`, written under the WM_RAW_REPS
-    prefix by common/wm_timing.h) in one run directory, concatenated: for example
+    """Every per-repetition timing sample (`timing_raw.*`, written under the BENCH_TIMING_RAW
+    prefix by common/bench_timing.h) in one run directory, concatenated: for example
     `timing_raw.<backend>`, `.suppliers.<supplier>`, `.suppliers_ladder.<supplier>`,
     `.ladder.<backend>`, `.gpu*`; the `.err` and `.sched.csv` files are skipped.
     mp.read_csv would skip these rows (no `schema` column), so the header is checked
@@ -198,9 +198,35 @@ def read_provenance(run_dir):
     return out
 
 
+# The Boost and GSL copy behind the CPU rows and the Boost behind the GPU rows, recorded as
+# `<dir> (<origin>)` by references/Makefile (boost_detect.sh --where cpu, gsl_flags.sh
+# --where) and the Makefile (boost_detect.sh --where gpu).
+SOURCE_KEYS = ("build_cpu_supplier_cxx_boost_source", "build_cpu_supplier_gsl_source",
+               "build_gpu_suppliers_boost_source")
+# The GSL library file behind the gsl row, `<file> (<origin>); <build>; <fused multiply-adds>`
+# (gsl_flags.sh --library); its file is shown as a `_source` directory is.
+LIBRARY_KEY = "build_cpu_supplier_gsl_library"
+
+
+def _source_short(d, origin):
+    """A `_source` directory as HARDWARE.md shows it, with its origin: a copy under
+    `references/` named from there, a directory under /usr/ or /opt/ in full, any other cut
+    to its last component."""
+    import re
+    d = d.rstrip("/")
+    ref = re.search(r"(?:^|/)(references/(?:boost|gsl)/[^/]+)$", d)
+    if ref:
+        d = ref.group(1)
+    elif not re.match(r"/(?:usr|opt)(?:/|$)", d):
+        d = d.rsplit("/", 1)[-1]
+    return f"{d} ({origin})" if d else f"({origin})"
+
+
 def _hardware_value(key, v):
-    """A PROVENANCE value as HARDWARE.md shows it: absolute paths cut to the last component;
-    `exclusive`, an absent `gpu` and `placement` reduced to their recorded result."""
+    """A PROVENANCE value as HARDWARE.md shows it: absolute paths cut to the last component
+    (a `_source` value with its origin by _source_short, and the file of LIBRARY_KEY in the
+    same way, one under `references/gsl/` named from there); `exclusive`, an absent `gpu` and
+    `placement` reduced to their recorded result."""
     import re
     v = " ".join(str(v).split())
     if key == "exclusive":
@@ -209,6 +235,18 @@ def _hardware_value(key, v):
         return "none"
     if key == "placement":
         v = re.sub(r"\s*\([^()]*\)", "", v)
+    if key in SOURCE_KEYS:
+        m = re.fullmatch(r"(.*?) ?\(([^()]*)\)", v)
+        if m:
+            return _source_short(m.group(1), m.group(2))
+    if key == LIBRARY_KEY:
+        head, sep, tail = v.partition("; ")
+        m = re.fullmatch(r"(.*?) ?\(([^()]*)\)", head)
+        if m:
+            ref = re.search(r"(?:^|/)(references/gsl/[^/]+/.+)$", m.group(1))
+            head = (f"{ref.group(1)} ({m.group(2)})" if ref
+                    else _source_short(m.group(1), m.group(2)))
+            return head + sep + re.sub(r"(?<![\w.])/(?:[^\s/:]+/)+", "", tail)
     return re.sub(r"(?<![\w.])/(?:[^\s/:]+/)+", "", v)
 
 
@@ -237,15 +275,19 @@ def write_hardware(runs, outdir, prov=None):
         ("build_cpu_supplier_c_compiler", "C supplier compiler"),
         ("build_cpu_supplier_cxx_compiler", "C++ supplier compiler"),
         ("build_cpu_supplier_cxx_boost", "Boost, CPU row (compiled against)"),
+        ("build_cpu_supplier_cxx_boost_source", "Boost, CPU row (copy used)"),
         ("build_cpu_supplier_cxx_boost_eval_type", "Boost evaluation type, CPU row"),
         ("build_cpu_supplier_gsl_headers", "GSL headers"),
         ("build_cpu_supplier_gsl_runtime", "GSL library (loaded)"),
+        ("build_cpu_supplier_gsl_source", "GSL (copy used)"),
+        (LIBRARY_KEY, "GSL library (linked)"),
         ("build_gpu_benchmark_compiler", "nvcc (compiled with)"),
         ("build_gpu_benchmark_host_compiler", "nvcc host compiler"),
         ("build_gpu_library_host_compiler", "library device object, host compiler"),
         ("build_gpu_benchmark_cuda_headers", "CUDA headers"),
         ("build_gpu_benchmark_cuda_runtime", "CUDA runtime (loaded)"),
         ("build_gpu_suppliers_boost", "Boost, GPU row (compiled against)"),
+        ("build_gpu_suppliers_boost_source", "Boost, GPU row (copy used)"),
         ("build_gpu_suppliers_boost_eval_type", "Boost evaluation type, GPU row"),
         ("make_cc", "make CC"), ("make_cxx", "make CXX"), ("make_nvcc", "make NVCC"),
         ("make_fma", "make FMA"),
@@ -273,6 +315,24 @@ def write_hardware(runs, outdir, prov=None):
         ("load_before", "load at open"), ("load_after", "load at close"),
         ("placement", "placement achieved"),
     ]
+    # The clause on the `_source` keys and on LIBRARY_KEY names those a run records.
+    has_src = any(k in pv for _, pv in rows for k in SOURCE_KEYS)
+    has_lib = any(LIBRARY_KEY in pv for _, pv in rows)
+    if has_src and has_lib:
+        paths = ["paths are shortened to the file name (in the `_source` keys and the first",
+                 "field of `build_cpu_supplier_gsl_library` a path under `references/` is",
+                 "named from there and one under `/usr/` or `/opt/` in full, followed by its",
+                 "origin), and"]
+    elif has_src:
+        paths = ["paths are shortened to the file name (in the `_source` keys a directory",
+                 "under `references/` is named from there and one under `/usr/` or `/opt/`",
+                 "in full, followed by its origin), and"]
+    elif has_lib:
+        paths = ["paths are shortened to the file name (in the first field of",
+                 "`build_cpu_supplier_gsl_library` a path under `references/` is named from",
+                 "there and one under `/usr/` or `/opt/` in full, followed by its origin), and"]
+    else:
+        paths = ["paths are shortened to the file name, and"]
     lines = ["# Environment, generated from the runs behind the figures", "",
              "Written by `make paper-figures%s`.  The first table names the Python,"
              % ("-final" if style.PAPER else ""),
@@ -281,7 +341,7 @@ def write_hardware(runs, outdir, prov=None):
              "`benchmark/runs/` unless `--runs` named another root); the key is",
              "named in the first column.  A field the run does not record is",
              "omitted; `--` marks a field recorded without a value.  Absolute",
-             "paths are shortened to the file name, and",
+             *paths,
              "`exclusive`, an absent `gpu` and `placement` are shown without the",
              "explanation recorded beside them.  Runs are named by stamp and stage",
              "and grouped by machine, which is named after its CPU model.", "",
@@ -418,8 +478,8 @@ def is_cpu_machine(rs):
     return any(r["accuracy"] and not r.get("gpu_pipeline") for r in rs)
 
 
-# The paper set: the figures and tables the paper uses (docs/Paper_norm.tex), drawn by
-# default; --full draws every one.  Names are stems without the fig-paper- / tab- prefix,
+# The paper set: the figures and tables the paper uses, drawn by default; --full draws
+# every one.  Names are stems without the fig-paper- / tab- prefix,
 # as fnmatch patterns, by the machine they come from: "cpu" the machine that cpu_source
 # picks for the CPU data the result is drawn from, "gpu" a machine with GPU data, "every"
 # each machine, "shared" the tree root (tables) or cross-machine/ (figures).
@@ -598,7 +658,7 @@ def main():
     if args.full:
         print("figure set: every figure (--full)")
     else:
-        print(f"figure set: the paper's (--full for every figure); CPU figures from "
+        print(f"figure set: the paper set (--full for every figure); CPU figures from "
               f"{cpu_sources_line(bymach, order)}")
     cur = None                       # the machine being drawn; None for cross-machine/
 

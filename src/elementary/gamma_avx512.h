@@ -93,8 +93,8 @@ static inline __attribute__((always_inline)) __m512d matern_gamma_pd(__m512d X)
     LB = _mm512_fmadd_pd(LB, Lr, _mm512_set1_pd(-0x1.0000000000000p-1));
     __m512d Lqv  = _mm512_mul_pd(Lr2, LB);               /* r^2*B (P low, nonlinear) */
     /* log = e*ln2 + logc + P(r), P = Lrh + Lplo.  The FastTwoSum chain A (+logc) (+Lrh)
-     * is exact since the magnitudes decrease (|A| >= 2.08, |logc| <= 0.59,
-     * |Lrh| <= 0.03); the roundoffs, Lplo and e*ln2lo are summed into one low word. */
+     * is exact since the magnitudes decrease (|A| >= 2.07, |logc| <= 0.59,
+     * |Lrh| <= 0.031); the roundoffs, Lplo and e*ln2lo are summed into one low word. */
     __m512d Lplo = _mm512_add_pd(Lpl, Lqv);                            /* P(r) low */
     __m512d LA   = _mm512_mul_pd(Le, L_ln2hi);                         /* e*ln2hi exact (small e) */
     __m512d Lh1  = _mm512_add_pd(LA, Llogc);

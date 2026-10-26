@@ -68,10 +68,9 @@ size_t matern_classify(const double *restrict h,const double *restrict nu,
                           vTRIV=VEC_VSET((double)REGION_TRIVIAL);
     size_t i=0;
     /* Per-region counts by compare and lane count, in registers: a per-lane cnt[r]++ is a
-     * store-to-load chain at a data-dependent address, on which AMD Zen 4 cores can settle,
-     * at random per process and depending on code layout, into flushing and re-executing
-     * (measured about 1 % of processes, 1.4-1.7x slower), as in phase B below.  At width 1
-     * the compares would cost a few per cent, so matched counts per point as before. */
+     * store-to-load chain at a data-dependent address, which AMD Zen 4 cores can, depending
+     * on code layout, execute with repeated flushes, as in phase B below.  Width 1 counts
+     * per point. */
 #if VEC_LANES > 1
     size_t lc[REGION_TOTAL]={0};
 #endif
@@ -170,12 +169,10 @@ void matern_route(double *restrict out,const double *restrict h,const double *re
 
         { size_t run=0; for(int r=0;r<REGION_TOTAL;r++){ off[r]=run; run+=cnt[r]; } }
 
-        /* B on AVX-512: the run cursors are kept in one register (vpermq reads one, a
-         * masked add advances it).  Kept in memory, the per-element pos[r]++ is a
-         * store-to-load chain at a data-dependent address, on which AMD Zen 4 cores can
-         * settle, at random per thread and depending on code layout, into flushing and
-         * re-executing (measured up to 1.6x slower).  The positions are the same, so the
-         * results are identical. */
+        /* B on AVX-512: the REGION_TOTAL <= 8 run cursors are kept in one register (vpermq
+         * reads one, a masked add advances it) instead of the memory pos[r]++ of the form
+         * below, a store-to-load chain at a data-dependent address as in phase A.  Both
+         * forms give the same positions, and so the same results. */
 #ifdef __AVX512F__
         { long long p8[8]={0}; for(int r=0;r<REGION_TOTAL;r++) p8[r]=(long long)off[r];
           __m512i posv=_mm512_loadu_si512((const void *)p8);

@@ -1,6 +1,6 @@
 /* benchmark_cpu.c -- stage 2: accuracy and timing of the library over the corpus (see the
  * accompanying paper, accuracy and stability metrics; timing methodology).  Built with
- * -DWM_FOLD it is build/fold_cpu, the driver of the prefactor-fold stage.  The exit status
+ * -DBENCH_FOLD it is build/fold_cpu, the driver of the prefactor-fold stage.  The exit status
  * is structural only (2 arguments, 3 backend, 4 no match); no error figure affects it. */
 #include "common/numa_bind.h"        /* first: sets _GNU_SOURCE */
 
@@ -12,9 +12,9 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include "corpus_dataset.h"
-#include "common/wm_metrics.h"
-#include "common/wm_timing.h"
-#include "common/wm_progress.h"
+#include "common/bench_metrics.h"
+#include "common/bench_timing.h"
+#include "common/bench_progress.h"
 #include "matern.h"
 #include "../references/common/build_info.h"
 
@@ -27,10 +27,10 @@ static int law_is_large(const char *law)
 { const size_t n = strlen(law); return n > 6 && !strcmp(law + n - 6, "_large"); }
 #define N_LAWS ((int)(sizeof ALL_LAWS / sizeof *ALL_LAWS))
 
-/* Timing primitives: common/wm_timing.h, shared with the supplier stage. */
-#define now_s wm_now_s
+/* Timing primitives: common/bench_timing.h, shared with the supplier stage. */
+#define now_s bench_now_s
 
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
 /* Fold-stage backends: scalar (through dispatch); scalar-control, the shipped source built
  * like the twin (Makefile, FOLD_VARIANTS); scalar-unfolded-direct/-explog, the unfolded twin
  * (src/backends/scalar/scalar_internal.h).  Control and twin run the instruction-set build
@@ -70,7 +70,7 @@ static fold_entry fold_h = NULL, fold_z = NULL;
 static int evaluate(const corpus_dataset *cs, double *out, size_t n,
                     matern_workspace *ws)
 {
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
     if (fold_h) {
         if (cs->set.has_length_scale)
             return fold_h(out, cs->set.h, cs->set.order, cs->set.length_scale, n, ws);
@@ -86,7 +86,7 @@ static int evaluate(const corpus_dataset *cs, double *out, size_t n,
 static int evaluate_range(const corpus_dataset *cs, double *out, size_t lo, size_t n,
                           matern_workspace *ws)
 {
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
     if (fold_h) {
         if (cs->set.has_length_scale)
             return fold_h(out + lo, cs->set.h + lo, cs->set.order + lo,
@@ -101,24 +101,25 @@ static int evaluate_range(const corpus_dataset *cs, double *out, size_t lo, size
     return matern_covariance_z(out + lo, cs->set.argument + lo, cs->set.order + lo, n, ws);
 }
 
-/* Whether the library uses a workspace on this backend: only the routing pipeline of
- * avx512 and avx2 does; the scalar builds and the width-1 entries (matched, matched_fma)
- * evaluate point by point (dispatch.c, vector.c).  tests/test_workspace_need.c checks it. */
+/* Whether the library uses a workspace on this backend: avx512 and avx2 do; the scalar
+ * builds and the width-1 entries (matched, matched_fma) use none (dispatch.c, vector.c).
+ * tests/test_workspace_need.c checks matern_evaluate_scalar and matern_evaluate_matched. */
 static int backend_builds_workspace(const char *backend)
 {
     return strncmp(backend, "avx", 3) == 0;      /* avx512 and avx2 */
 }
 
-/* Timing: every repetition creates and destroys its own workspace inside the timer.
- * wm_rep_policy repeats until a budget is spent, between a floor and a ceiling; the
+/* Timing: on avx512 and avx2 every repetition creates and destroys its own workspace
+ * inside the timer.
+ * bench_rep_policy repeats until a budget is spent, between a floor and a ceiling; the
  * pipeline sets floor == ceiling, so every row is a minimum over the same count. */
-#define cmp_d wm_cmp_d
+#define cmp_d bench_cmp_d
 
 /* Last-level cache size and sharing CPUs, set once in main, printed on every ladder row. */
-static long wm_llc_bytes = 0;
-static int  wm_llc_share = 1;
+static long bench_llc_bytes = 0;
+static int  bench_llc_share = 1;
 /* Backend label of the ladder's raw-repetition dump, set by run_ladder. */
-static const char *wm_raw_backend = "-";
+static const char *bench_raw_backend = "-";
 
 /* --ladder-max: the top rung, below the corpus size (default: no cap). */
 static size_t ladder_max = (size_t)-1;
@@ -127,13 +128,13 @@ static size_t ladder_max = (size_t)-1;
  * every rung on its own. */
 static size_t ladder_pass_from = 0;
 
-static wm_time time_call(const corpus_dataset *cs, double *out, size_t n,
-                         wm_rep_policy pol, int ws_needed)
+static bench_time time_call(const corpus_dataset *cs, double *out, size_t n,
+                         bench_rep_policy pol, int ws_needed)
 {
     double *t = (double *)malloc((size_t)pol.max_reps * sizeof *t);
-    wm_time r; memset(&r, 0, sizeof r);
-    wm_sched_begin();
-    for (int w = 0; w < WM_WARMUP_REPS; w++) {                       /* untimed warm-up */
+    bench_time r; memset(&r, 0, sizeof r);
+    bench_sched_begin();
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++) {                       /* untimed warm-up */
         matern_workspace *ws = NULL;
         if (ws_needed) matern_workspace_create(&ws, 0);
         evaluate(cs, out, n, ws);
@@ -151,22 +152,22 @@ static wm_time time_call(const corpus_dataset *cs, double *out, size_t n,
         t[i++] = dt * 1e9 / (double)n;                  /* ns per element */
     }
     /* Raw samples are written before the shared reducer, which sorts in place. */
-    wm_raw_emit("cpu", "-", cs->family, cs->law, wm_raw_backend, n, t, i);
-    r = wm_time_reduce(t, i);
+    bench_raw_emit("cpu", "-", cs->family, cs->law, bench_raw_backend, n, t, i);
+    r = bench_time_reduce(t, i);
     free(t);
     return r;
 }
 
 /* time_call() with one workspace created outside the timer; the difference is the
  * per-call setup cost. */
-static wm_time time_call_ws_reused(const corpus_dataset *cs, double *out, size_t n,
-                              wm_rep_policy pol, int ws_needed)
+static bench_time time_call_ws_reused(const corpus_dataset *cs, double *out, size_t n,
+                              bench_rep_policy pol, int ws_needed)
 {
     double *t = (double *)malloc((size_t)pol.max_reps * sizeof *t);
-    wm_time r; memset(&r, 0, sizeof r);
+    bench_time r; memset(&r, 0, sizeof r);
     matern_workspace *ws = NULL;
     if (ws_needed) matern_workspace_create(&ws, 0);
-    for (int w = 0; w < WM_WARMUP_REPS; w++) evaluate(cs, out, n, ws);
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++) evaluate(cs, out, n, ws);
     int i = 0; double spent = 0.0;
     while (i < pol.max_reps && (i < pol.min_reps || spent < pol.budget)) {
         double t0 = now_s();
@@ -177,18 +178,18 @@ static wm_time time_call_ws_reused(const corpus_dataset *cs, double *out, size_t
     }
     if (ws_needed) matern_workspace_destroy(ws);
     /* Not written to timing_raw: it would share time_call's (family, law, backend, n) key. */
-    r = wm_time_reduce(t, i);
+    r = bench_time_reduce(t, i);
     free(t);
     return r;
 }
 
 /* Workspace create+destroy alone, in ns per pair. */
-static wm_time time_workspace(int reps)
+static bench_time time_workspace(int reps)
 {
     double *t = (double *)malloc((size_t)reps * sizeof *t);
-    wm_time r; memset(&r, 0, sizeof r); r.reps = reps;
+    bench_time r; memset(&r, 0, sizeof r); r.reps = reps;
     /* Same untimed warm-up as time_call and time_call_ws_reused. */
-    for (int w = 0; w < WM_WARMUP_REPS; w++) {
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++) {
         matern_workspace *ws;
         matern_workspace_create(&ws, 0);
         matern_workspace_destroy(ws);
@@ -200,7 +201,7 @@ static wm_time time_workspace(int reps)
         matern_workspace_destroy(ws);
         t[i] = (now_s() - t0) * 1e9;                    /* ns for the pair */
     }
-    r = wm_time_reduce(t, reps);
+    r = bench_time_reduce(t, reps);
     free(t);
     return r;
 }
@@ -210,7 +211,7 @@ static wm_time time_workspace(int reps)
  * for the first N points.  reused = 0: a workspace per chunk call inside the timer, as
  * time_call; reused = 1: one workspace built outside, as time_call_ws_reused. */
 static void time_pass(const corpus_dataset *cs, double *out, size_t S, size_t top,
-                      wm_rep_policy pol, int ws_needed, int reused, wm_time *T)
+                      bench_rep_policy pol, int ws_needed, int reused, bench_time *T)
 {
     int k = 0;
     size_t bnd[40];
@@ -219,8 +220,8 @@ static void time_pass(const corpus_dataset *cs, double *out, size_t S, size_t to
     double *t = (double *)malloc((size_t)k * (size_t)reps * sizeof *t);
     matern_workspace *wsr = NULL;
     if (reused && ws_needed) matern_workspace_create(&wsr, 0);
-    if (!reused) wm_sched_begin();
-    for (int r = -WM_WARMUP_REPS; r < reps; r++) {         /* r < 0: untimed warm-up */
+    if (!reused) bench_sched_begin();
+    for (int r = -BENCH_WARMUP_REPS; r < reps; r++) {         /* r < 0: untimed warm-up */
         size_t lo = 0;
         const double t0 = now_s();
         for (int j = 0; j < k; j++) {
@@ -234,12 +235,12 @@ static void time_pass(const corpus_dataset *cs, double *out, size_t S, size_t to
     }
     if (wsr) matern_workspace_destroy(wsr);
     /* every rung of the pass carries the pass's scheduler record */
-    const wm_sched mark = wm_sched_mark;
+    const bench_sched mark = bench_sched_mark;
     for (int j = 0; j < k; j++) {
         double *tj = t + (size_t)j * (size_t)reps;
-        if (!reused) { wm_sched_mark = mark; wm_sched_marked = 1; }
-        if (!reused) wm_raw_emit("cpu", "-", cs->family, cs->law, wm_raw_backend, bnd[j], tj, reps);
-        T[j] = wm_time_reduce(tj, reps);
+        if (!reused) { bench_sched_mark = mark; bench_sched_marked = 1; }
+        if (!reused) bench_raw_emit("cpu", "-", cs->family, cs->law, bench_raw_backend, bnd[j], tj, reps);
+        T[j] = bench_time_reduce(tj, reps);
     }
     free(t);
 }
@@ -258,40 +259,40 @@ static double median_of(const double *v, size_t n)
     return m;
 }
 
-/* One ladder row: build series t, reused series wmth, workspace alone w, and the
+/* One ladder row: build series t, reused series t_reused, workspace alone w, and the
  * timing mode (`rung` or `pass`). */
 static void ladder_row(const corpus_dataset *cs, const char *backend, const char *format,
-                       size_t n, const wm_time *tp, const wm_time *wp, const wm_time *wsp,
+                       size_t n, const bench_time *tp, const bench_time *wp, const bench_time *wsp,
                        const char *mode)
 {
-    const wm_time t = *tp, wmth = *wp, w = *wsp;
+    const bench_time t = *tp, t_reused = *wp, w = *wsp;
     const double *nu  = cs->set.order;
     const double *arg = cs->set.has_length_scale ? cs->set.h : cs->set.argument;
     /* Without a workspace both loops are the same: the difference is noise. */
-    double setup_per = t.min - wmth.min;
+    double setup_per = t.min - t_reused.min;
     double qn = median_of(nu, n), qa = median_of(arg, n);
     if (strcmp(format, "csv") == 0)
         printf("%d,cpu,-,%s,%s,%s,%zu,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
                "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%ld,%d,%.0f,"
                "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%s,%zu\n",
-               WM_SCHEMA, cs->family, cs->law, backend, n,
-               t.min, wmth.min, setup_per, (double)t.reps, wmth.med, qn, qa,
+               BENCH_SCHEMA, cs->family, cs->law, backend, n,
+               t.min, t_reused.min, setup_per, (double)t.reps, t_reused.med, qn, qa,
                w.min,
-               wmth.q1, wmth.q3, wmth.p95, wmth.max, wmth.mean, wmth.iqr,
-               wmth.spread, wm_llc_bytes, wm_llc_share,
+               t_reused.q1, t_reused.q3, t_reused.p95, t_reused.max, t_reused.mean, t_reused.iqr,
+               t_reused.spread, bench_llc_bytes, bench_llc_share,
                (double)n * (double)sizeof(double)
                    * (cs->set.has_length_scale ? 4.0 : 3.0),
                t.med, t.q1, t.q3, t.p95, t.max, t.mean, t.iqr, t.spread,
                w.med, mode, ladder_pass_from);
     else
         printf("  %-9zu %-10.3f %-10.3f %-10.3f %-9d %-11.0f %-11.5g %-11.5g %s\n",
-               n, t.min, wmth.min, setup_per, t.reps, w.min, qn, qa, mode);
+               n, t.min, t_reused.min, setup_per, t.reps, w.min, qn, qa, mode);
 }
 
 static void run_ladder(const corpus_dataset *cs, const char *backend,
-                       wm_rep_policy pol, const char *format)
+                       bench_rep_policy pol, const char *format)
 {
-    wm_raw_backend = backend;
+    bench_raw_backend = backend;
     const size_t full = cs->set.count;
 
     /* The CSV header is printed once, by the parent (print_ladder_header). */
@@ -321,35 +322,35 @@ static void run_ladder(const corpus_dataset *cs, const char *backend,
         if (n > full || n > ladder_max) break;
         top = n;
         if (ladder_pass_from && n >= ladder_pass_from) continue;
-        wm_time t = time_call(cs, out, n, pol, ws_needed);   /* workspace per call */
-        wm_time wmth = time_call_ws_reused(cs, out, n, pol, ws_needed); /* warm ws     */
+        bench_time t = time_call(cs, out, n, pol, ws_needed);   /* workspace per call */
+        bench_time t_reused = time_call_ws_reused(cs, out, n, pol, ws_needed); /* warm ws     */
         /* Workspace create+destroy alone, same repetition count, at every rung; zero
          * without a workspace.  ns_setup_per_elem matches it only while N fits one tile. */
-        wm_time w = ws_needed ? time_workspace(pol.max_reps)
-                              : (wm_time){0};
-        ladder_row(cs, backend, format, n, &t, &wmth, &w, "rung");
+        bench_time w = ws_needed ? time_workspace(pol.max_reps)
+                              : (bench_time){0};
+        ladder_row(cs, backend, format, n, &t, &t_reused, &w, "rung");
     }
     if (ladder_pass_from && top >= ladder_pass_from) {
-        wm_time T[40], TR[40];
+        bench_time T[40], TR[40];
         time_pass(cs, out, ladder_pass_from, top, pol, ws_needed, 0, T);
         time_pass(cs, out, ladder_pass_from, top, pol, ws_needed, 1, TR);
         int j = 0;
         for (size_t n = ladder_pass_from; n <= top; n <<= 1, j++) {
-            wm_time w = ws_needed ? time_workspace(pol.max_reps) : (wm_time){0};
+            bench_time w = ws_needed ? time_workspace(pol.max_reps) : (bench_time){0};
             ladder_row(cs, backend, format, n, &T[j], &TR[j], &w, "pass");
         }
     }
     free(out);
     if (strcmp(format, "csv") != 0)
-        puts("  (build = a new workspace per rep, the decided protocol.  reused = the same\n"
-             "   loop with the workspace created once.  setup = build - reused, a measured\n"
-             "   DIFFERENCE rather than two minima from different loops subtracted.\n"
-             "   nu/arg medians must stay FLAT down the column, or the curve is reporting\n"
-             "   a changed input mixture rather than a cache regime.)");
+        puts("  (build = a new workspace per call on avx512 and avx2, the library's timing.\n"
+             "   reused = the same loop with the workspace created once.  On the other\n"
+             "   backends both time the same call.  setup = build - reused, the difference\n"
+             "   of the two minima.  nu/arg medians that change down the column show that\n"
+             "   the input mixture, not only N, changes along the ladder.)");
 }
 
 static void print_accuracy_text(const char *fam, const char *law, const char *backend,
-                                const wm_metrics *M)
+                                const bench_metrics *M)
 {
     printf("%-9s %-12s %-8s n=%-8zu scored=%-8zu\n", fam, law, backend, M->n, M->n_scored);
     printf("   ULP  max=%-11.4f p999=%-9.4f p99=%-9.4f q3=%-8.4f med=%-8.4f q1=%-8.4f min=%.4f\n",
@@ -386,8 +387,9 @@ static void print_ladder_header(void)
 static size_t time_points_cap = 0;
 
 /* Times the library on the law being scored, with the repetitions and point cap of the
- * supplier stage; every repetition builds its own workspace, as a caller pays for it. */
-static wm_time time_accuracy_law(const corpus_dataset *cs, double *out, size_t n,
+ * supplier stage; on avx512 and avx2 every repetition builds its own workspace, as a
+ * caller pays for it. */
+static bench_time time_accuracy_law(const corpus_dataset *cs, double *out, size_t n,
                                  int reps, size_t *timed_points,
                                  const char *fam, const char *law,
                                  const char *backend)
@@ -396,9 +398,9 @@ static wm_time time_accuracy_law(const corpus_dataset *cs, double *out, size_t n
     *timed_points = n;
     const int ws_needed = backend_builds_workspace(backend);
     double *t = (double *)malloc((size_t)reps * sizeof *t);
-    if (!t) { wm_time z; memset(&z, 0, sizeof z); return z; }
-    wm_sched_begin();
-    for (int w = 0; w < WM_WARMUP_REPS; w++) {          /* warmed like the reps */
+    if (!t) { bench_time z; memset(&z, 0, sizeof z); return z; }
+    bench_sched_begin();
+    for (int w = 0; w < BENCH_WARMUP_REPS; w++) {          /* warmed like the reps */
         matern_workspace *ws = NULL;
         if (ws_needed) matern_workspace_create(&ws, 0);
         evaluate(cs, out, n, ws);
@@ -413,8 +415,8 @@ static wm_time time_accuracy_law(const corpus_dataset *cs, double *out, size_t n
         t[r] = (now_s() - t0) * 1e9 / (double)n;
     }
     /* Before the reduce, which sorts in place: the raw samples keep their order. */
-    wm_raw_emit("cpu", "-", fam, law, backend, n, t, reps);
-    wm_time R = wm_time_reduce(t, reps);
+    bench_raw_emit("cpu", "-", fam, law, backend, n, t, reps);
+    bench_time R = bench_time_reduce(t, reps);
     free(t);
     return R;
 }
@@ -429,14 +431,14 @@ static void print_csv_header(void)
 }
 
 static void print_csv_row(const char *fam, const char *law, const char *backend,
-                          wm_ulp_mode mode, const wm_metrics *M,
-                          const wm_time *T, size_t ns_points)
+                          bench_ulp_mode mode, const bench_metrics *M,
+                          const bench_time *T, size_t ns_points)
 {
     /* device and supplier are fixed (cpu, "-") for the library's CPU rows. */
     printf("%d,cpu,-,%s,%s,%s,%s,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%d,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%zu,"
            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d,%zu,call,%zu\n",
-           WM_SCHEMA, fam, law, backend, wm_ulp_mode_name(mode),
+           BENCH_SCHEMA, fam, law, backend, bench_ulp_mode_name(mode),
            M->n, M->n_scored, M->n_excluded, M->n_nonfinite,
            M->n_ref_zero, M->n_ref_subnormal, M->n_exact, M->min_bits,
            M->u_min, M->u_q1, M->u_med, M->u_q3, M->u_p99, M->u_p999, M->u_max,
@@ -447,7 +449,7 @@ static void print_csv_row(const char *fam, const char *law, const char *backend,
            T->spread, T->reps, ns_points, M->n_file);
 }
 
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
 /* Selects fold-stage backend `b` for this process.  Nonzero (exit 3) for an unknown name,
  * when dispatch does not resolve `scalar`, or when a control or twin does not behave as built. */
 static int fold_select(const char *b)
@@ -502,8 +504,8 @@ static int fold_select(const char *b)
 
 static void usage(FILE *o, const char *p)
 {
-#ifdef WM_FOLD
-    fprintf(o, "fold_cpu: the prefactor-fold stage.  benchmark_cpu built with -DWM_FOLD:\n"
+#ifdef BENCH_FOLD
+    fprintf(o, "fold_cpu: the prefactor-fold stage.  benchmark_cpu built with -DBENCH_FOLD:\n"
                "  accuracy rows only (--metric accuracy, no --ladder), for the backends\n"
                "  %s (the default).\n\n", FOLD_DEFAULT_BACKENDS);
 #endif
@@ -525,7 +527,7 @@ static void usage(FILE *o, const char *p)
            "          [--print-build]  print `levin_vector=` and `levin_scalar=` and exit\n"
            "          [--build-info]  print this binary's build record and exit\n"
            "          [--help]  print this text and exit\n", p);
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
     const char *backend = "as above";
 #else
     const char *backend = "avx512";
@@ -534,7 +536,7 @@ static void usage(FILE *o, const char *p)
                "            --ulp-mode up --reps 65 --format text --data-dir data; all points\n"
                "            (no --max-points, no --time-points); no --ladder-max; every rung\n"
                "            timed on its own (no --ladder-pass-from).\n", backend);
-#ifndef WM_FOLD
+#ifndef BENCH_FOLD
     fprintf(o, "            benchmark/run_benchmark.sh passes --backend, by default with every\n"
                "            backend of avx512,avx2,matched_fma,matched,scalar this CPU runs.\n");
 #endif
@@ -543,16 +545,16 @@ static void usage(FILE *o, const char *p)
 int main(int argc, char **argv)
 {
     /* the last-level cache of CPU 0, read once */
-    wm_llc_bytes = wm_llc_bytes_shared(0, &wm_llc_share);
-#ifdef WM_FOLD
+    bench_llc_bytes = bench_llc_bytes_shared(0, &bench_llc_share);
+#ifdef BENCH_FOLD
     const char *families = "z_nu,h_nu_s", *laws = "all", *backends = FOLD_DEFAULT_BACKENDS;
 #else
     const char *families = "z_nu,h_nu_s", *laws = "all", *backends = "avx512";
 #endif
     const char *metric = "accuracy", *format = "text", *root = "data";
     int bind = 1, ladder = 0; size_t maxpts = 0;
-    wm_rep_policy pol = { WM_REPS_MIN_DEFAULT, WM_REPS_MAX_DEFAULT, WM_BUDGET_DEFAULT };
-    wm_ulp_mode mode = WM_ULP_MODE_DEFAULT;
+    bench_rep_policy pol = { BENCH_REPS_MIN_DEFAULT, BENCH_REPS_MAX_DEFAULT, BENCH_BUDGET_DEFAULT };
+    bench_ulp_mode mode = BENCH_ULP_MODE_DEFAULT;
 
     for (int a = 1; a < argc; a++) {
         const char *nx = (a + 1 < argc) ? argv[a+1] : NULL;
@@ -575,51 +577,51 @@ int main(int argc, char **argv)
         /* --print-build reports the compiled routing of both Levin routers; the Levin A/B
          * checks that its arms differ. */
         else if (!strcmp(argv[a],"--print-build")) {
-            /* Independent macros: MATERN_WITHOUT_LEVIN (vector), WMS_LEVIN (scalar). */
+            /* Independent macros: MATERN_WITHOUT_LEVIN (vector), MATERN_SCALAR_WITH_LEVIN (scalar). */
 #ifdef MATERN_WITHOUT_LEVIN
             printf("levin_vector=off\n");
 #else
             printf("levin_vector=on\n");
 #endif
-#ifdef WMS_LEVIN
+#ifdef MATERN_SCALAR_WITH_LEVIN
             printf("levin_scalar=on\n");
 #else
             printf("levin_scalar=off\n");
 #endif
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
             printf("fold=on\n");
 #endif
             return 0;
         }
         /* --build-info: this binary's build record, relayed by `detect --build-info`. */
         else if (!strcmp(argv[a],"--build-info")) {
-#ifdef WM_FOLD
-            WM_BUILD_INFO_COMMON(stdout, "cpu_fold");
-            wm_build_info_kv(stdout, "cpu_fold", "twin_direct",
+#ifdef BENCH_FOLD
+            BENCH_BUILD_INFO_COMMON(stdout, "cpu_fold");
+            bench_build_info_kv(stdout, "cpu_fold", "twin_direct",
                              "M = 2 (z/2)^nu / Gamma(nu) * K_nu(z)");
-            wm_build_info_kv(stdout, "cpu_fold", "twin_explog",
+            bench_build_info_kv(stdout, "cpu_fold", "twin_explog",
                              "M = exp((1-nu) ln 2 - lnGamma(nu) + nu ln z + ln K_nu(z))");
-            wm_build_info_kv(stdout, "cpu_fold", "backends", FOLD_DEFAULT_BACKENDS);
+            bench_build_info_kv(stdout, "cpu_fold", "backends", FOLD_DEFAULT_BACKENDS);
 #else
-            WM_BUILD_INFO_COMMON(stdout, "cpu_benchmark");
+            BENCH_BUILD_INFO_COMMON(stdout, "cpu_benchmark");
 #endif
             char um[160];
             snprintf(um, sizeof um, "%s (the default; --ulp-mode overrides it, and the "
                      "ulp_mode column records the mode of each row)",
-                     wm_ulp_mode_name(WM_ULP_MODE_DEFAULT));
-#ifdef WM_FOLD
-            wm_build_info_kv(stdout, "cpu_fold", "ulp_mode", um);
+                     bench_ulp_mode_name(BENCH_ULP_MODE_DEFAULT));
+#ifdef BENCH_FOLD
+            bench_build_info_kv(stdout, "cpu_fold", "ulp_mode", um);
 #else
-            wm_build_info_kv(stdout, "cpu_benchmark", "ulp_mode", um);
+            bench_build_info_kv(stdout, "cpu_benchmark", "ulp_mode", um);
 #endif
             return 0;
         }
         else if (!strcmp(argv[a],"--ulp-mode") && nx) {
             const char *m = argv[++a];
-            if      (!strcmp(m,"up"))       mode = WM_ULP_UP;
-            else if (!strcmp(m,"down"))     mode = WM_ULP_DOWN;
-            else if (!strcmp(m,"muller"))   mode = WM_ULP_MULLER;
-            else if (!strcmp(m,"straddle")) mode = WM_ULP_STRADDLE;
+            if      (!strcmp(m,"up"))       mode = BENCH_ULP_UP;
+            else if (!strcmp(m,"down"))     mode = BENCH_ULP_DOWN;
+            else if (!strcmp(m,"muller"))   mode = BENCH_ULP_MULLER;
+            else if (!strcmp(m,"straddle")) mode = BENCH_ULP_STRADDLE;
             else { fprintf(stderr, "unknown --ulp-mode %s\n", m); return 2; }
         }
         else if (!strcmp(argv[a],"--help")) { usage(stdout, argv[0]); return 0; }
@@ -627,7 +629,7 @@ int main(int argc, char **argv)
     }
     if (corpus_family_check(families)) return 2;
 
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
     /* The fold stage writes accuracy rows only. */
     if (ladder || strcmp(metric, "accuracy") != 0) {
         fprintf(stderr, "fold_cpu: the prefactor-fold stage writes accuracy rows only"
@@ -650,7 +652,7 @@ int main(int argc, char **argv)
 
     /* One backend per process: dispatch reads MATERN_BACKEND on the first call only and
      * caches it, so several backends run as re-executed children. */
-    const int want_acc_hdr = (strcmp(metric,"speed") != 0) && !getenv("WM_BENCH_CHILD");
+    const int want_acc_hdr = (strcmp(metric,"speed") != 0) && !getenv("BENCH_CHILD");
     if (strchr(backends, ',')) {
         char list[128]; snprintf(list, sizeof list, "%s", backends);
         int rc = 0; char *save = NULL;
@@ -672,19 +674,19 @@ int main(int argc, char **argv)
             child[c++] = b;
             child[c]   = NULL;
             pid_t pid = fork();
-            if (pid == 0) { setenv("WM_BENCH_CHILD","1",1); execv(argv[0], child); _exit(127); }
+            if (pid == 0) { setenv("BENCH_CHILD","1",1); execv(argv[0], child); _exit(127); }
             int st = 0; waitpid(pid, &st, 0);
             if (st) rc = 1;
         }
         return rc;
     }
 
-    wm_expect_single_thread = 1;
+    bench_expect_single_thread = 1;
     if (bind) {
-        char why[256]; int nodes = 0, best = wm_best_node(&nodes);
-        const int st = wm_bind_node(best < 0 ? 0 : best, why, sizeof why);
+        char why[256]; int nodes = 0, best = bench_best_node(&nodes);
+        const int st = bench_bind_node(best < 0 ? 0 : best, why, sizeof why);
         if (strcmp(format, "csv") != 0) printf("# placement: %s\n", why);
-        wm_bind_warn(st, why);
+        bench_bind_warn(st, why);
     }
 
     const int want_acc   = strcmp(metric,"speed") != 0;
@@ -697,25 +699,25 @@ int main(int argc, char **argv)
     }
     const int want_speed = strcmp(metric,"accuracy") != 0;
     /* Only a process that is not a re-exec'd child prints the header. */
-    if (!strcmp(format,"csv") && !getenv("WM_BENCH_CHILD")) {
+    if (!strcmp(format,"csv") && !getenv("BENCH_CHILD")) {
         if (ladder)        print_ladder_header();
         else if (want_acc) print_csv_header();
     }
     /* One raw file per backend process, <prefix>.<backend>, so children do not truncate
      * each other's files. */
     {
-        const char *rp = getenv("WM_RAW_REPS");
+        const char *rp = getenv("BENCH_TIMING_RAW");
         if (rp && *rp) {
             char pth[512];
             snprintf(pth, sizeof pth, "%s.%s", rp, backends);
-            wm_raw_open(pth);
+            bench_raw_open(pth);
         }
         /* the accuracy detail, one file per backend process, likewise */
-        const char *dp = getenv("WM_ACC_DETAIL");
+        const char *dp = getenv("BENCH_ACCURACY_DETAIL");
         if (dp && *dp) {
             char pth[512];
             snprintf(pth, sizeof pth, "%s.%s", dp, backends);
-            wm_detail_open(pth);
+            bench_detail_open(pth);
         }
     }
 
@@ -747,9 +749,9 @@ int main(int argc, char **argv)
             char *bsave = NULL;
             for (char *b = strtok_r(bkb, ",", &bsave); b; b = strtok_r(NULL, ",", &bsave)) {
                 /* before the block's warm-up, outside every timed interval */
-                wm_progress("  %-8s %s/%s  %s", ladder ? "ladder" : want_acc ? "accuracy" : "speed",
+                bench_progress("  %-8s %s/%s  %s", ladder ? "ladder" : want_acc ? "accuracy" : "speed",
                             fs, law, b);
-#ifdef WM_FOLD
+#ifdef BENCH_FOLD
                 if (fold_select(b) != 0) { free(out); corpus_dataset_free(&cs); return 3; }
 #else
                 setenv("MATERN_BACKEND", b, 1);   /* single backend per process */
@@ -776,19 +778,19 @@ int main(int argc, char **argv)
                         fprintf(stderr, "benchmark_cpu: %s/%s on %s returned status %d"
                                 " -- row scored on what it wrote (unwritten = non-finite)\n",
                                 fs, law, b, ast);
-                    wm_metrics M;
-                    wm_metrics_compute(&M, out, cs.set.reference_high, cs.set.reference_low,
+                    bench_metrics M;
+                    bench_metrics_compute(&M, out, cs.set.reference_high, cs.set.reference_low,
                                        cs.accuracy_bits, cs.set.order,
                                        cs.set.has_length_scale ? cs.set.h : cs.set.argument,
                                        cs.set.length_scale, n, mode);
                     M.n_file = cs.file_points;
-                    /* the detail sidecar (wm_metrics.h), before the timed loop reuses `out` */
-                    wm_detail_emit("cpu", "-", fs, law, b, &M, out, cs.set.order,
+                    /* the detail sidecar (bench_metrics.h), before the timed loop reuses `out` */
+                    bench_detail_emit("cpu", "-", fs, law, b, &M, out, cs.set.order,
                                    cs.set.has_length_scale ? cs.set.h : cs.set.argument,
                                    cs.set.has_length_scale ? cs.set.length_scale : NULL, n);
                     rows_emitted++;
                     size_t tpts = 0;
-                    wm_time TA = time_accuracy_law(&cs, out, n, pol.max_reps, &tpts,
+                    bench_time TA = time_accuracy_law(&cs, out, n, pol.max_reps, &tpts,
                                                    fs, law, b);
                     if (!strcmp(format,"csv"))
                         print_csv_row(fs, law, b, mode, &M, &TA, tpts);
@@ -797,7 +799,7 @@ int main(int argc, char **argv)
                 if (ladder) { run_ladder(&cs, b, pol, format); rows_emitted++; }
                 if (want_speed && !ladder) {
                     rows_emitted++;
-                    wm_time t = time_call(&cs, out, n, pol,
+                    bench_time t = time_call(&cs, out, n, pol,
                                           backend_builds_workspace(b));
                     if (strcmp(format,"csv") != 0)
                         printf("   TIME %-8s min=%-9.3f med=%-9.3f max=%-9.3f spread=%.1f%% (ns/elem, %d reps)\n",
@@ -816,10 +818,10 @@ int main(int argc, char **argv)
         return 4;
     }
     if (want_speed && strcmp(format,"csv") != 0) {
-        wm_time w = time_workspace(30);
+        bench_time w = time_workspace(30);
         printf("\n# workspace create+destroy alone: min=%.0f ns med=%.0f ns max=%.0f ns\n"
-               "#   tile-sized (~552 KiB), NOT N-sized -- so it is negligible at large N\n"
-               "#   and dominant at small N.  The ladder's left end is this curve.\n",
+               "#   the workspace is tile-sized (~552 KiB), not N-sized: negligible at large N,\n"
+               "#   dominant at small N, where the ladder starts.\n",
                w.min, w.med, w.max);
     }
     return 0;

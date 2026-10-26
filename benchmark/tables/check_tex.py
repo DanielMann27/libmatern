@@ -9,9 +9,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 PREAMBLE = r"""\documentclass[11pt,a4paper]{article}
 % The packages the fragments declare in their `% requires:` lines, and the
-% page geometry of the manuscript (a4paper, 2.4cm margins), which sets the
-% width the tables are checked against.
-\usepackage[margin=2.4cm]{geometry}
+% page geometry of the manuscript, at which the tables are compiled.
+\usepackage{geometry}
+\geometry{left=27mm,right=27mm,top=25mm,bottom=26mm}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{booktabs}
@@ -51,7 +51,7 @@ def main():
         print(f"check_tex: no .tex files under {args.dir}")
         return 1
 
-    work = tempfile.mkdtemp(prefix="wm-tabcheck-")
+    work = tempfile.mkdtemp(prefix="bench-tabcheck-")
     doc = PREAMBLE + "\n".join(
         r"\clearpage\input{%s}" % t.replace("\\", "/") for t in sorted(tex)
     ) + "\n\\end{document}\n"
