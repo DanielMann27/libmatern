@@ -34,10 +34,15 @@ RB=benchmark/run_benchmark.sh
 text_commands() {
     cat <<'EOF'
 == the full benchmark (the published results)
-  The published results come from the full benchmark on exclusive nodes: its CPU part
-  once on an Intel Xeon Platinum 8358 and once on an AMD EPYC 9454, its GPU part on an
-  NVIDIA A100 80GB PCIe in a machine with the Intel CPU, each part as a separate batch
-  job.  One command runs the full benchmark on one machine:
+  The published results come from the full benchmark at this release, run by make
+  reproduce on three exclusive nodes, each as one batch job without a terminal:
+
+      make reproduce GPU=no KAUST=yes   # AMD EPYC 9454: the CPU part
+      make reproduce GPU=no KAUST=yes   # Intel Xeon Platinum 8358: the CPU part
+      make reproduce CPU=no KAUST=yes   # NVIDIA A100 80GB PCIe, Intel Xeon Platinum 8358
+                                        # host: the GPU part
+
+  One command runs the full benchmark on one machine:
 
       make reproduce
 
@@ -45,7 +50,7 @@ text_commands() {
   externals the run uses (EXTERNALS=yes) and the download of the missing or damaged
   corpus files (CORPUS=yes, 5.19 GB from Zenodo).  The GPU part runs where nvcc and an
   NVIDIA GPU are found and is left out elsewhere; make reproduce GPU=no runs the full
-  CPU part only.  SETTINGS=full sets LEVIN, FOLD, THREADS and the run parameters over
+  CPU part only, CPU=no the GPU part only.  SETTINGS=full sets LEVIN, FOLD, THREADS and the run parameters over
   values given on the command line.  The published CPU rows used the system
   Boost 1.75.0 and GSL 2.6 of the run machines (packages of Red Hat Enterprise
   Linux 9.6; GSL as a shared library found by pkg-config).  make reproduce likewise
@@ -267,9 +272,16 @@ done <<< "$PARAMS"
 # full run (FULL's, unset for a cap, else the default) and the default it takes there when
 # unset (run_benchmark.sh's, with the parameters before it at their full values).
 if [ $MODE = assign ]; then
-    runs levin   || echo "set LEVIN yes"
-    runs fold    || echo "set FOLD yes"
-    runs threads || echo "set THREADS yes"
+    # Without a CPU part (make pipeline CPU=no) LEVIN and THREADS select the GPU Levin and
+    # thread stages alone, and FOLD, a CPU stage, is not asked for.
+    if [ -n "$STAGES" ]; then
+        runs levin   || echo "set LEVIN yes"
+        runs fold    || echo "set FOLD yes"
+        runs threads || echo "set THREADS yes"
+    else
+        runs gpu-levin   || echo "set LEVIN yes"
+        runs gpu-threads || echo "set THREADS yes"
+    fi
     { runs gpu-core || runs gpu-levin || runs gpu-threads; } || echo "set GPU yes"
     # GPU_STAGES replaces the stages LEVIN and THREADS select; the full run leaves it unset
     gs=${ARG[GPU_STAGES]-${GPU_STAGES:-}}

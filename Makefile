@@ -35,10 +35,11 @@
 #   make reproduce        the full benchmark behind the published results on this machine:
 #                         make pipeline with SETTINGS=full, EXTERNALS=yes and CORPUS=yes
 #                         (durations: benchmark/durations.tsv; downloads not included;
-#                         GPU=no runs the CPU part only); on a terminal it asks about
-#                         KAUST after its copyright notice, without one it needs KAUST=yes
-#                         or KAUST=no while the port is absent; the cross-machine figure
-#                         needs a second run on a CPU of the other vendor
+#                         GPU=no runs the CPU part only, CPU=no the GPU part only); on a
+#                         terminal it asks about KAUST after its copyright notice, without
+#                         one it needs KAUST=yes or KAUST=no while the port is absent; the
+#                         cross-machine figure needs a second run on a CPU of the other
+#                         vendor
 #                         (docs/benchmark.md, "Replicating the published results")
 #   make pipeline         everything in one command: builds, CPU run, optional Levin,
 #                         prefactor-fold, thread and GPU stages, figures, tables; on a

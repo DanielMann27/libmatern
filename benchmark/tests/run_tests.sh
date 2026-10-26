@@ -1491,6 +1491,16 @@ run "published env: other compiler" bash -c '
 run "published env: same compiler" bash -c '
     [ -z "$(CC="'"$TMP"'/cc_same" bash tools/published_env.sh lines cc)" ] &&
     CC="'"$TMP"'/cc_same" bash tools/published_env.sh report cc | grep -q "^  same     C compiler  *GCC 11.5.0"'
+# CPU=no runs the GPU part alone: refused without one, planned without the CPU stages.
+dry cpuno_none pipeline CPU=no GPU=no
+dry cpuno      pipeline CPU=no GPU=yes
+run "pipeline: CPU=no needs a GPU part" bash -c '
+    f="'"$TMP"'/dry_cpuno_none"; grep -q "^rc=2$" "$f" &&
+    grep -q "^pipeline: CPU=no and GPU=no leave nothing to run" "$f"'
+run "pipeline: CPU=no, the GPU part alone" bash -c '
+    f="'"$TMP"'/dry_cpuno"; grep -q "^rc=0$" "$f" &&
+    grep -q "^  CPU run  *no (CPU=no" "$f" && grep -q "^  prefactor fold  *no (a CPU stage)" "$f" &&
+    grep -q "^  GPU pipeline  *yes " "$f" && ! grep -q "^  builds .*CPU suppliers" "$f"'
 
 echo "== stage 8: the NumPy and Matplotlib of the generators (tools/py_stack.py) =="
 # Stand-in packages of a given version on PYTHONPATH, and an interpreter that sees them.

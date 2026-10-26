@@ -1,7 +1,8 @@
 #!/bin/bash
 # pipeline.sh [reproduce] -- the whole benchmark in one command (make pipeline, make reproduce): builds,
 # the selected stages, figures, tables, one notification at the end; on a terminal it first asks its
-# questions (full settings, externals, KAUST, corpus).  Switches: make help, docs/benchmark.md.
+# questions (full settings, externals, KAUST, corpus).  Switches: make help, docs/benchmark.md;
+# CPU=no runs the GPU part alone, GPU=no the CPU part alone.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 . ./tools/ask.sh
@@ -62,6 +63,9 @@ _g=$(lower "${GPU:-auto}")
 case "$_g" in auto) GPU=auto ;; *)
     GPU=$(yes_no GPU "$_g" 2>/dev/null) || { echo "pipeline: GPU=$_g: use auto, yes or no" >&2; exit 2; } ;;
 esac
+# CPU=no: the GPU part alone (downloads, builds, the GPU pipeline, figures and tables), the
+# counterpart of GPU=no; LEVIN and THREADS then select only the GPU Levin and thread stages.
+CPU=$(yes_no CPU "${CPU:-yes}") || exit 2
 MAKE="${MAKE:-make}"
 DATA_DIR="${DATA:-data}"
 
@@ -93,15 +97,26 @@ derive() {
     esac
     GPU_STAGES_PLAN="${GPU_STAGES:-core$([ $LEVIN = yes ] && echo ,levin)$([ $THREADS = yes ] && echo ,threads)}"
     CPU_PARTS="rest,ladder$([ $LEVIN = yes ] && echo ,levin)$([ $FOLD = yes ] && echo ,fold)$([ $THREADS = yes ] && echo ,threads)"
+    [ $CPU = yes ] || CPU_PARTS=""
     GPU_PARTS="$([ $RUN_GPU = yes ] && echo "$GPU_STAGES_PLAN")"
     # The components to report; nvcc and the GPU also when GPU=auto finds none.
-    MX_KEYS="cxx boost-cpu gsl kaust"
+    MX_KEYS="$([ $CPU = yes ] && echo "cxx boost-cpu gsl kaust")"
     if [ $RUN_GPU = yes ]; then MX_KEYS="$MX_KEYS nvcc gpu boost-gpu kaust-dev"
     elif [ "$GPU" = auto ]; then MX_KEYS="$MX_KEYS nvcc gpu"; fi
     [ $FIGURES = yes ] && MX_KEYS="$MX_KEYS python pdflatex"
     return 0
 }
 derive
+# CPU=no needs a GPU part.
+if [ $CPU = no ] && [ "$GPU" = no ]; then
+    echo "pipeline: CPU=no and GPU=no leave nothing to run" >&2
+    exit 2
+fi
+if [ $CPU = no ] && [ $RUN_GPU = no ]; then
+    echo "pipeline: CPU=no runs the GPU part alone, and none can run here (nvcc: $have_nvcc," \
+         "GPU visible: $have_gpu); GPU=yes forces it" >&2
+    exit 2
+fi
 full_run() {
     bash benchmark/tools/full_run.sh --entry "$ENTRY" --stages "$CPU_PARTS" --gpu "$GPU_PARTS" "$@"
 }
@@ -126,7 +141,7 @@ KAUST_HDR=references/build/kaust/kaust_derived.h
 if [ -f "$KAUST_HDR" ]; then KAUST_STATE=ported; else KAUST_STATE=absent; fi
 # A KAUST row runs with SUPPLIERS=all (CPU) and in the GPU core stage.
 kaust_runs() {
-    [ "${SUPPLIERS:-ship}" = all ] && return 0
+    [ $CPU = yes ] && [ "${SUPPLIERS:-ship}" = all ] && return 0
     [ $RUN_GPU = yes ] && case ",$GPU_STAGES_PLAN," in *,core,*|*,all,*) return 0 ;; esac
     return 1
 }
@@ -180,12 +195,23 @@ show() { printf '  %-22s %s\n' "$1" "$2"; }
 plan() {
     echo "== benchmark pipeline"
     show "download externals" "$EXTERNALS$([ $EXTERNALS = yes ] && echo " ($(ext_names))")$([ $EXTERNALS = no ] && [ -n "$GSL_OTHER" ] && echo "; $GSL_OTHER")"
-    show "builds" "library, benchmark drivers, CPU suppliers$([ $LEVIN = yes ] && echo ', Levin arms (first)')$([ $FOLD = yes ] && echo ', fold_cpu')$([ $THREADS = yes ] && echo ', threads_cpu')"
+    if [ $CPU = yes ]; then
+        show "builds" "library, benchmark drivers, CPU suppliers$([ $LEVIN = yes ] && echo ', Levin arms (first)')$([ $FOLD = yes ] && echo ', fold_cpu')$([ $THREADS = yes ] && echo ', threads_cpu')"
+    else
+        show "builds" "library, benchmark drivers (the GPU part's CPU reference)"
+    fi
     show "make check" "$CHECK"
-    show "CPU run" "yes (STAGES=all: accuracy, ladder, suppliers, supplier ladder)"
-    show "Levin A/B" "$LEVIN"
-    show "prefactor fold" "$FOLD"
-    show "thread scaling" "$THREADS${THREADS_MAX:+ (THREADS_MAX=$THREADS_MAX)}"
+    if [ $CPU = yes ]; then
+        show "CPU run" "yes (STAGES=all: accuracy, ladder, suppliers, supplier ladder)"
+        show "Levin A/B" "$LEVIN"
+        show "prefactor fold" "$FOLD"
+        show "thread scaling" "$THREADS${THREADS_MAX:+ (THREADS_MAX=$THREADS_MAX)}"
+    else
+        show "CPU run" "no (CPU=no: the GPU part alone)"
+        show "Levin A/B" "$([ $LEVIN = yes ] && echo 'yes, the GPU arm only' || echo no)"
+        show "prefactor fold" "no (a CPU stage)"
+        show "thread scaling" "$([ $THREADS = yes ] && echo 'yes, the GPU thread settings only' || echo no)"
+    fi
     show "GPU pipeline" "$RUN_GPU  (GPU=$GPU; nvcc: $have_nvcc, GPU visible: $have_gpu)$([ $RUN_GPU = yes ] && echo "; GPU_STAGES=$GPU_STAGES_PLAN")"
     local _figs _py
     _figs="$FIGURES$([ $FIGURES = yes ] && echo ' (the paper set)')$([ $TABLES_CHECK = yes ] && echo ', tables-check')"
@@ -676,19 +702,21 @@ fi
 [ "${BENCH_PIPELINE_STOP:-}" = downloads ] && exit 0
 
 # 2. Builds.  The Levin arms first, since levin-ab-build cleans build/.
-[ $LEVIN = yes ] && build "Levin arms" hard levin-ab-build
+[ $CPU = yes ] && [ $LEVIN = yes ] && build "Levin arms" hard levin-ab-build
 # The library archive alone; the header self-check (make headers) is part of make all and
 # make check, and under the pipeline runs only with CHECK=yes.
 build "library" hard build/libmatern.a
 build "benchmark drivers" hard benchmark-build
-build "CPU suppliers" soft build/suppliers || {
-    warned=1
-    echo "pipeline: build/suppliers did not build; the CPU supplier stages are skipped (make requirements)"; }
-if [ $FOLD = yes ]; then
-    build "fold_cpu" soft build/fold_cpu || FOLD=failed
-fi
-if [ $THREADS = yes ]; then
-    build "threads_cpu" soft build/threads_cpu || THREADS=failed
+if [ $CPU = yes ]; then
+    build "CPU suppliers" soft build/suppliers || {
+        warned=1
+        echo "pipeline: build/suppliers did not build; the CPU supplier stages are skipped (make requirements)"; }
+    if [ $FOLD = yes ]; then
+        build "fold_cpu" soft build/fold_cpu || FOLD=failed
+    fi
+    if [ $THREADS = yes ]; then
+        build "threads_cpu" soft build/threads_cpu || THREADS=failed
+    fi
 fi
 [ "${BENCH_PIPELINE_STOP:-}" = builds ] && { finish; exit $failed; }
 
@@ -720,17 +748,21 @@ fi
 # a SCOPE given to the pipeline names every run as before.
 CPU_SCOPE=""
 [ -z "${SCOPE:-}" ] && [ -z "$(full_assign)" ] && CPU_SCOPE=cpu
-stage "CPU run" env STAGES=all ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
-[ $LEVIN = yes ] && stage "Levin A/B" env STAGES=levin ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
-if [ "$FOLD" = yes ]; then
-    stage "prefactor fold" env STAGES=fold ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
-elif [ "$FOLD" = failed ]; then
-    note "prefactor fold" "not run: build/fold_cpu did not build"; failed=1
-fi
-if [ "$THREADS" = yes ]; then
-    stage "thread scaling" env STAGES=threads ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
-elif [ "$THREADS" = failed ]; then
-    note "thread scaling" "not run: build/threads_cpu did not build"; failed=1
+if [ $CPU = yes ]; then
+    stage "CPU run" env STAGES=all ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
+    [ $LEVIN = yes ] && stage "Levin A/B" env STAGES=levin ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
+    if [ "$FOLD" = yes ]; then
+        stage "prefactor fold" env STAGES=fold ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
+    elif [ "$FOLD" = failed ]; then
+        note "prefactor fold" "not run: build/fold_cpu did not build"; failed=1
+    fi
+    if [ "$THREADS" = yes ]; then
+        stage "thread scaling" env STAGES=threads ${CPU_SCOPE:+SCOPE=$CPU_SCOPE} bash benchmark/run_benchmark.sh
+    elif [ "$THREADS" = failed ]; then
+        note "thread scaling" "not run: build/threads_cpu did not build"; failed=1
+    fi
+else
+    note "CPU run" "not run: CPU=no (the GPU part alone)"
 fi
 [ $RUN_GPU = yes ] && stage "GPU pipeline" env GPU_STAGES="$GPU_STAGES_PLAN" NVCC="$nvcc_bin" \
     NVIDIA_SMI="$smi_bin" bash benchmark/run_gpu.sh

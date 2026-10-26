@@ -210,6 +210,7 @@ the first question does; the other switches act as for `make pipeline`.
 | `LEVIN` | `no` | the Levin A/B: builds the three arms (`make levin-ab-build`, logs in `build-ab/`), runs `STAGES=levin` |
 | `FOLD` | `no` | the prefactor-fold stage: builds `build/fold_cpu`, runs `STAGES=fold` (CPU only) |
 | `THREADS` | `no` | the thread-scaling stage, `STAGES=threads` |
+| `CPU` | `yes` | `no` leaves out the CPU part (the CPU run, the Levin, prefactor-fold and thread stages and their builds) and runs the GPU part alone, with `LEVIN` and `THREADS` selecting only the GPU Levin and thread stages; it needs a GPU part (with `GPU=no`, or `GPU=auto` where none can run, the pipeline stops before anything runs); kept by `SETTINGS=full` and in `make reproduce` |
 | `GPU` | `auto` | the GPU pipeline (`benchmark/run_gpu.sh`); `auto` runs it when `nvcc` and an NVIDIA GPU are found, `no` leaves it out (also with `SETTINGS=full` and in `make reproduce`); with `yes` and no `nvcc` or no visible GPU, `benchmark/run_gpu.sh` stops before its runs (exit status 3) and the pipeline ends with failures |
 | `GPU_STAGES` | `core`, plus `levin` and `threads` with `LEVIN` and `THREADS` | a comma list of `core`, `levin`, `threads`, or `all`, and `call-large`, which `all` does not include |
 | `CHECK` | `no` | `make check` after the builds, before the runs; a failure stops the pipeline |
@@ -493,10 +494,18 @@ moves such files to their names here without downloading them.
 
 ## Replicating the published results
 
-The published results come from the full benchmark on exclusive nodes: its CPU part once on
-an Intel Xeon Platinum 8358 and once on an AMD EPYC 9454, its GPU part on an NVIDIA A100
-80GB PCIe in a machine with the Intel CPU, each part as a separate batch job. One command
-runs the full benchmark on one machine:
+The published results come from the full benchmark at this release, run by `make reproduce`
+on three exclusive nodes, each as one batch job without a terminal:
+
+```sh
+make reproduce GPU=no KAUST=yes   # AMD EPYC 9454: the CPU part
+make reproduce GPU=no KAUST=yes   # Intel Xeon Platinum 8358: the CPU part
+make reproduce CPU=no KAUST=yes   # NVIDIA A100 80GB PCIe in an Intel Xeon Platinum 8358 machine: the GPU part
+```
+
+Every run records the commit it ran from (`source_commit`, `git_dirty` in `PROVENANCE.txt`),
+and the figures and tables name it beside the generators' own (`HARDWARE.md` and the tables'
+`README.md`, "Version of record"). One command runs the full benchmark on one machine:
 
 ```sh
 make reproduce
@@ -505,8 +514,8 @@ make reproduce
 It is `make pipeline` with the settings of the full benchmark (`SETTINGS=full`), the
 externals the run uses (`EXTERNALS=yes`) and the download of the missing or damaged corpus
 files (`CORPUS=yes`, 5.19 GB from Zenodo). The GPU part runs where `nvcc` and an NVIDIA GPU
-are found and is left out elsewhere; `make reproduce GPU=no` runs the full CPU part only.
-`SETTINGS=full` sets `LEVIN`, `FOLD`, `THREADS` and the run parameters over values given on
+are found and is left out elsewhere; `make reproduce GPU=no` runs the full CPU part only,
+`CPU=no` the GPU part only. `SETTINGS=full` sets `LEVIN`, `FOLD`, `THREADS` and the run parameters over values given on
 the command line. The published CPU rows used the system Boost 1.75.0 and GSL 2.6 of the
 run machines (packages of Red Hat Enterprise Linux 9.6; GSL as a shared library found by
 pkg-config). `make reproduce` likewise uses a system Boost 1.75.0 or GSL 2.6 where it finds
@@ -532,11 +541,11 @@ port). The port is deleted at the end of the run and the two files are kept, so 
 The figure `cross-machine/fig-paper-machine-independence` compares the CPU runs of an Intel
 and an AMD CPU (two models of one vendor do not count), so one machine cannot write it; a
 machine with the GPU part writes every other figure and table of the paper set (with the
-KAUST rows after a yes to the KAUST question or `KAUST=yes`). As in the published run, run
-`make reproduce` on one Intel machine with an NVIDIA GPU and on one AMD machine, copy the
-run directories of the second (`benchmark/runs/<run id>/`, not `latest`) into
-`benchmark/runs/` of the first, and write the figures and tables again there with
-`make figures` and `make tables`. The generators read every run in
+KAUST rows after a yes to the KAUST question or `KAUST=yes`). Run the commands above on
+their three machines (or `make reproduce` on an Intel machine with an NVIDIA GPU, which
+runs both of its parts, and `make reproduce GPU=no` on an AMD one). Copy the run
+directories (`benchmark/runs/<run id>/`, not `latest`) into `benchmark/runs/` of one tree,
+and write the figures and tables again there with `make figures` and `make tables`. The generators read every run in
 `benchmark/runs/` and take each kind of result from the newest run of the machine that has
 it, so an earlier run there can supply a stage; the CPU results come from a machine without
 GPU data, here the AMD one (`ARGS=--cpu-machine NAME` selects another).
