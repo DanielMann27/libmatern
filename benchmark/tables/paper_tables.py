@@ -1793,6 +1793,8 @@ ENV_KEYS = [
     ("cpufreq_driver",    "cpufreq driver"),
     ("cpufreq_governor",  "cpufreq governor"),
     ("cpufreq_range_kHz", "cpufreq range"),
+    # The clock right after each timed row (runs since the sidecars record it).
+    ("cpu_mhz_timed",     "Clock in the timed rows"),
     ("turbo",             "Turbo boost"),
     ("cpu_flags_simd",    "SIMD ISA"),
 ]

@@ -93,32 +93,34 @@ static int boost_version_at(const char *inc)
     return v;
 }
 
-static int find_boost(char *out, size_t n)
+/* Every Boost found, one line each with the rows it can serve: the copies of make externals,
+ * BOOST_DIR, BOOST_ROOT, the conda prefix and the system include directories.  The build
+ * selects among them (benchmark/tools/boost_detect.sh); the "built with" list says which. */
+static int list_boost(void)
 {
+    char conda[512] = "";
+    if (getenv("CONDA_PREFIX")) snprintf(conda, sizeof conda, "%s/include", getenv("CONDA_PREFIX"));
     /* Sized, not NULL-terminated: an unset variable yields a NULL entry. */
-    const char *env[] = { getenv("BOOST_DIR"), getenv("BOOST_ROOT") };
-    const size_t n_env = sizeof env / sizeof env[0];
-    const char *fixed[] = { "/usr/include", "/usr/local/include",
-                            "/opt/homebrew/include", "/opt/local/include", NULL };
-    int best = 0; char bestp[512] = "";
-
-    for (size_t i = 0; i < n_env; i++) {
-        if (!env[i]) continue;
-        int v = boost_version_at(env[i]);
-        if (v > best) { best = v; snprintf(bestp, sizeof bestp, "%s", env[i]); }
+    const char *where[] = { "references/boost/1.75.0", "references/boost/1.87.0",
+                            getenv("BOOST_DIR"), getenv("BOOST_ROOT"), conda[0] ? conda : NULL,
+                            "/usr/include", "/usr/local/include",
+                            "/opt/homebrew/include", "/opt/local/include" };
+    const size_t n_where = sizeof where / sizeof where[0];
+    int found = 0;
+    for (size_t i = 0; i < n_where; i++) {
+        if (!where[i]) continue;
+        int dup = 0;
+        for (size_t j = 0; j < i; j++) dup |= where[j] && strcmp(where[j], where[i]) == 0;
+        int v = dup ? 0 : boost_version_at(where[i]);
+        if (!v) continue;
+        printf("  %-10s %d.%d.%d at %s -- %s\n", found ? "" : "boost",
+               v / 100000, v / 100 % 1000, v % 100, where[i],
+               v == 107500 ? "the CPU row's version"
+               : v >= 108700 ? "a GPU row version (1.87 or later)"
+                             : "neither row (the CPU row is 1.75.0, the GPU row 1.87 or later)");
+        found++;
     }
-    const char *conda = getenv("CONDA_PREFIX");
-    if (conda) {
-        char p[512]; snprintf(p, sizeof p, "%s/include", conda);
-        int v = boost_version_at(p);
-        if (v > best) { best = v; snprintf(bestp, sizeof bestp, "%s", p); }
-    }
-    for (int i = 0; fixed[i]; i++) {
-        int v = boost_version_at(fixed[i]);
-        if (v > best) { best = v; snprintf(bestp, sizeof bestp, "%s", fixed[i]); }
-    }
-    if (best) snprintf(out, n, "%s", bestp);
-    return best;
+    return found;
 }
 
 /* GSL version from the header the row compiles against, not from libgsl.so, which can
@@ -135,10 +137,11 @@ static int gsl_version_at(const char *inc, char *ver, size_t vn)
 
 static int find_gsl(char *out, size_t n, char *ver, size_t vn)
 {
-    const char *fixed[] = { "/usr/include", "/usr/local/include",
+    /* the copy of make externals first: the build prefers it (benchmark/tools/gsl_flags.sh) */
+    const char *fixed[] = { "references/gsl/2.6/include", "/usr/include", "/usr/local/include",
                             "/opt/homebrew/include", "/opt/local/include", NULL };
     const char *conda = getenv("CONDA_PREFIX");
-    if (conda) {
+    if (conda && !gsl_version_at(fixed[0], ver, vn)) {
         char p[512]; snprintf(p, sizeof p, "%s/include", conda);
         if (gsl_version_at(p, ver, vn)) { snprintf(out, n, "%s", p); return 1; }
     }
@@ -166,9 +169,9 @@ static int corpus_stage(const char *root)
     return bad ? -1 : total;
 }
 
-/* The floating-point environment.  Every ULP figure assumes round-to-nearest-even, honoured
- * subnormals (FTZ/DAZ removes the subnormal range, where the extended-range assemblies work)
- * and contraction only as the build requests.  The probes use volatile operands. */
+/* The floating-point environment.  Every ULP figure assumes round-to-nearest-even and honoured
+ * subnormals (FTZ/DAZ removes the subnormal range, where the extended-range assemblies work).
+ * The probes use volatile operands. */
 static void fp_environment(void)
 {
     int r = fegetround();
@@ -186,15 +189,6 @@ static void fp_environment(void)
     printf("fp_subnormals      %s\n", prod == 0.0
            ? "FLUSHED TO ZERO (FTZ/DAZ active) -- the subnormal range is not measurable here"
            : "honoured");
-
-    /* Contraction: a*b+c whose fused and unfused values differ (2^-26 + 2^-54 against
-     * 2^-26), compared with fma(), which is fused by definition. */
-    volatile double a = 1.0 + 0x1p-27, b = 1.0 + 0x1p-27, c = -1.0;
-    volatile double step = a * b + c;
-    double fused = fma(a, b, c);
-    printf("fp_contraction     %s\n", step == fused
-           ? "this expression fused (a*b+c became one FMA)"
-           : "not fused in this translation unit");
 
     printf("fp_iec559          %s\n",
 #ifdef __STDC_IEC_559__
@@ -218,19 +212,8 @@ static void fp_environment(void)
     printf("fp_long_double     %zu bytes, %d mantissa bits\n",
            sizeof(long double), (int)LDBL_MANT_DIG);
     printf("fp_double_digits   %d mantissa bits, radix %d\n", (int)DBL_MANT_DIG, (int)FLT_RADIX);
-    /* fp_contraction and fp_fast_fma describe this translation unit, not the machine or
-     * the library's vector objects; cpu_flags_simd in PROVENANCE.txt records the hardware. */
-    printf("fp_fast_fma        %s\n",
-#ifdef FP_FAST_FMA
-           "yes -- fma() is a single instruction in THIS translation unit"
-#else
-           "no -- fma() is a call in THIS translation unit (detect.c is not built "
-           "with -mfma; the library's vector objects are, see cpu_flags_simd)"
-#endif
-    );
-    printf("fp_probe_scope     the rounding mode, subnormal and FTZ probes are "
-           "PROCESS state and describe the machine; contraction and fast_fma are "
-           "compiled the same way as this file and describe the build\n");
+    /* Contraction and FP_FAST_FMA are not reported: they describe this program's translation
+     * unit, not the library, whose fused instructions PROVENANCE.txt counts (fma_insns_*). */
 }
 
 /* The scalar build MATERN_BACKEND=scalar runs (matern_scalar_isa(), src/backends/internal.h).
@@ -564,7 +547,8 @@ int main(int argc, char **argv)
     /* 1. machine */
     char buf[512];
     if (cpuinfo_field("model name", buf, sizeof buf) == 0) printf("  cpu        %s\n", buf);
-    printf("  cores      %ld online\n", sysconf(_SC_NPROCESSORS_ONLN));
+    printf("  cpus       %ld online (hardware threads; cpus_physical in PROVENANCE.txt counts "
+           "the cores)\n", sysconf(_SC_NPROCESSORS_ONLN));
     if (read_first_line("/proc/loadavg", buf, sizeof buf) == 0) {
         char *sp = buf; int k = 0; for (char *p = buf; *p; p++) if (*p == ' ' && ++k == 3) { *p = '\0'; break; }
         printf("  load       %s\n", sp);
@@ -614,7 +598,7 @@ int main(int argc, char **argv)
         if (st != 2) warn++;
     }
 
-    /* 3. toolchain: the compiler of this program; the library's is read in section 5b. */
+    /* 3. toolchain: the compiler of this program; the library's is in the "built with" list. */
     puts("");
 #if defined(__clang__)
     printf("  compiler   clang %d.%d.%d (this program)\n", __clang_major__, __clang_minor__, __clang_patchlevel__);
@@ -631,10 +615,8 @@ int main(int argc, char **argv)
     const int target_has_fma = 0;
 #endif
     if (!target_has_fma) {
-        puts("  fp-contract this probe was built WITHOUT an FMA target (-mfma/-march=native),");
-        puts("              so contraction is impossible here and says nothing about the");
-        puts("              library: its vector objects are built with -mfma explicitly.");
-        puts("              Rebuild detect.c with the library's own flags to assert it.");
+        /* This program has no FMA target, so the probe cannot speak for the library; the
+         * fused instructions of its objects are counted in PROVENANCE.txt (fma_insns_*). */
     } else if (contracted) {
         puts("  fp-contract FUSED (a*b+c becomes one FMA) -- as required");
     } else {
@@ -649,7 +631,8 @@ int main(int argc, char **argv)
     puts("");
     warn += timer_info("  ");
     puts("");
-    bench_ulp_mode_describe(stdout, "  ", BENCH_ULP_MODE_DEFAULT);
+    /* the definition of the mode is in PROVENANCE.txt (ulp_formula, ulp_spacing, ...) */
+    printf("  ulp_mode           %s\n", bench_ulp_mode_name(BENCH_ULP_MODE_DEFAULT));
 
     /* 4. ISA: compiled-for vs executable */
     puts("");
@@ -675,30 +658,14 @@ int main(int argc, char **argv)
 #endif
     if (dis) warn++;
 
-    /* 5. suppliers installed; section 5b records what each artefact used. */
+    /* 5. suppliers installed; the "built with" list below records what each artefact used. */
     puts("");
-    puts("  installed  (what a build could use; section 5b says what each artefact used)");
-    char binc[512] = "";
-    int bv = find_boost(binc, sizeof binc);
-    if (!bv) {
-        puts("  boost      not found in the system include directories (references/boost/,");
-        puts("             where make externals puts 1.75.0 and 1.87.0, is not searched here;");
-        puts("             section 5b says what each artefact was built with).");
-    } else {
-        printf("  boost      %d.%d.%d at %s\n", bv/100000, bv/100%1000, bv%100, binc);
-        printf("             compile with -I%s\n", binc);
-        if (bv == 107500)
-            puts("             the CPU supplier row's version (the CPU row is Boost 1.75.0 only)");
-        else if (bv >= 108700)
-            puts("             enables the GPU supplier row; the CPU row needs Boost 1.75.0");
-        else
-            puts("             neither row: the CPU row needs 1.75.0, the GPU row >= 1.87");
-    }
+    puts("  installed  (what a build could use; \"built with\" below says what each artefact used)");
+    if (!list_boost())
+        puts("  boost      none found (references/boost/, BOOST_DIR, BOOST_ROOT, the system)");
     char ginc[512] = "", gver[32] = "";
     if (!find_gsl(ginc, sizeof ginc, gver, sizeof gver)) {
-        puts("  gsl        not found in the system include directories (references/gsl/,");
-        puts("             where make externals builds GSL 2.6, is not searched here;");
-        puts("             section 5b says what each artefact was built with).");
+        puts("  gsl        none found (references/gsl/2.6, the system include directories)");
     } else {
         printf("  gsl        %s at %s\n", gver, ginc);
         puts("             enables ONE CPU supplier row in all three assemblies");
@@ -713,7 +680,7 @@ int main(int argc, char **argv)
         : "CuBesselK not ported (not distributed: all rights reserved) -- no KAUST\n"
           "             rows.  make kaust: the copyright situation and how to obtain it");
 
-    /* 5b. what every linked artefact used, read from the artefacts */
+    /* 5b. "built with": what every linked artefact used, read from the artefacts */
     puts("");
     puts("  built with (read back from each artefact; this is what PROVENANCE.txt records)");
     {

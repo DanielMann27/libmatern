@@ -294,6 +294,7 @@ def write_hardware(runs, outdir, prov=None):
         ("cc_on_path", "$CC at run time"), ("nvcc_on_path", "nvcc at run time"),
         ("scalar_isa", "scalar build selected"),
         ("ulp_mode", "ULP mode"),
+        ("cpu_mhz_timed", "CPU clock in the timed rows"),
         ("timer_clock", "timer clock"), ("timer_clocksource", "clocksource"),
         ("timer_tsc_invariant", "invariant TSC"), ("timer_warning", "timer warning"),
         ("compiler", "compiler (older runs: $CC at run time)"), ("fma_knob", "FMA knob"),

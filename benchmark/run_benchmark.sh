@@ -356,9 +356,9 @@ fi
     echo "slurm_job         none"
     echo "exclusive         no -- not a dedicated allocation; timings can include load from other processes (see load_before and load_after)"
   fi
-  # The compiler $CC names in this shell, not what built the library (make predefines CC=cc);
-  # the build_* keys below are read from the artefacts.
-  pv cc_on_path "$(pfirst "${CC:-gcc} --version" "${CC:-cc} --version")" \
+  # The compiler $CC names in this shell, cc when unset as for make (make predefines CC=cc);
+  # what built the library is in the build_* keys below, read from the artefacts.
+  pv cc_on_path "$(pfirst "${CC:-cc} --version" "${CC:-gcc} --version")" \
      "the compiler named by \$CC does not answer --version"
   # The C library provides the libm of the scalar backend; libms differ in the last ulp, so it
   # is part of an accuracy result.
@@ -438,6 +438,10 @@ fi
      "no /proc/cpuinfo flags and no machdep.cpu sysctl"
   # FMA contraction is a per-object build choice: fused-instruction counts per object follow
   # at the end of this block.
+  # _gpu_part: the run has a GPU part (run_gpu.sh) or device objects are built; only then are
+  # the nvcc and device-architecture keys recorded, which otherwise hold Makefile defaults.
+  _gpu_part=no
+  { [ -n "${BENCH_GPU_PIPELINE:-}" ] || [ -f "$BUILD/cuda_bench.o" ]; } && _gpu_part=yes
   # The device: model, clocks, driver and throttle state; a missing GPU is noted, not a failure.
   if command -v nvidia-smi >/dev/null 2>&1; then
     echo "gpu               $(_gpuq name)"
@@ -479,7 +483,7 @@ fi
   else
     echo "gpu               none -- no nvidia-smi on this machine (CPU run, no device rows)"
   fi
-  echo "nvcc_on_path      $(nvcc --version 2>/dev/null | sed -n 's/.*release /release /p' | head -1)"
+  [ $_gpu_part = yes ] && echo "nvcc_on_path      $(nvcc --version 2>/dev/null | sed -n 's/.*release /release /p' | head -1)"
   # What built the artefacts, read from the artefacts (they may come prebuilt): detect
   # --build-info prints `build_<artefact>_<key>` lines from each object's .comment stamp and
   # each driver's compiled-in record.
@@ -489,8 +493,10 @@ fi
     pv build_info "" "build/detect is not built yet; run 'make benchmark-build'"
   fi
   # The make variables as the build resolved them (build/BUILD_KNOBS, written with each driver).
-  if [ -f "$BUILD/BUILD_KNOBS" ]; then
+  if [ -f "$BUILD/BUILD_KNOBS" ] && [ $_gpu_part = yes ]; then
     cat "$BUILD/BUILD_KNOBS"
+  elif [ -f "$BUILD/BUILD_KNOBS" ]; then
+    grep -Ev '^(make_nvcc|make_gpu_arch|make_gpu_arch_use) ' "$BUILD/BUILD_KNOBS"
   else
     pv make_knobs "" "no $BUILD/BUILD_KNOBS; the drivers were built by a Makefile that does not write it"
   fi
@@ -523,7 +529,9 @@ fi
     _e=$("$_cuobj" --list-elf "$1" 2>/dev/null | grep -o 'sm_[0-9]*[a-z]*' | sort -u | tr '\n' ' ' | sed 's/ $//')
     _p=$("$_cuobj" --list-ptx "$1" 2>/dev/null | grep -o 'sm_[0-9]*[a-z]*' | sort -u | tr '\n' ' ' | sed 's/ $//')
     printf '%s%s' "${_e:-no sass}" "${_p:+ (ptx $_p)}"; }
-  if [ -n "$_cuobj" ] && [ -f "$BUILD/cuda_bench.o" ]; then
+  if [ $_gpu_part = no ]; then
+    :
+  elif [ -n "$_cuobj" ] && [ -f "$BUILD/cuda_bench.o" ]; then
     _al=$(_archs "$BUILD/cuda_bench.o"); _ad=""
     for _d in benchmark_gpu suppliers_gpu; do
       [ -x "$BUILD/$_d" ] && _ad="${_ad:+$_ad; }$_d $(_archs "$BUILD/$_d")"
@@ -998,9 +1006,20 @@ LOAD_AFTER="$(pfirst \
     'cut -d" " -f1-3 /proc/loadavg' \
     'sysctl -n vm.loadavg | tr -d "{}" | sed "s/^ *//"' \
     'uptime | sed "s/.*average[s]*: //" | tr -d ","')"
+# The clock of the timing CPU right after each timed row (mhz_end of the .sched.csv sidecars,
+# cpufreq's scaling_cur_freq): the median and range over the rows of this run.
+CPU_MHZ_TIMED=$(cat "$OUT"/timing_raw.*.sched.csv 2>/dev/null | awk -F, '
+    $1 == "device" { c = 0; for (i = 1; i <= NF; i++) if ($i == "mhz_end") c = i; next }
+    c && $c > 0 { print $c + 0 }' | sort -n | awk '
+    { v[++n] = $1 }
+    END { if (!n) exit
+          m = (n % 2) ? v[(n + 1) / 2] : (v[n / 2] + v[n / 2 + 1]) / 2
+          printf "%d MHz median (%d..%d MHz) -- over %d timed rows: scaling_cur_freq of the timing CPU after each row (timing_raw.*.sched.csv)", m, v[1], v[n], n }')
 {
   pv load_after    "$LOAD_AFTER"              "no /proc/loadavg, no vm.loadavg sysctl and no uptime(1)"
   pv load_after_pc "$(_loadpc "$LOAD_AFTER")" "needs both a load average and a cpu count"
+  # absent where no row recorded one: no cpufreq, or the threads stage (mhz_end in threads.csv)
+  [ -z "$CPU_MHZ_TIMED" ] || pv cpu_mhz_timed "$CPU_MHZ_TIMED"
 } >> "$OUT/PROVENANCE.txt"
 
 # The accuracy detail files are compressed: a supplier that fails widely lists many excluded

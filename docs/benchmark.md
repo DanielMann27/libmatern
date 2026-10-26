@@ -613,7 +613,7 @@ directory holds the files of the stages it ran:
 | `STATUS` | `complete`, `partial` or `failed`, what is missing or skipped, warnings (from the sha256 check of the corpus against `data/MANIFEST.md`), the load before and after |
 | `EXPECTED.txt` | `u_max` of `avx512` on four `z_nu` datasets beside a reference value |
 | `timing_raw.<x>` | every timed repetition (`n`, `rep`, `ns_per_elem`) |
-| `timing_raw.<x>.sched.csv` | per timed row of `benchmark_cpu` and `suppliers`: thread count, migrations, involuntary context switches |
+| `timing_raw.<x>.sched.csv` | per timed row of `benchmark_cpu` and `suppliers`: thread count, migrations, involuntary context switches, and the clock of the timing CPU right after the row (`mhz_end`, MHz; `cpu_mhz_timed` in `PROVENANCE.txt` summarises it) |
 | `accuracy_detail.<x>[.gz]` | per accuracy row: the signed ULP histogram (`hist`), the 64 worst points (`worst`), every excluded point with its reason (`excluded`) |
 | `*.err` | the standard error of each stage |
 

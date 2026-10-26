@@ -267,6 +267,21 @@ run "provenance records the ULP metric and the timer clock" bash -c '
     grep -q "^ulp_mode  *up$" "$p" && grep -q "^ulp_formula " "$p" &&
     grep -q "^timer_clock  *CLOCK_MONOTONIC" "$p" && grep -q "^timer_warning " "$p" &&
     grep -q "^scalar_isa " "$p"'
+# The clock after each timed row (mhz_end), summarised as cpu_mhz_timed where cpufreq exists.
+run "sched sidecar records the clock" bash -c '
+    for s in "'"$LAST"'"/timing_raw.*.sched.csv; do head -1 "$s" | grep -q ",mhz_end$" || exit 1; done
+    [ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ] || exit 0
+    grep -q "^cpu_mhz_timed  *[0-9]* MHz median" "'"$LAST"'/PROVENANCE.txt"'
+# A CPU run without device objects records no nvcc or device-architecture keys.
+run "CPU run records no GPU build keys" bash -c '
+    [ -f build/cuda_bench.o ] && exit 0
+    ! grep -Eq "^(make_nvcc|make_gpu_arch|make_gpu_arch_use|nvcc_on_path|gpu_arch_built) " \
+        "'"$LAST"'/PROVENANCE.txt"'
+run "provenance: no probe-only fields" bash -c '
+    p="'"$LAST"'/PROVENANCE.txt"
+    grep -q "^fp_rounding " "$p" && grep -q "^l3_total " "$p" &&
+    ! grep -Eq "^(fp_contraction|fp_fast_fma|fp_probe_scope|tier|l3_per_socket) " "$p" &&
+    grep -q "^  cpus  *[0-9]* online (hardware threads" "'"$LAST"'/detect.txt"'
 run "manifest checksums the corpus" bash -c 'grep -q "data/MANIFEST.md" "'"$LAST"'/MANIFEST.txt"'
 run "device+supplier columns exist" bash -c '
     head -1 "'"$LAST"'/accuracy.csv" | grep -q "^schema,device,supplier,family," &&
@@ -1230,9 +1245,9 @@ run "size laws: the 2^20 prefix of the 2^25 sets" bash -c '
 # full_run.sh notes a LADDER_PASS_FROM above the top rung: 2^20 for the small set, LADDER_MAX
 # rounded down to a power of two when it caps the ladder.
 run "full run: small set tops at 2^20" bash -c '
-    bash benchmark/tools/full_run.sh --stages ladder LADDER_SET=small LADDER_PASS_FROM=2097152 2>&1 |
+    bash benchmark/tools/full_run.sh --brief --stages ladder LADDER_SET=small LADDER_PASS_FROM=2097152 2>&1 |
         grep -q "no effect: the top rung is 1048576" &&
-    bash benchmark/tools/full_run.sh --stages ladder LADDER_SET=small LADDER_MAX=70000 \
+    bash benchmark/tools/full_run.sh --brief --stages ladder LADDER_SET=small LADDER_MAX=70000 \
         LADDER_PASS_FROM=2097152 2>&1 | grep -q "no effect: the top rung is 65536"'
 run "LADDER_MAX is validated" bash -c '
     out=$(LADDER_MAX=abc bash benchmark/run_benchmark.sh 2>&1); rc=$?

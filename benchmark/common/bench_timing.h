@@ -66,8 +66,9 @@ static inline long bench_llc_bytes_shared(int cpu, int *shared_cpus)
 static FILE *bench_raw_fp = NULL;
 
 /* Scheduler counters of this process (-1 where unavailable).  A row bracketed by
- * bench_sched_begin() and bench_raw_emit() records its thread count, migrations and
- * involuntary context switches in the `.sched.csv` sidecar. */
+ * bench_sched_begin() and bench_raw_emit() records its thread count, migrations,
+ * involuntary context switches and the clock right after it (bench_cpu_mhz) in the
+ * `.sched.csv` sidecar. */
 typedef struct { long threads, migrations, invol_switches; } bench_sched;
 
 static inline bench_sched bench_sched_now(void)
@@ -93,6 +94,32 @@ static inline bench_sched bench_sched_now(void)
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) == 0) s.invol_switches = ru.ru_nivcsw;
     return s;
+}
+
+/* The clock of the CPU this process last ran on, in MHz: cpufreq's scaling_cur_freq, the
+ * kernel's estimate of its recent frequency; -1 without Linux /proc or cpufreq.  The CPU is
+ * field 39 of /proc/self/stat, which needs no _GNU_SOURCE (sched_getcpu() does). */
+static inline long bench_cpu_mhz(void)
+{
+    char buf[1024], path[96];
+    FILE *f = fopen("/proc/self/stat", "r");
+    if (!f) return -1;
+    size_t got = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[got] = '\0';
+    const char *q = strrchr(buf, ')');      /* the command name may hold spaces */
+    if (!q) return -1;
+    int field = 2;
+    for (q++; *q && field < 39; q++)
+        if (*q == ' ') field++;
+    if (field != 39) return -1;
+    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", atoi(q));
+    f = fopen(path, "r");
+    if (!f) return -1;
+    long khz = -1;
+    if (fscanf(f, "%ld", &khz) != 1) khz = -1;
+    fclose(f);
+    return khz > 0 ? khz / 1000 : -1;
 }
 
 static FILE    *bench_sched_fp = NULL;
@@ -129,15 +156,16 @@ static inline void bench_raw_emit(const char *device, const char *supplier,
                          ? e.migrations - bench_sched_mark.migrations : -1;
         const long sw  = (e.invol_switches >= 0 && bench_sched_mark.invol_switches >= 0)
                          ? e.invol_switches - bench_sched_mark.invol_switches : -1;
+        const long mhz = bench_cpu_mhz();
         if (!bench_sched_fp && bench_sched_path[0]) {
             bench_sched_fp = fopen(bench_sched_path, "w");
             if (bench_sched_fp)
                 fprintf(bench_sched_fp, "device,supplier,family,law,backend,n,threads,"
-                                     "migrations,invol_switches\n");
+                                     "migrations,invol_switches,mhz_end\n");
         }
         if (bench_sched_fp) {
-            fprintf(bench_sched_fp, "%s,%s,%s,%s,%s,%zu,%ld,%ld,%ld\n",
-                    device, supplier, fam, law, backend, n, e.threads, mig, sw);
+            fprintf(bench_sched_fp, "%s,%s,%s,%s,%s,%zu,%ld,%ld,%ld,%ld\n",
+                    device, supplier, fam, law, backend, n, e.threads, mig, sw, mhz);
             fflush(bench_sched_fp);
         }
         static int warned = 0;
