@@ -119,8 +119,9 @@ def lib_backend_for(rows, prefer=None, family=None):
     return rest[0] if rest else None
 
 
-# Backends that keep no workspace (src/backends/dispatch.c); `matched` runs the
-# vector pipeline and needs one.
+# Backends that keep no workspace (src/backends/dispatch.c).  A run that times the
+# workspace (`ns_workspace_med`) also shows it: a backend timed at 0 at every rung builds
+# none, as `matched` and `matched_fma` since they evaluate point by point at width 1.
 NO_WORKSPACE = {"scalar"}
 
 BACKEND_LABEL = {
@@ -1022,7 +1023,12 @@ def fig_workspace(plt, lad, outdir, stamp, law="size_random", family="z_nu",
                  lw=1.3, color=c)
         axl.plot(ns, [_f(r, "ns_ws_reused_med") for r in rows], marker=m, ms=3.8,
                  lw=1.3, ls=":", color=c, alpha=0.75)
-        if b in NO_WORKSPACE:
+        # No allocation series for a backend without a workspace: listed, or timed at 0
+        # at every rung by a run that times it (the fallback difference below would
+        # plot call-timing noise, in ns, beside the shares).
+        if b in NO_WORKSPACE or (_ws_med and not any(
+                _ok(_f(r, "ns_workspace_med")) and _f(r, "ns_workspace_med") > 0
+                for r in rows)):
             no_ws.append(b)
             continue
         # Share = workspace create+destroy / whole build-per-call.  The fallback
@@ -1087,10 +1093,9 @@ def fig_workspace(plt, lad, outdir, stamp, law="size_random", family="z_nu",
                                              for b, x in sorted(below_one.items()))
                                    if below_one else ""))
     if no_ws:
-        _parts.append(", ".join(no_ws) + " builds no workspace "
-                      "(the scalar path allocates none), so it has no setup "
-                      "series and no ring, and its two call measurements "
-                      "coincide")
+        _parts.append(", ".join(no_ws) + (" build" if len(no_ws) > 1 else " builds")
+                      + " no workspace, so there is no setup series and no ring, "
+                      "and the two call measurements coincide")
 
     if exhausted:
         where = ", ".join(
@@ -1146,7 +1151,8 @@ def fig_workspace(plt, lad, outdir, stamp, law="size_random", family="z_nu",
              "below it." if _ws_med else
              "The right panel shows the cost per element with a new workspace "
              "minus the cost with a reused one.",
-             ("The %s backend allocates no workspace." % _and(no_ws))
+             ("The %s backend%s no workspace." % (
+                 _and(no_ws), "s allocate" if len(no_ws) > 1 else " allocates"))
              if no_ws else "",
              _obtained(arch))
     return _finish(fig, outdir, f"fig-paper-workspace-{law}-{family}", stamp)
