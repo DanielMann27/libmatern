@@ -513,7 +513,7 @@ static void usage(FILE *o, const char *p)
            "          [--backend avx512,avx2,matched_fma,matched,scalar] [--metric accuracy|speed|all]\n"
            "          [--ulp-mode up|down|muller|straddle] [--max-points N] [--time-points N]\n"
            "          [--reps N] [--max-reps MAX] [--budget SECONDS]\n"
-           "            --reps fixes the repetition count (default 65); with --max-reps and\n"
+           "            --reps fixes the repetition count (default 25); with --max-reps and\n"
            "            --budget, repetitions continue until the budget is spent, between N\n"
            "            and MAX.  The count used is recorded per row.\n"
            "            --time-points times only the first N points of each dataset (default:\n"
@@ -533,7 +533,7 @@ static void usage(FILE *o, const char *p)
     const char *backend = "avx512";
 #endif
     fprintf(o, "  defaults: --family z_nu,h_nu_s --law all --backend %s --metric accuracy\n"
-               "            --ulp-mode up --reps 65 --format text --data-dir data; all points\n"
+               "            --ulp-mode up --reps 25 --format text --data-dir data; all points\n"
                "            (no --max-points, no --time-points); no --ladder-max; every rung\n"
                "            timed on its own (no --ladder-pass-from).\n", backend);
 #ifndef BENCH_FOLD

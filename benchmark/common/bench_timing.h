@@ -11,8 +11,8 @@
 
 /* Default repetition count of every stage (REPS of run_benchmark.sh and run_gpu.sh
  * overrides it), so every statistic in a record is over the same number of samples. */
-#define BENCH_REPS_MIN_DEFAULT  65
-#define BENCH_REPS_MAX_DEFAULT  65
+#define BENCH_REPS_MIN_DEFAULT  25
+#define BENCH_REPS_MAX_DEFAULT  25
 #define BENCH_BUDGET_DEFAULT   1e30      /* effectively no budget: reps are fixed */
 #define BENCH_WARMUP_REPS        2
 

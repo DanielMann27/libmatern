@@ -194,7 +194,7 @@ ladder_top() {
 }
 # The full run's values of the run parameters it sets, and the caps, which it leaves
 # unset.
-declare -A FULL=([REPS]=65 [LADDER_SET]=large [LADDER_PASS_FROM]=4194304 [SUPPLIERS]=all
+declare -A FULL=([REPS]=25 [LADDER_SET]=large [LADDER_PASS_FROM]=4194304 [SUPPLIERS]=all
                  [SUP_LADDER]=ship [SUP_LADDER_BUDGET]=1500)
 CAPS=" TIME_MAX_POINTS SUP_MAX_POINTS LADDER_MAX THREADS_MAX "
 is_cap() { [ "${CAPS/ $1 /}" != "$CAPS" ]; }

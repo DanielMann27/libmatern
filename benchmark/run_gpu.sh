@@ -94,7 +94,7 @@ bash benchmark/tools/full_run.sh --entry "bash benchmark/run_gpu.sh" --gpu "$GPU
 export BENCH_FULL_RUN_NOTICE=shown
 
 # The pipeline's fixed repetition count, forwarded to every device stage.
-REPS="${REPS:-65}"
+REPS="${REPS:-25}"
 build gpu-stage build/benchmark_gpu || exit 1
 # build/suppliers_gpu builds without Boost and KAUST (this library's kernel only), so a
 # failure is a build error and the stage counts as failed.

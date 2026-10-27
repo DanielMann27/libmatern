@@ -251,7 +251,7 @@ both families, and it refuses `SUP_MAX_POINTS` and `TIME_MAX_POINTS`.
 |---|---|---|
 | `FAMILIES` | `z_nu,h_nu_s` | the argument conventions measured |
 | `BACKENDS` | every backend of `avx512,avx2,matched_fma,matched,scalar` this CPU runs | the backends measured; one given explicitly that this CPU cannot run fails the accuracy stage |
-| `REPS` | `65` | timed repetitions per measurement |
+| `REPS` | `25` | timed repetitions per measurement |
 | `STAGES` | `all` | `all` (accuracy, ladder, suppliers, supplier ladder), `ladder` (the two ladders), `rest` (accuracy and suppliers), `levin` (needs `make levin-ab-build`), `threads` (needs `make build/threads_cpu`), `fold` (needs `make build/fold_cpu`), `record` (the run record alone) |
 | `LADDER_SET` | `small` (`large` in `benchmark/run_gpu.sh` run on its own) | ladders up to 2^20 (`small`) or 2^25 (`large`) points; both read the 2^25-point sets |
 | `LADDER_MAX` | unset | caps the top rung of every ladder |

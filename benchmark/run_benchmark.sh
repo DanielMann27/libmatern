@@ -36,7 +36,7 @@ for _f in $(printf '%s' "$FAMILIES" | tr ',' ' '); do
 done
 # A fixed repetition count, not a floor, for every timing stage (threads through THREADS_REPS,
 # the GPU stages through benchmark/run_gpu.sh), so the estimators are comparable.
-REPS="${REPS:-65}"
+REPS="${REPS:-25}"
 DATA="${DATA:-data}"
 # LADDER_SET: small (size_random/size_half, the first 2^20 points of the 2^25 sets) or large
 # (size_random_large/size_half_large, all 2^25; the default of benchmark/run_gpu.sh).  The top
