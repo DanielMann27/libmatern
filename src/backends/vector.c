@@ -285,8 +285,9 @@ int MATERN_VECTOR_ENTRY(double *out, const double *h, const double *nu,
         }
 
         if (degree >= 0) {
-            /* a short half-integer run: the closed form still applies if it opens
-             * a long enough segment of half-integer orders */
+            /* a short half-integer run: the direct path still applies if it opens a
+             * long enough segment of half-integer orders (otherwise the router gives
+             * its points the same closed form) */
             const size_t segment = half_integer_segment(nu + offset, remaining);
             if (segment > run && (segment >= HALF_INTEGER_MIN_RUN || segment == remaining)) {
                 for (size_t done = 0; done < segment; ) {

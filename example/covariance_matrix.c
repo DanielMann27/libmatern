@@ -84,10 +84,8 @@ int main(void)
            n, n, order, scale);
     printf("  M(0)          = %.17g   (must be exactly 1)\n", matrix[0]);
     printf("  M(h_max)      = %.17g\n", matrix[n - 1]);
-    /* At a constant half-integer order up to 29.5 (40.5 on scalar), such as 3/2, the
-     * library uses a closed form, so the check prints 0.  In general M(i,j) and M(j,i)
-     * can differ in the last bits (matern.h, THREAD SAFETY); for an exactly symmetric
-     * matrix, compute one triangle and mirror it. */
+    /* A point's result does not depend on the other points of the call (matern.h,
+     * THREAD SAFETY), so M(i,j) and M(j,i) are equal and the check prints 0. */
     printf("  symmetry check: max |M(i,j) - M(j,i)| = ");
 
     double asymmetry = 0.0;

@@ -232,6 +232,10 @@ run "covariance_z: 0 nonfin"       bash -c '
     for b in $SHORT; do
         MATERN_BACKEND=$b "'"$TMP/tail"'" | grep "covariance_z" | grep -q "non-finite 0 " || exit 1
     done'
+run "short calls equal the bulk call" bash -c '
+    for b in $SHORT; do
+        MATERN_BACKEND=$b "'"$TMP/tail"'" | grep -c "differs-from-bulk 0 " | grep -qx 2 || exit 1
+    done'
 
 echo "== stage 3: the run record =="
 # A reduced run (2 backends, 3 repetitions, one ladder law): run record and status.

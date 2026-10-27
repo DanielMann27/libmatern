@@ -112,10 +112,11 @@ draw to the stated interval. `grid`, `near_int` and `seam` are deterministic lay
 
 ### `half_int`
 
-`p + 0.5` is exactly representable and is stored exactly. The block length 2500 exceeds
-`HALF_INTEGER_MIN_RUN = 256` (`src/bessel/half_integer_common.h`), so every block is a
-constant-order run that the backends evaluate with the half-integer closed form
-`M = e^-z P_p(z)` where the order is within the backend's cap:
+`p + 0.5` is exactly representable and is stored exactly. Every backend evaluates a
+half-integer point with the half-integer closed form `M = e^-z P_p(z)` where the order is
+within the backend's cap, whatever its neighbours. The block length 2500 exceeds
+`HALF_INTEGER_MIN_RUN = 256` (`src/bessel/half_integer_common.h`), so on the vector backends
+every block also takes the direct path, which skips the router:
 
 | backend | closed form | Debye |
 |---|---|---|
@@ -252,5 +253,5 @@ both sides of those lines are served by the Debye expansion.
 | `EXTENDED_RANGE_ORDER_SPLIT` | 30 | selects the assembly used past the exponent range |
 | `MATERN_EXP_RANGE_LIMIT` | 708.396418532264 | `-log(DBL_MIN)`; past it, the extended-range bucket |
 | Levin band | nu <= 15 and `z > nu^4/2401 + 1.5` | closes at nu = 14.8949 |
-| `HALF_INTEGER_MIN_RUN` | 256 | vector backends: shorter constant-order runs go to the router (the scalar backend has no threshold) |
+| `HALF_INTEGER_MIN_RUN` | 256 | vector backends: shorter runs go through the router, which serves their half-integer points with the same closed form (speed only; the scalar backend has no threshold) |
 | `HALF_INTEGER_VECTOR_CAP` / `HALF_INTEGER_SCALAR_CAP` | 29 / 40 | closed form for nu <= 29.5 (AVX-512, AVX2, CUDA) or nu <= 40.5 (scalar) |

@@ -233,8 +233,9 @@ statements are in `include/matern.h`.
 
 No error bound is guaranteed. The accuracy is measured by the benchmark against
 arbitrary-precision references (FLINT/arb) and reported in the accompanying paper; the
-`scalar` backend has larger errors than the others. A backend gives the same bits on every
-processor that runs it (`include/matern.h`, BACKENDS).
+`scalar` backend has larger errors than the others. `avx512` and `avx2` give the same bits on
+every processor that runs them; the other backends call the C library's elementary functions,
+whose results can depend on the processor (`include/matern.h`, BACKENDS).
 
 ## Testing
 
@@ -252,7 +253,7 @@ backend it cannot run is reported as `skipped`. Each part can also be run on its
 | `make crosscheck` | `scalar` and `scalar_portable` against `matched`, which share no region kernel; reports the largest relative difference |
 | `make positive-definite` | per backend: covariance matrices factor by Cholesky, are exactly symmetric, and every point equals its single-point and chunked-call result |
 | `make direct-argument` | per backend: the `(z, ν)` entry `matern_covariance_z()` |
-| `make threads` | per backend: 8 threads reproduce the single-thread result bit for bit; a positive control that shares one workspace must fail |
+| `make threads` | per backend: 8 threads reproduce the single-thread result bit for bit, and one call equals calls of 7000 points; a positive control that shares one workspace must fail |
 | `make exports` | `build/libmatern.a` defines exactly the names in `matern.map`, the CUDA stand-ins weak; `build/cuda.o`, when built, no other name |
 | `make audit` | static checks of the tree (`tools/audit.py`); outside a git checkout one check prints `skip`, which is not a failure |
 | `make neutral` | every region kernel compiles at width 1 |

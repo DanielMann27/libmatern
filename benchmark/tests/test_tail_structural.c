@@ -1,6 +1,7 @@
 /* test_tail_structural.c -- short calls (n = 1..NMAX) through both public entries: no
- * output may be non-finite; agreement with one bulk call is reported, not asserted.
- * Run by benchmark/tests/run_tests.sh; exit status 1 on a non-finite output. */
+ * output may be non-finite, and every output equals the same point in one bulk call
+ * (matern.h, THREAD SAFETY).  Run by benchmark/tests/run_tests.sh; exit status 1 on a
+ * non-finite output or a difference. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -50,5 +51,5 @@ int main(void){
     printf("%-8s n=1..%d, %ld point-evaluations per entry\n", bk, NMAX, tot);
     printf("   covariance_z : non-finite %-6ld   differs-from-bulk %-7ld  worst rel %.2e\n",nf_z,dis_z,worst_z);
     printf("   covariance   : non-finite %-6ld   differs-from-bulk %-7ld  worst rel %.2e\n",nf_h,dis_h,worst_h);
-    return (nf_z||nf_h)?1:0;
+    return (nf_z||nf_h||dis_z||dis_h)?1:0;
 }

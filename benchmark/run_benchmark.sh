@@ -1079,7 +1079,7 @@ printf '%-40s %d\n' run_total "$SECONDS" >> "$OUT/TIMES.txt"
       for _w in "${WARNINGS[@]}"; do echo "warning  $_w"; done
   fi
   echo "load     before=$LOAD_BEFORE after=$LOAD_AFTER"
-  echo "note     accuracy does not depend on the load or the processor, but on the build (compiler, flags, libm); timings on a machine shared with other processes can be slower."
+  echo "note     accuracy does not depend on the load, but on the build (compiler, flags, libm) and, for the libm-based backends, on the processor's features; timings on a machine shared with other processes can be slower."
 } > "$OUT/STATUS"
 
 cat "$OUT/STATUS"

@@ -52,7 +52,11 @@
  *      a nonzero value past the exponential limit z = 708.4 wherever M >= DBL_MIN
  * No error bound is guaranteed.  Accuracy is evaluated against arbitrary-precision
  * references by the benchmark and in the accompanying paper.  A point's result does not
- * depend on the other points of the call or on the processor model (THREAD SAFETY).
+ * depend on the other points of the call (THREAD SAFETY), and on avx512 and avx2 not on
+ * the processor model either (BACKENDS).  Results assume the default floating-point
+ * environment (round to nearest, no flush-to-zero or denormals-are-zero); in a thread
+ * that sets FTZ or DAZ, as a program linked with -ffast-math does, the last bits can
+ * differ and values below DBL_MIN can become 0.
  *
  * BACKENDS
  * The backend is resolved once, at the first call of matern_covariance(),
@@ -77,10 +81,13 @@
  * with -mfma, which changes their results and requires FMA3 on every machine
  * (docs/benchmark.md, "Make parameters").  scalar and the CUDA entries route
  * differently from the other CPU backends, and the results of all backends differ;
- * the errors of scalar are larger than those of the other backends.  Every backend uses
- * only instructions whose results the x86 instruction set defines exactly, so a backend
- * gives the same bits on every processor that runs it (built with the same compiler and
- * flags).
+ * the errors of scalar are larger than those of the other backends.  avx512 and avx2
+ * have their own elementary functions and use only instructions whose results the x86
+ * instruction set defines exactly, so a build gives the same bits on every processor
+ * that runs it.  matched, matched_fma, scalar and scalar_portable call the C library's
+ * exp, log, pow and tgamma, which the C library may implement differently by processor
+ * feature, and `scalar` selects its build by processor; their results can therefore
+ * differ between machines.
  *
  * THREAD SAFETY
  * The backend choice is published atomically at the first call; the CPU library

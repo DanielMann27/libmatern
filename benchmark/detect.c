@@ -699,8 +699,9 @@ int main(int argc, char **argv)
     printf("  %d warning(s).\n", warn);
     puts("  Accuracy figures do not depend on the load.  They are expected to agree");
     puts("  between machines with the same build (compiler, flags, libm and the");
-    puts("  supplier libraries), whatever the processor model or vendor.  Speed is a");
-    puts("  property of this host and");
+    puts("  supplier libraries); avx512 and avx2 whatever the processor, the backends");
+    puts("  on the C library's elementary functions only with the same C library and");
+    puts("  processor features.  Speed is a property of this host and");
     puts("  its load: on a machine shared with other processes, timings can be slower.");
     line();
     return (laws < 0) ? 1 : 0;

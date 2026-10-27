@@ -1,7 +1,10 @@
-/* region_partition.h -- region codes, border constants and the scalar classifier
- * matern_region_of() (see the accompanying paper, domain decomposition).  The
- * vector classifier in pipeline_vector.h must make the same decisions; within an ulp of
- * the C(nu) and L(nu) borders the two can differ, as they round those curves differently. */
+/* region_partition.h -- region codes, border constants and the scalar statement of the
+ * partition, matern_region_of() (see the accompanying paper, domain decomposition).  The
+ * vector backends classify every point with matern_classify (pipeline_vector.h), which
+ * makes the same decisions except within an ulp of the C(nu) and L(nu) borders, where it
+ * rounds those curves differently; matern_region_of has no caller in the library and
+ * documents the partition that backends/scalar/region_router.c and the CUDA router
+ * write out. */
 #ifndef MATERN_REGION_PARTITION_H
 #define MATERN_REGION_PARTITION_H
 

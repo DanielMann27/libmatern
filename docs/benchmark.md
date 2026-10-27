@@ -645,8 +645,9 @@ within 10^-3 ulp, `MOVED` otherwise. It is a report, not a test. The reference v
 from the default build with GCC 11.5.0; another compiler or a changed `OPTIMISE`, `CFLAGS`
 or `XCF` can move the measured values. With that build
 on a CPU with AVX-512, a `MOVED` row leaves two causes to check: changed library sources, or
-a corpus file that does not match its sha256 (`MANIFEST.txt`). No backend's results depend on
-the processor model or vendor.
+a corpus file that does not match its sha256 (`MANIFEST.txt`). The `avx512` and `avx2` results
+do not depend on the processor model or vendor; the backends built on the C library's
+elementary functions (`matched`, `matched_fma`, `scalar`, `scalar_portable`) can.
 
 In `PROVENANCE.txt`, `release` is `MATERN_VERSION_STRING`; `source_commit` is taken from
 git when the tree is the top level of a git checkout, else from `BENCH_SOURCE_COMMIT`, else

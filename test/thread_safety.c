@@ -220,7 +220,8 @@ int main(void)
         printf("\n  one call vs %zu-point calls: %zu of %d points differ, "
                "largest relative %.3e  %s\n", chunk, moved, POINT_COUNT, worst,
                moved ? "FAILED" : "ok");
-        if (moved) failures++;
+        /* not counted in the control run, where only the shared workspace may fire */
+        if (moved && !is_control) failures++;
     }
 
     matern_workspace_destroy(workspace);
