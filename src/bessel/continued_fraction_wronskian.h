@@ -1,7 +1,8 @@
 /* continued_fraction_wronskian.h -- continued-fraction kernel in the vector vocabulary (I
  * series, CF2 by modified Lentz, Wronskian, prefactor cancelled; see the accompanying
- * paper, continued-fraction formulation).  vec_divide_refined is per instruction set; with
- * horizontal exits, sorting runs by z can change the last bits. */
+ * paper, continued-fraction formulation).  vec_divide_refined is per instruction set.  Each
+ * lane stops accumulating at its own convergence test, so a point's result does not depend
+ * on the points that share its block; the sort by z only groups similar trip counts. */
 #ifndef MATERN_CONTINUED_FRACTION_WRONSKIAN_H
 #define MATERN_CONTINUED_FRACTION_WRONSKIAN_H
 
@@ -106,6 +107,11 @@ static inline __attribute__((always_inline)) void continued_fraction_cell_x1(con
     const SIMD_TYPE_FLOAT HALF = LOAD_FLOAT(MATERN_BROADCAST_HALF);
     const SIMD_TYPE_FLOAT QUARTER = LOAD_FLOAT(MATERN_BROADCAST_QUARTER);
     SIMD_TYPE_FLOAT Z[1], NU[1], Z4[1], S[1], T[1], O1[1], O2[1];
+    vec_mask DS[1], DL[1];                           /* lanes past the series / Lentz test */
+    for (int w = 0; w < 1; w++) {
+        DS[w] = LESS_THAN_FLOAT(ONE, ZERO);          /* no lane has passed either test */
+        DL[w] = DS[w];
+    }
     /* phase 1: S_0 = 1/nu, T_0 = 2/z */
     #pragma GCC unroll 4
 for (int w = 0; w < 1; w++){
@@ -119,14 +125,17 @@ for (int w = 0; w < 1; w++){
         O2[w] = ZERO;
     }
     /* phase 2: with k = i + 1 the term ratios are (z/2)^2/(k (nu+k)) for S and
-     * (z/2)^2/(k (nu+k-1)) for T; exit once every lane's S term is negligible. */
+     * (z/2)^2/(k (nu+k-1)) for T.  A lane whose S term has become negligible adds 0 from
+     * then on, which leaves its sums exactly as they were; the loop exits once every lane
+     * has. */
     for (int i = 0; i < CONTINUED_FRACTION_SERIES_TERMS; i++){
         unsigned all = 1u;
         #pragma GCC unroll 4
 for (int w = 0; w < 1; w++){
-            O1[w] = ADD_FLOAT(O1[w], S[w]);
-            O2[w] = ADD_FLOAT(O2[w], T[w]);
-            if (MASK_REDUCE(LESS_THAN_EQUAL_FLOAT(ABS(S[w]), MUL_FLOAT(TOL, ABS(O1[w])))) != WHILE_FACTOR) all = 0u;
+            O1[w] = ADD_FLOAT(O1[w], BLEND_FLOAT(DS[w], S[w], ZERO));
+            O2[w] = ADD_FLOAT(O2[w], BLEND_FLOAT(DS[w], T[w], ZERO));
+            DS[w] = MASK_OR(DS[w], LESS_THAN_EQUAL_FLOAT(ABS(S[w]), MUL_FLOAT(TOL, ABS(O1[w]))));
+            if (MASK_REDUCE(DS[w]) != WHILE_FACTOR) all = 0u;
         }
         if (all) break;
         const SIMD_TYPE_FLOAT FAC1 = LOAD_FLOAT(MATERN_BROADCAST_POOL + (i + 1) * INDEX_FACTOR);
@@ -150,8 +159,9 @@ for (int w = 0; w < 1; w++){
         H[w] = ZERO;
     }
     SIMD_TYPE_FLOAT C = ONE;
-    /* phase 3: step k has A = (nu-1)^2 - (2k-1)^2/4 and B = 2(z+k); exit once
-     * PROD = 1 within TOL in every lane. */
+    /* phase 3: step k has A = (nu-1)^2 - (2k-1)^2/4 and B = 2(z+k).  A lane whose PROD
+     * has reached 1 within TOL multiplies LOW1 by 1 from then on; the loop exits once every
+     * lane has. */
     for (int i = 0; i < CONTINUED_FRACTION_LENTZ_STEPS; i++){
         const SIMD_TYPE_FLOAT TMP_T2 = SUB_FLOAT(MUL_FLOAT(TWO, C), ONE);
         const SIMD_TYPE_FLOAT TMP5 = MUL_FLOAT(QUARTER, MUL_FLOAT(TMP_T2, TMP_T2));
@@ -163,8 +173,9 @@ for (int w = 0; w < 1; w++){
             LOW2[w] = ADD_FLOAT(B, vec_divide_refined(A, LOW2[w]));
             H[w] = vec_divide_refined(ONE, FMADD_FLOAT(A, H[w], B));
             const SIMD_TYPE_FLOAT PROD = MUL_FLOAT(H[w], LOW2[w]);
-            LOW1[w] = MUL_FLOAT(LOW1[w], PROD);
-            if (MASK_REDUCE(LESS_THAN_EQUAL_FLOAT(ABS(SUB_FLOAT(PROD, ONE)), TOL)) != WHILE_FACTOR) all = 0u;
+            LOW1[w] = MUL_FLOAT(LOW1[w], BLEND_FLOAT(DL[w], PROD, ONE));
+            DL[w] = MASK_OR(DL[w], LESS_THAN_EQUAL_FLOAT(ABS(SUB_FLOAT(PROD, ONE)), TOL));
+            if (MASK_REDUCE(DL[w]) != WHILE_FACTOR) all = 0u;
         }
         if (all) break;
         C = ADD_FLOAT(C, ONE);
@@ -186,6 +197,11 @@ static inline __attribute__((always_inline)) void continued_fraction_cell_x4(con
     const SIMD_TYPE_FLOAT HALF = LOAD_FLOAT(MATERN_BROADCAST_HALF);
     const SIMD_TYPE_FLOAT QUARTER = LOAD_FLOAT(MATERN_BROADCAST_QUARTER);
     SIMD_TYPE_FLOAT Z[4], NU[4], Z4[4], S[4], T[4], O1[4], O2[4];
+    vec_mask DS[4], DL[4];                           /* lanes past the series / Lentz test */
+    for (int w = 0; w < 4; w++) {
+        DS[w] = LESS_THAN_FLOAT(ONE, ZERO);          /* no lane has passed either test */
+        DL[w] = DS[w];
+    }
     #pragma GCC unroll 4
 for (int w = 0; w < 4; w++){
         Z[w] = VEC_VLD(zp + (size_t)w * VEC_LANES);
@@ -201,9 +217,10 @@ for (int w = 0; w < 4; w++){
         unsigned all = 1u;
         #pragma GCC unroll 4
 for (int w = 0; w < 4; w++){
-            O1[w] = ADD_FLOAT(O1[w], S[w]);
-            O2[w] = ADD_FLOAT(O2[w], T[w]);
-            if (MASK_REDUCE(LESS_THAN_EQUAL_FLOAT(ABS(S[w]), MUL_FLOAT(TOL, ABS(O1[w])))) != WHILE_FACTOR) all = 0u;
+            O1[w] = ADD_FLOAT(O1[w], BLEND_FLOAT(DS[w], S[w], ZERO));
+            O2[w] = ADD_FLOAT(O2[w], BLEND_FLOAT(DS[w], T[w], ZERO));
+            DS[w] = MASK_OR(DS[w], LESS_THAN_EQUAL_FLOAT(ABS(S[w]), MUL_FLOAT(TOL, ABS(O1[w]))));
+            if (MASK_REDUCE(DS[w]) != WHILE_FACTOR) all = 0u;
         }
         if (all) break;
         const SIMD_TYPE_FLOAT FAC1 = LOAD_FLOAT(MATERN_BROADCAST_POOL + (i + 1) * INDEX_FACTOR);
@@ -237,8 +254,9 @@ for (int w = 0; w < 4; w++){
             LOW2[w] = ADD_FLOAT(B, vec_divide_refined(A, LOW2[w]));
             H[w] = vec_divide_refined(ONE, FMADD_FLOAT(A, H[w], B));
             const SIMD_TYPE_FLOAT PROD = MUL_FLOAT(H[w], LOW2[w]);
-            LOW1[w] = MUL_FLOAT(LOW1[w], PROD);
-            if (MASK_REDUCE(LESS_THAN_EQUAL_FLOAT(ABS(SUB_FLOAT(PROD, ONE)), TOL)) != WHILE_FACTOR) all = 0u;
+            LOW1[w] = MUL_FLOAT(LOW1[w], BLEND_FLOAT(DL[w], PROD, ONE));
+            DL[w] = MASK_OR(DL[w], LESS_THAN_EQUAL_FLOAT(ABS(SUB_FLOAT(PROD, ONE)), TOL));
+            if (MASK_REDUCE(DL[w]) != WHILE_FACTOR) all = 0u;
         }
         if (all) break;
         C = ADD_FLOAT(C, ONE);

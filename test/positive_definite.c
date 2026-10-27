@@ -1,10 +1,10 @@
 /* positive_definite.c -- the largest leading block of 200 x 200 library covariance matrices
  * (one-dimensional grid, s = 1) that admits a Cholesky factorisation, the unit diagonal, and
- * symmetry and batch invariance (asserted exact on scalar, reported on the other backends). */
+ * exact symmetry and batch invariance on every backend: a point gets the same bits alone, in
+ * one call, and in calls of other lengths. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <string.h>
 #include "matern.h"
 
 static int failures = 0;
@@ -74,7 +74,6 @@ int main(void)
 
     int asserted_bad = 0, asymmetric = 0, diagonal_bad = 0;
     double asym_worst = 0.0;
-    const int is_scalar = (strncmp(matern_backend_name(), "scalar", 6) == 0);
 
     printf("  %8s %8s %12s %12s   %s\n",
            "spacing", "nu", "factors", "min pivot", "");
@@ -94,10 +93,8 @@ int main(void)
                 failures++; continue;
             }
 
-            /* Symmetry and the unit diagonal.  On the CPU backends other than scalar
-             * a result can depend on its position in the batch, so W[i][j] and
-             * W[j][i] can differ in the last bit (reported); scalar routes per point
-             * and is checked for exact symmetry. */
+            /* Symmetry and the unit diagonal.  A result does not depend on its position
+             * in the batch (matern.h, THREAD SAFETY), so W[i][j] and W[j][i] are equal. */
             for (int i = 0; i < n; i++) {
                 if (W[(size_t)i*n + i] != 1.0) diagonal_bad++;
                 for (int j = 0; j < i; j++) {
@@ -127,21 +124,16 @@ int main(void)
     putchar('\n');
     report("every asserted configuration factors fully", asserted_bad,
            "configurations did not, and their margin was three orders of magnitude");
-    if (is_scalar) {
-        printf("  %-58s %s\n", "the matrix is exactly symmetric (scalar)",
-               asymmetric == 0 ? "ok" : "FAILED");
-        if (asymmetric) {
-            printf("      %d pairs differ, largest relative %.3e\n", asymmetric, asym_worst);
-            failures++;
-        }
-    } else {
-        printf("  %-58s %d pairs differ, largest relative %.3e\n",
-               "symmetry (reported)", asymmetric, asym_worst);
-    }
+    report("every matrix is exactly symmetric", asymmetric,
+           "pairs W[i][j] != W[j][i] -- a result depends on its place in the batch");
+    if (asymmetric)
+        printf("      largest relative difference %.3e\n", asym_worst);
 
-    /* Batch invariance: a point evaluated alone against the same point inside a
-     * batch.  Reported on the vector backends (matern.h, THREAD SAFETY), exact on
-     * scalar. */
+    /* Batch invariance: every point evaluated alone against the same point inside one
+     * call, and inside calls of 37 points.  The first set is the nu = 20 grid above; the
+     * second mixes orders in short runs (half-integers among them, so that the closed form
+     * and the router share tiles), separations across the regions and a length that is not
+     * a multiple of any vector width. */
     {
         const double spacing = 0.05, nu = 20.0, length_scale = 1.0;
         for (int i = 0; i < n; i++) x[i] = spacing * (double)i;
@@ -151,27 +143,43 @@ int main(void)
                 order[(size_t)i*n + j] = nu;
                 scale[(size_t)i*n + j] = length_scale;
             }
+        static const double MIXED[] = { 0.5, 2.3, 1.5, 7.0, 12.5, 29.5, 20.0, 2.5, 31.0, 0.75 };
+        const size_t nmixed = sizeof MIXED / sizeof MIXED[0];
+        const size_t mixed_points = m2 - 13;
+        double *mh = malloc(mixed_points * sizeof *mh), *mnu = malloc(mixed_points * sizeof *mnu);
+        double *ms = malloc(mixed_points * sizeof *ms), *one = malloc(mixed_points * sizeof *one);
+        double *chunked = malloc(mixed_points * sizeof *chunked);
+        if (!mh || !mnu || !ms || !one || !chunked) { puts("out of memory"); return 1; }
+        for (size_t i = 0, k = 0; i < mixed_points; k++)           /* runs of 1 .. 5 points */
+            for (size_t r = 0; r <= k % 5 && i < mixed_points; r++, i++) {
+                mnu[i] = MIXED[k % nmixed];
+                mh[i]  = 0.013 * (double)(i % 3001);                   /* z from 0 to ~250 */
+                ms[i]  = (i % 2) ? 1.0 : 0.7;
+            }
+        size_t moved_grid = 0, moved_mixed = 0, moved_chunked = 0;
         matern_covariance(W, h, order, scale, m2, work);
-        size_t moved = 0; double worst = 0.0;
         for (size_t i = 0; i < m2; i++) {
             double alone = 0.0;
             matern_covariance(&alone, &h[i], &order[i], &scale[i], 1, work);
-            if (alone == W[i]) continue;
-            moved++;
-            const double d = fabs(alone - W[i]) / fabs(alone);
-            if (d > worst) worst = d;
+            if (alone != W[i]) moved_grid++;
         }
-        if (is_scalar) {
-            printf("  %-58s %s\n", "batch and single-point calls agree exactly (scalar)",
-                   moved == 0 ? "ok" : "FAILED");
-            if (moved) {
-                printf("      %zu of %zu points moved, largest relative %.3e\n", moved, m2, worst);
-                failures++;
-            }
-        } else {
-            printf("  %-58s %zu of %zu points differ, largest relative %.3e\n",
-                   "batch vs single-point calls (reported)", moved, m2, worst);
+        matern_covariance(W, mh, mnu, ms, mixed_points, work);
+        for (size_t i = 0; i < mixed_points; i += 37) {
+            const size_t len = (mixed_points - i < 37) ? mixed_points - i : 37;
+            matern_covariance(chunked + i, mh + i, mnu + i, ms + i, len, work);
         }
+        for (size_t i = 0; i < mixed_points; i++) {
+            matern_covariance(one + i, mh + i, mnu + i, ms + i, 1, work);
+            if (one[i] != W[i]) moved_mixed++;
+            if (chunked[i] != W[i]) moved_chunked++;
+        }
+        report("nu = 20 grid: one call equals single-point calls", (int)moved_grid,
+               "points differ between the batch and the point alone");
+        report("mixed orders: one call equals single-point calls", (int)moved_mixed,
+               "points differ between the batch and the point alone");
+        report("mixed orders: one call equals calls of 37 points", (int)moved_chunked,
+               "points differ between one call and shorter calls");
+        free(mh); free(mnu); free(ms); free(one); free(chunked);
     }
     report("the diagonal is exactly 1.0", diagonal_bad,
            "diagonal entries were not 1.0 -- M(0) = 1 at every order");

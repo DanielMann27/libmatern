@@ -198,9 +198,8 @@ int main(void)
     failures += check_case("covariance, per-thread cache",
                            matern_covariance, 0);
 
-    /* Batching (not a thread property): points whose bits change when one array is
-     * evaluated in chunks instead of one call.  Reported, not asserted: a horizontal
-     * exit test across a vector makes the trip count depend on which points share it. */
+    /* Batching (not a thread property): one array evaluated in chunks instead of one call
+     * gives the same bits (matern.h, THREAD SAFETY). */
     if (matern_covariance(expected, h_input, nu_input, scale_input,
                           POINT_COUNT, workspace) == MATERN_OK) {
         const size_t chunk = 7000;    /* not a multiple of the tile size */
@@ -218,8 +217,10 @@ int main(void)
                     if (d > worst) worst = d;
                 }
             }
-        printf("\n  one call vs %zu-point calls (reported) %zu of %d points differ, "
-               "largest relative %.3e\n", chunk, moved, POINT_COUNT, worst);
+        printf("\n  one call vs %zu-point calls: %zu of %d points differ, "
+               "largest relative %.3e  %s\n", chunk, moved, POINT_COUNT, worst,
+               moved ? "FAILED" : "ok");
+        if (moved) failures++;
     }
 
     matern_workspace_destroy(workspace);

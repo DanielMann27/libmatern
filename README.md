@@ -146,9 +146,9 @@ The interface and its contract are documented in `include/matern.h`.
   exit). A workspace from `matern_workspace_create()` lives until `matern_workspace_destroy()`
   and serves one thread at a time. Neither form allocates on every call; the other backends
   use no workspace.
-* On every CPU backend except `scalar`, the last bits of a point can depend on the other points
-  of the batch, so a covariance matrix need not be exactly symmetric; where exact symmetry
-  matters, compute one triangle and mirror it.
+* A point's result does not depend on the other points of the call: alone, in a batch, in any
+  order or split over several calls it has the same bits, so a covariance matrix is exactly
+  symmetric.
 * `matern_covariance_z()` takes `z` directly, for a model that works in `z`. A caller who has
   `h` and `s` passes them to `matern_covariance()`, which derives `z` itself and, on the
   backends other than `scalar`, carries it in most regions as a double-double (the unevaluated
@@ -233,8 +233,8 @@ statements are in `include/matern.h`.
 
 No error bound is guaranteed. The accuracy is measured by the benchmark against
 arbitrary-precision references (FLINT/arb) and reported in the accompanying paper; the
-`scalar` backend has larger errors than the others. The results of `avx2` can differ in the
-last bit between processor vendors (`include/matern.h`, BACKENDS).
+`scalar` backend has larger errors than the others. A backend gives the same bits on every
+processor that runs it (`include/matern.h`, BACKENDS).
 
 ## Testing
 
@@ -250,7 +250,7 @@ backend it cannot run is reported as `skipped`. Each part can also be run on its
 | `make contract` | per backend: `0 < M <= 1` and finite on a sample of `10⁻³ ≤ ν ≤ 10³`, `10⁻³ ≤ z ≤ 700`, `M` non-increasing in `h`, NaN for invalid input (also infinite `ν` or `s`), 0 at `h = +∞`, `M > 0` past the exponential limit, `matern_version()` |
 | `make h-zero` | per backend: `M(0)` is exactly 1 in single, batched and mixed calls |
 | `make crosscheck` | `scalar` and `scalar_portable` against `matched`, which share no region kernel; reports the largest relative difference |
-| `make positive-definite` | per backend: covariance matrices factor by Cholesky; symmetry and batch invariance are reported |
+| `make positive-definite` | per backend: covariance matrices factor by Cholesky, are exactly symmetric, and every point equals its single-point and chunked-call result |
 | `make direct-argument` | per backend: the `(z, ν)` entry `matern_covariance_z()` |
 | `make threads` | per backend: 8 threads reproduce the single-thread result bit for bit; a positive control that shares one workspace must fail |
 | `make exports` | `build/libmatern.a` defines exactly the names in `matern.map`, the CUDA stand-ins weak; `build/cuda.o`, when built, no other name |

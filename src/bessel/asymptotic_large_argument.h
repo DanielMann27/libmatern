@@ -19,7 +19,7 @@
 
 /* Converged when |t| <= tol |s| in every lane.  The test is relative to the partial sum of
  * Sigma = sqrt(2z/pi) e^z K_nu(z), since an absolute test cannot fire where Sigma is large.
- * Converged lanes keep accumulating; above the region border their further terms are below eps. */
+ * The extended-range cell uses it on one point at a time (all lanes equal). */
 static inline int large_argument_converged(const SIMD_TYPE_FLOAT *t,
                                            const SIMD_TYPE_FLOAT *s,
                                            SIMD_TYPE_FLOAT tol, int width)
@@ -29,6 +29,20 @@ static inline int large_argument_converged(const SIMD_TYPE_FLOAT *t,
             return 0;
 
     return 1;
+}
+
+/* The same test per lane, at a chunk boundary.  A lane that passes for the first time keeps
+ * its partial sum in *kept and the cell returns that sum, so a lane's term count is the first
+ * boundary at which its own test passes, whatever the other lanes need: a point gets the
+ * result it gets alone.  Returns 1 once every lane has passed. */
+static inline __attribute__((always_inline))
+int large_argument_lanes_converged(SIMD_TYPE_FLOAT t, SIMD_TYPE_FLOAT s, SIMD_TYPE_FLOAT tol,
+                                   vec_mask *done, SIMD_TYPE_FLOAT *kept)
+{
+    const vec_mask c = MASK_NOT(MASK_GREATER(VEC_ABS(t), VEC_MUL(tol, VEC_ABS(s))));
+    *kept = MASK_BLEND(MASK_AND(c, MASK_NOT(*done)), *kept, s);
+    *done = MASK_OR(*done, c);
+    return !MASK_ANY(MASK_NOT(*done));
 }
 
 
@@ -64,6 +78,8 @@ SIMD_TYPE_FLOAT large_argument_assemble_corrected(SIMD_TYPE_FLOAT Z, SIMD_TYPE_F
 static inline __attribute__((always_inline)) void large_argument_cell(const SIMD_TYPE_FLOAT *Hv, const SIMD_TYPE_FLOAT *NUv, const SIMD_TYPE_FLOAT *Rv, SIMD_TYPE_FLOAT *out){
     const SIMD_TYPE_FLOAT one=VEC_VSET(1.0), tol=VEC_VSET(DBL_EPSILON);
     SIMD_TYPE_FLOAT Zh[1], Zl[1], w_[1], mu_[1], t_[1], s_[1];
+    vec_mask done_ = MASK_LESS(one, VEC_VSET(0.0));     /* no lane has passed */
+    SIMD_TYPE_FLOAT kept_ = one;                        /* each passed lane's partial sum */
     for(int q=0;q<(1);q++){
         bessel_derive_argument(Hv[q], NUv[q], Rv[q], &Zh[q], &Zl[q]);
         w_[q]=VEC_DIV(one, Zh[q]);
@@ -85,7 +101,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=1 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=1 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(9)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -99,7 +115,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=2 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=2 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(17)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -113,7 +129,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=3 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=3 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(25)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -127,7 +143,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=4 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=4 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(33)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -141,7 +157,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=5 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=5 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(41)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -155,7 +171,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
                 }
             }
         }
-        if((LARGE_ARGUMENT_CHUNKS)<=6 || large_argument_converged(t_, s_, tol, 1)) break;
+        if((LARGE_ARGUMENT_CHUNKS)<=6 || large_argument_lanes_converged(t_[0], s_[0], tol, &done_, &kept_)) break;
         for(int kk=0; kk<8; kk++){
             const int k=(49)+kk;
             if(k>=LARGE_ARGUMENT_MAX_TERM) break;
@@ -170,6 +186,7 @@ static inline __attribute__((always_inline)) void large_argument_cell(const SIMD
             }
         }
     }while(0);
+    s_[0] = MASK_BLEND(done_, s_[0], kept_);
     for(int q=0;q<(1);q++) out[q] = large_argument_assemble_corrected(Zh[q], Zl[q], NUv[q], s_[q], w_[q]);
 }
 static void matern_large_argument_x4(double *res,double *h,double *nu,double *scale,int n){

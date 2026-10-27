@@ -51,9 +51,8 @@
  *      invalid input returns NaN
  *      a nonzero value past the exponential limit z = 708.4 wherever M >= DBL_MIN
  * No error bound is guaranteed.  Accuracy is evaluated against arbitrary-precision
- * references by the benchmark and in the accompanying paper.  Results can differ in
- * the last bits with the composition of a batch (THREAD SAFETY) and, on avx2,
- * between processor vendors (BACKENDS).
+ * references by the benchmark and in the accompanying paper.  A point's result does not
+ * depend on the other points of the call or on the processor model (THREAD SAFETY).
  *
  * BACKENDS
  * The backend is resolved once, at the first call of matern_covariance(),
@@ -78,25 +77,23 @@
  * with -mfma, which changes their results and requires FMA3 on every machine
  * (docs/benchmark.md, "Make parameters").  scalar and the CUDA entries route
  * differently from the other CPU backends, and the results of all backends differ;
- * the errors of scalar are larger than those of the other backends.  avx2 results
- * can differ in the last bits between processor vendors: its gamma function uses the
- * single-precision reciprocal estimate VRCPPS, whose result the x86 instruction set
- * leaves to the implementation.
+ * the errors of scalar are larger than those of the other backends.  Every backend uses
+ * only instructions whose results the x86 instruction set defines exactly, so a backend
+ * gives the same bits on every processor that runs it (built with the same compiler and
+ * flags).
  *
  * THREAD SAFETY
  * The backend choice is published atomically at the first call; the CPU library
  * shares no other mutable state between threads.  A workspace must not be used by
  * two threads at the same time (concurrent use is undefined behaviour): give each
  * thread its own, or pass NULL so that each thread caches its own.
- * Each call is deterministic, but the composition of a batch can change the last
- * bits: on avx512 and avx2 the same point evaluated alone and inside a batch can
- * differ, because the router tiles and sorts, some kernels stop on a test across a
- * whole vector, and whether a half-integer order takes the closed form depends on the
- * runs in the batch (see the CUDA entries below); on matched_fma and matched only a
- * continued-fraction point can, since those run four at a time.  scalar routes each
- * point on its own and is exactly batch-invariant.  Consequently a covariance matrix is
- * not exactly symmetric on those backends: compare the two triangles with a tolerance,
- * or compute one and mirror it.
+ * Each call is deterministic, and on every backend a point's result is independent of
+ * the batch: the same point evaluated alone, inside a batch, in another order, with
+ * another tile size or split over several calls gives the same bits.  The router tiles
+ * and sorts, and some kernels run a loop until every lane of a vector has converged, but
+ * each lane stops accumulating at its own convergence test, and every half-integer
+ * order within the closed form's range takes the closed form.  A covariance matrix is
+ * therefore exactly symmetric.
  *
  * RESOURCES
  * The CPU library has no global constructors, atexit handlers, signal handlers or
@@ -231,12 +228,8 @@ const char *matern_cuda_device_name(void);
 
 /* M(h) and M_nu(z) on the device, with the interface and input rules of the CPU
  * entries.  Unlike avx512, avx2, matched_fma and matched, the routing sends the Levin
- * band to the continued fraction.  As on matched and matched_fma, the half-integer
- * closed form is selected per point.  avx512 and avx2 select it for a run of constant
- * half-integer order, or a mixed half-integer segment, of at least 256 points
- * (HALF_INTEGER_MIN_RUN) or reaching the end of the batch.  The scan runs from the start
- * of the batch; from the first run of fewer than 256 points that the closed form does
- * not take, the rest of the batch goes through the router. */
+ * band to the continued fraction.  As on every CPU backend, the half-integer closed form
+ * is selected per point. */
 int matern_covariance_cuda(double *out, const double *h, const double *nu,
                            const double *scale, size_t n, int mode);
 int matern_covariance_cuda_z(double *out, const double *z, const double *nu,

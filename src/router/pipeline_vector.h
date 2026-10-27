@@ -21,6 +21,37 @@
  * kernel.  REGION_TRIVIAL has no entry: matern_trivial_run (region_map.h) serves it. */
 typedef void (*matern_region_fn)(double *, double *, double *, double *, int);
 
+#ifdef MATERN_ROUTE_HALF_INTEGER
+/* The half-integer bucket of a tile (avx512, avx2), mixed degrees.  Counting sort by degree
+ * into the continued-fraction scratch (tile-sized; that region does not run concurrently),
+ * one closed-form run per degree, scatter back: the arithmetic of half_integer_mixed_tile in
+ * vector.c, so a point gets the bits of the constant-run path. */
+static void matern_half_integer_bucket(double *res, double *h, double *nu, double *scale, int n)
+{
+    const fraction_working_set ws = continued_fraction_scratch((size_t)n);
+    if (!ws.argument) { for (int k = 0; k < n; k++) res[k] = NAN; return; }
+    double *hs = ws.argument, *rs = ws.order, *os = ws.result;
+    uint32_t *src = ws.index;
+    size_t start[HALF_INTEGER_VECTOR_CAP + 2] = {0};
+    size_t next [HALF_INTEGER_VECTOR_CAP + 1];
+    for (int i = 0; i < n; i++)
+        start[half_integer_degree(nu[i], HALF_INTEGER_VECTOR_CAP) + 1]++;
+    for (int p = 0; p <= HALF_INTEGER_VECTOR_CAP; p++) {
+        start[p + 1] += start[p];
+        next[p] = start[p];
+    }
+    for (int i = 0; i < n; i++) {
+        const size_t d = next[half_integer_degree(nu[i], HALF_INTEGER_VECTOR_CAP)]++;
+        src[d] = (uint32_t)i; hs[d] = h[i]; rs[d] = scale[i];
+    }
+    for (int p = 0; p <= HALF_INTEGER_VECTOR_CAP; p++) {
+        const size_t s0 = start[p], k = start[p + 1] - s0;
+        if (k) matern_half_integer_run(os + s0, hs + s0, (double)p + 0.5, rs + s0, k, p);
+    }
+    for (int d = 0; d < n; d++) res[src[d]] = os[d];
+}
+#endif
+
 static const matern_region_fn MATERN_REGION_KERNELS[REGION_COUNT] = {
     [REGION_LARGE_ARGUMENT_LOW_ORDER] = matern_large_argument_x4,
     [REGION_LARGE_ARGUMENT]           = matern_large_argument_x4,
@@ -28,11 +59,15 @@ static const matern_region_fn MATERN_REGION_KERNELS[REGION_COUNT] = {
     [REGION_CONTINUED_FRACTION]       = matern_continued_fraction_x4,
     [REGION_DEBYE]                    = matern_debye_x4,
     [REGION_SMALL_ARGUMENT]           = matern_small_argument_x4,
+#ifdef MATERN_ROUTE_HALF_INTEGER
+    [REGION_HALF_INTEGER]             = matern_half_integer_bucket,
+#endif
 };
 
-/* Phase A: matern_region_of (region_partition.h) without branches; the two must agree
- * (up to the rounding of the border curves), and the scalar one classifies the tile
- * remainder.  Each test is a mask and
+/* Phase A: matern_region_of (region_partition.h) without branches; the two agree up to the
+ * rounding of the border curves.  Every point of a tile, the remainder included, is
+ * classified here, so a point's region does not depend on its place in the batch.  Each
+ * test is a mask and
  * each assignment a blend, and a later blend overrides an earlier one, so the tests run
  * in the reverse of the scalar cascade's order:
  *
@@ -41,7 +76,8 @@ static const matern_region_fn MATERN_REGION_KERNELS[REGION_COUNT] = {
  *     -> Debye                           nu >= 30
  *     -> small argument or Debye         z < 1, split at nu = 26
  *     -> large argument                  z > C(nu) and nu <= 30
- *     -> trivial                         past the exponential limit, or invalid */
+ *     -> trivial                         past the exponential limit, or invalid
+ *     -> half-integer (avx512, avx2)     nu = p + 1/2 within the cap, valid input */
 static inline __attribute__((always_inline))
 size_t matern_classify(const double *restrict h,const double *restrict nu,
                       const double *restrict scale,unsigned char *restrict rg,
@@ -95,16 +131,26 @@ size_t matern_classify(const double *restrict h,const double *restrict nu,
         { vec_mask m_lz=MASK_AND(MASK_GREATER(Z,C),MASK_LESS_EQUAL(NU,ncap));
           code=MASK_BLEND(m_lz,code,vLZ);
           { vec_mask ma=MASK_AND(m_lz,MASK_LESS(NU,n8)); code=MASK_BLEND(ma,code,vLZA); } }
-        /* Trivial: z outside (0, limit] or invalid input, last so it overrides every
-         * region.  Validity is tested on the inputs, not on a derived z: h < 0 with s < 0
-         * gives a valid-looking z that matern_region_of cannot see.  The scalar tail
-         * applies the same guard.  On the (h, nu, s) entry an infinite nu or s makes
+        /* Trivial: z outside (0, limit] or invalid input, after every region, so only a
+         * valid half-integer order overrides it.  Validity is tested on the inputs, not on a
+         * derived z: h < 0 with s < 0 gives a valid-looking z that matern_region_of cannot
+         * see.  On the (h, nu, s) entry an infinite nu or s makes
          * z = inf, 0 or NaN, so the lane reaches the trivial bucket, whose guard rejects
          * it; on the (z, nu) entry nu is tested for finiteness here. */
 #ifdef MATERN_ENTRY_Z
         { vec_mask m_tv=MASK_OR(MASK_OR(MASK_NOT(MASK_GREATER(Z,zero)),MASK_NOT(MASK_LESS_EQUAL(Z,zmax))),
                                 MASK_NOT(MASK_AND(MASK_GREATER(NU,zero),MASK_LESS_EQUAL(NU,dmax))));
           code=MASK_BLEND(m_tv,code,vTRIV); }
+#ifdef MATERN_ROUTE_HALF_INTEGER
+        /* Half-integer orders: nu - floor(nu) = 1/2 and 1/2 <= nu <= cap + 1/2 is
+         * half_integer_degree's test; it overrides every region and z = 0 / z > z_max (the
+         * closed form handles both), but not invalid input */
+        { vec_mask valid=MASK_AND(MASK_LESS_EQUAL(zero,Z),MASK_AND(MASK_GREATER(NU,zero),MASK_LESS_EQUAL(NU,dmax)));
+          vec_mask m_hf=MASK_AND(MASK_EQUAL(VEC_SUB(NU,FLOOR(NU)),VEC_VSET(0.5)),
+                                 MASK_AND(MASK_LESS_EQUAL(VEC_VSET(0.5),NU),
+                                          MASK_LESS_EQUAL(NU,VEC_VSET((double)HALF_INTEGER_VECTOR_CAP + 0.5))));
+          code=MASK_BLEND(MASK_AND(m_hf,valid),code,VEC_VSET((double)REGION_HALF_INTEGER)); }
+#endif
         (void)R; (void)H;
 #else
         { vec_mask m_tv=MASK_OR(MASK_OR(MASK_NOT(MASK_GREATER(Z,zero)),MASK_NOT(MASK_LESS_EQUAL(Z,zmax))),
@@ -112,6 +158,15 @@ size_t matern_classify(const double *restrict h,const double *restrict nu,
                                    MASK_OR(MASK_NOT(MASK_GREATER(R,zero)),
                                          MASK_NOT(MASK_LESS_EQUAL(zero,H)))));   /* !(h>=0), NaN too */
           code=MASK_BLEND(m_tv,code,vTRIV); }
+#ifdef MATERN_ROUTE_HALF_INTEGER
+        /* Half-integer orders, as on the (z, nu) entry; an infinite s passes here and is
+         * rejected inside the closed form */
+        { vec_mask valid=MASK_AND(MASK_AND(MASK_GREATER(NU,zero),MASK_GREATER(R,zero)),MASK_LESS_EQUAL(zero,H));
+          vec_mask m_hf=MASK_AND(MASK_EQUAL(VEC_SUB(NU,FLOOR(NU)),VEC_VSET(0.5)),
+                                 MASK_AND(MASK_LESS_EQUAL(VEC_VSET(0.5),NU),
+                                          MASK_LESS_EQUAL(NU,VEC_VSET((double)HALF_INTEGER_VECTOR_CAP + 0.5))));
+          code=MASK_BLEND(MASK_AND(m_hf,valid),code,VEC_VSET((double)REGION_HALF_INTEGER)); }
+#endif
 #endif
         double tmp[VEC_LANES]; VEC_VST(tmp,code);
 #if VEC_LANES > 1
@@ -152,20 +207,27 @@ void matern_route(double *restrict out,const double *restrict h,const double *re
         const double *hb=h+base, *nb=nu+base, *rb=scale+base;
 
         size_t i = matern_classify(hb,nb,rb,rg,m,cnt);                       /* A */
-        /* tile remainder, with the same validity guard as the vector body; on the
-         * (h, nu, s) entry matern_region_of sends an infinite nu or s to the trivial
-         * bucket through z, as the vector body does */
-        for(; i<m; i++){
-#ifdef MATERN_ENTRY_Z
-                         double z = hb[i];            /* h is z on this entry */
-                         unsigned char r = (!(nb[i]>0.0 && nb[i]<=DBL_MAX) || !(hb[i]>=0.0))
+#if VEC_LANES > 1
+        /* The tile remainder is classified as one padded vector, with the body's arithmetic
+         * (the fma forms of C(nu) and L(nu)) and its validity guard, so a point's region does
+         * not depend on its position in the tile or on the length of the call.  The pad
+         * repeats the last point; only the remainder's tags and counts are kept.  At width 1
+         * the body classifies every point. */
+        if (i < m) {
+            const size_t r = m - i;
+            double ph[VEC_LANES], pn[VEC_LANES], pr[VEC_LANES];
+            unsigned char pg[VEC_LANES];
+            size_t pc[REGION_TOTAL] = {0};
+            for (size_t k = 0; k < (size_t)VEC_LANES; k++) {
+                const size_t j = i + (k < r ? k : r - 1);
+                ph[k] = hb[j]; pn[k] = nb[j]; pr[k] = rb[j];
+            }
+            matern_classify(ph, pn, pr, pg, VEC_LANES, pc);
+            for (size_t k = 0; k < r; k++) { rg[i+k] = pg[k]; cnt[pg[k]]++; }
+        }
 #else
-                         double z=sqrt(2.0*nb[i])*hb[i]/rb[i];
-                         unsigned char r = (!(nb[i]>0.0) || !(rb[i]>0.0) || !(hb[i]>=0.0))
+        (void)i;
 #endif
-                                         ? (unsigned char)REGION_TRIVIAL
-                                         : (unsigned char)matern_region_of(z,nb[i]);
-                         rg[i]=r; cnt[r]++; }
 
         { size_t run=0; for(int r=0;r<REGION_TOTAL;r++){ off[r]=run; run+=cnt[r]; } }
 
@@ -174,6 +236,7 @@ void matern_route(double *restrict out,const double *restrict h,const double *re
          * below, a store-to-load chain at a data-dependent address as in phase A.  Both
          * forms give the same positions, and so the same results. */
 #ifdef __AVX512F__
+        _Static_assert(REGION_TOTAL <= 8, "the run cursors are one 8-lane register");
         { long long p8[8]={0}; for(int r=0;r<REGION_TOTAL;r++) p8[r]=(long long)off[r];
           __m512i posv=_mm512_loadu_si512((const void *)p8);
           const __m512i one=_mm512_set1_epi64(1), eight=_mm512_set1_epi64(8);
@@ -231,7 +294,13 @@ void matern_route(double *restrict out,const double *restrict h,const double *re
          * becomes 0.  Above 1 becomes 1: z is below the exponential limit here, so that
          * is rounding as z -> 0.  The trivial run, whose NaN marks invalid input, is
          * exempt: as the last region it is the tail of `to`, where the loop splits. */
+#ifdef MATERN_ROUTE_HALF_INTEGER
+        /* The half-integer run sits just before the trivial run and is exempt as well, as
+         * the closed form is on every other path. */
+        { const size_t nclamp = m - cnt[REGION_TRIVIAL] - cnt[REGION_HALF_INTEGER];
+#else
         { const size_t nclamp = m - cnt[REGION_TRIVIAL];
+#endif
           double *restrict ob=out+base;
           for(size_t j=0;j<nclamp;j++){ double v=to[j];
               if(!(v>0.0)) v=0.0; else if(v>1.0) v=1.0;   /* !(v>0) also catches NaN */

@@ -16,6 +16,12 @@ enum {
     REGION_CONTINUED_FRACTION,            /* the middle                           */
     REGION_DEBYE,                         /* nu >= 30, and small z above order 26 */
     REGION_SMALL_ARGUMENT,                /* z < 1, nu <= 26                      */
+#ifdef MATERN_ROUTE_HALF_INTEGER
+    /* avx512 and avx2 only (vector.c): nu = p + 1/2 within the vector cap, served by the
+     * closed form per point.  A routing class, not a region of the partition below; last,
+     * so that the output clamp exempts it together with the trivial bucket. */
+    REGION_HALF_INTEGER,
+#endif
     REGION_COUNT
 };
 

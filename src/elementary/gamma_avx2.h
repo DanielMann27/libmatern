@@ -121,10 +121,11 @@ static inline __attribute__((always_inline)) __m256d matern_gamma_pd(__m256d X)
     const SIMD_TYPE_FLOAT DD_WH_1  = ADD_FLOAT(DD_ADH_1, SS_1);
     const SIMD_TYPE_FLOAT DD_WL_1  = ADD_FLOAT(SUB_FLOAT(SS_1, SUB_FLOAT(DD_WH_1, DD_ADH_1)), DD_ADL_1);
 
-    /* 4. Low-word correction psi(XW) XL; the 1/XW estimate only scales XL.
-     *    VRCPPS is implementation-defined, so the last bits depend on the processor vendor. */
+    /* 4. Low-word correction psi(XW) XL; the 1/XW estimate only scales XL.  It is an IEEE
+     *    single-precision division, not VRCPPS, whose result the x86 instruction set leaves
+     *    to the implementation, so the result does not depend on the processor vendor. */
     const SIMD_TYPE_FLOAT RES3H_1 = DD_WH_1;
-    const SIMD_TYPE_FLOAT INVXW   = _mm256_cvtps_pd(_mm_rcp_ps(_mm256_cvtpd_ps(XW_1)));
+    const SIMD_TYPE_FLOAT INVXW   = _mm256_cvtps_pd(_mm_div_ps(_mm_set1_ps(1.0f), _mm256_cvtpd_ps(XW_1)));
     const SIMD_TYPE_FLOAT RES3L_1 = FMADD_FLOAT(SUB_FLOAT(SUMLOG_1, MUL_FLOAT(LOAD_FLOAT(MATERN_BROADCAST_HALF), INVXW)), XL_1, DD_WL_1);
 
     /* 5. exp(W) as a double-double (TH, TL), with the constants of exponential_avx2.h;

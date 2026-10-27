@@ -3,6 +3,13 @@
  * the routing pipeline; width 1 works per point, continued-fraction points four at a time. */
 #include <stddef.h>
 
+/* avx512 and avx2 route half-integer orders as a region of their own (region_partition.h),
+ * so that every such point takes the closed form wherever it sits in the batch; the width-1
+ * entries select the closed form per point before classifying. */
+#if !defined(MATERN_TARGET_SCALAR)
+#define MATERN_ROUTE_HALF_INTEGER
+#endif
+
 #include "internal.h"
 #include "vector_current.h"
 #include "region_map.h"
@@ -54,8 +61,8 @@
  * value of continued_fraction_bucket_of (the driver's sort key, so that the points sharing
  * a block have similar z), and run four at a time through continued_fraction_cell_x4; a
  * queue left with fewer than four points at the end runs continued_fraction_cell_x1 per
- * point.  Which points share a block depends on the batch, so the last bits of a
- * continued-fraction point can too; every other point gets the result it gets alone. */
+ * point.  Which points share a block depends on the batch, but each lane of the cell stops
+ * at its own test, so every point gets the result it gets alone. */
 #define CONTINUED_FRACTION_QUEUES 32                 /* the range of continued_fraction_bucket_of */
 
 /* The closed form's per-run setup (matern_half_integer_run), kept for the last order seen. */
