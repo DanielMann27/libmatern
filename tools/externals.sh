@@ -54,10 +54,19 @@ if [ "${EXTERNALS_PLAN:-}" = yes ]; then
     done
     [ -n "$SYS_GSL" ] || { [ -f references/gsl/2.6/lib/pkgconfig/gsl.pc ] && [ -f references/gsl/2.6/lib/libgsl.a ]; } ||
         echo "GSL 2.6|about 8 MB download, then a build of a few minutes"
+    # python_packages below: nothing where PYTHON or .venv/ has the published versions; a
+    # download where a Python 3.11+ can take them; else nothing where one meets the minimum.
     _p="${PYTHON:-python3 -B}"; _p=${_p%% *}
-    { command -v "$_p" >/dev/null 2>&1 && "$_p" tools/py_stack.py >/dev/null 2>&1; } ||
-    { [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; } ||
+    if { command -v "$_p" >/dev/null 2>&1 && "$_p" tools/py_stack.py --exact >/dev/null 2>&1; } ||
+       { [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py --exact >/dev/null 2>&1; }; then :
+    elif for _r in "$_p" python3 /usr/bin/python3; do command -v "$_r" >/dev/null 2>&1 && break; done &&
+         "$_r" tools/py_stack.py --base >/dev/null 2>&1; then
         echo "NumPy and Matplotlib|about 40 MB download into .venv/"
+    elif { command -v "$_p" >/dev/null 2>&1 && "$_p" tools/py_stack.py >/dev/null 2>&1; } ||
+         { [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; }; then :
+    else
+        echo "NumPy and Matplotlib|about 40 MB download into .venv/"
+    fi
     exit 0
 fi
 
@@ -144,54 +153,91 @@ py="${PYTHON:-python3 -B}"; py=${py%% *}
 # interpreter's NumPy and Matplotlib count (at or above PY_FLOORS).
 PY_PINS=$(sed -n 's/^PY_PINS = "\(.*\)"$/\1/p' tools/py_stack.py)
 PY_FLOORS=$(sed -n 's/^PY_FLOORS = "\(.*\)"$/\1/p' tools/py_stack.py)
+PY_PINS_PYTHON=$(sed -n 's/^PY_PINS_PYTHON = "\(.*\)"$/\1/p' tools/py_stack.py)
+PY_PUBLISHED=$(sed -n 's/^PY_PUBLISHED = "\(.*\)"$/\1/p' tools/py_stack.py)
+# The first interpreter that runs tools/py_stack.py itself (it needs no NumPy).
+py_runner() {
+    local p
+    for p in "$py" python3 /usr/bin/python3 python; do
+        command -v "$p" >/dev/null 2>&1 && "$p" tools/py_stack.py --pins >/dev/null 2>&1 && { echo "$p"; return 0; }
+    done
+    return 1
+}
 python_packages() {
-    local st
-    if command -v "$py" >/dev/null 2>&1; then
-        st=$("$py" tools/py_stack.py 2>/dev/null)
-        case $? in
-            0) echo "  present   $st for $(command -v "$py")"; return 0 ;;
-            1) echo "  too old   $st for $(command -v "$py")" ;;
-        esac
+    local st runner b kind bpath bver vver="" made=no
+    # An interpreter with the published versions needs nothing; one at or above the tested
+    # minimum is used as it is only when no .venv/ with the published versions can be made.
+    if command -v "$py" >/dev/null 2>&1 && st=$("$py" tools/py_stack.py --exact 2>/dev/null); then
+        echo "  present   $st for $(command -v "$py")"; return 0
     fi
-    if [ -x .venv/bin/python3 ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; then
-        echo "  present   .venv (numpy and matplotlib)"
+    if [ -x .venv/bin/python3 ] && st=$(.venv/bin/python3 tools/py_stack.py --exact 2>/dev/null); then
+        echo "  present   .venv: $st"
         python_user_set && echo "  note      PYTHON=${PYTHON:-} is set (${PYTHON_ORIGIN:-}), so the Makefile uses it, not .venv/bin/python3"
         return 0
     fi
-    local base made=no
-    # A .venv whose interpreter runs but does not import both (e.g. after a Python minor
-    # upgrade) is adapted to the current Python in place.
-    if [ -x .venv/bin/python3 ] && .venv/bin/python3 -c '' >/dev/null 2>&1; then
-        echo "  updating  .venv ($(.venv/bin/python3 -c 'import sys; print("Python", sys.version.split()[0])') has no numpy and matplotlib at or above the tested minimum), installing $PY_PINS"
-        .venv/bin/python3 -m venv --upgrade .venv && made=yes
-    fi
-    if [ $made = no ]; then
-        base=$(command -v python3 2>/dev/null) || { echo "  failed    no python3 to create .venv from"; return 1; }
-        echo "  creating  .venv from $base, installing $PY_PINS"
-        if ! "$base" -m venv .venv; then
-            echo "  failed    python3 -m venv (on Debian/Ubuntu: sudo apt install python3-venv)"
-            rm -rf .venv; return 1
+    runner=$(py_runner) || {
+        echo "  failed    no Python found: install Python $PY_PINS_PYTHON or newer (the published figures used $PY_PUBLISHED; make requirements names the package)"
+        return 1; }
+    [ -x .venv/bin/python3 ] && vver=$(.venv/bin/python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)
+    if [ -n "$vver" ] && .venv/bin/python3 -c "import sys; sys.exit(sys.version_info[:2] < tuple(map(int, '$PY_PINS_PYTHON'.split('.'))))"; then
+        # .venv/ runs a Python that takes the published versions: they are installed into it.
+        st=$(.venv/bin/python3 tools/py_stack.py 2>/dev/null)
+        echo "  updating  .venv (Python $vver, ${st:-no numpy and matplotlib}), installing $PY_PINS"
+        kind=pins; made=yes
+    else
+        # The interpreter .venv/ is made from (tools/py_stack.py --base: PYTHON_BASE, else the
+        # newest Python 3.11+ with the venv module, else the newest 3.9+).
+        b=$("$runner" tools/py_stack.py --base 2>/dev/null)
+        read -r kind bpath bver <<<"$b"
+        case $kind in
+            pins|floors) ;;
+            *) echo "  failed    $("$runner" tools/py_stack.py --advice)"
+               return 1 ;;
+        esac
+        if [ $kind = floors ] && [ -n "$vver" ] && .venv/bin/python3 tools/py_stack.py >/dev/null 2>&1; then
+            echo "  present   .venv (Python $vver): $(.venv/bin/python3 tools/py_stack.py), at or above the tested minimum, not the published $PY_PINS"
+            echo "  note      the published versions need Python $PY_PINS_PYTHON or newer (the published figures used $PY_PUBLISHED; make requirements names the package); with one installed, make externals replaces .venv"
+            return 0
+        fi
+        if [ -e .venv ]; then
+            echo "  replacing .venv ($([ -n "$vver" ] && echo "Python $vver" || echo "its interpreter does not run")) by one from Python $bver ($bpath)"
+            "$bpath" -m venv --clear .venv || { echo "  failed    $bpath -m venv --clear .venv"; return 1; }
+        else
+            echo "  creating  .venv from Python $bver ($bpath)"
+            "$bpath" -m venv .venv || {
+                echo "  failed    $bpath -m venv (on Debian/Ubuntu: sudo apt install python3-venv)"
+                rm -rf .venv; return 1; }
         fi
     fi
-    if ! .venv/bin/python3 -m pip install --quiet --disable-pip-version-check \
-            --only-binary=numpy,matplotlib $PY_PINS; then
-        echo "  fallback  pip install $PY_PINS (the versions of the published figures) failed;"
-        echo "            installing $PY_FLOORS; figures drawn with other versions can differ in detail"
+    if [ $kind = pins ]; then
+        if ! .venv/bin/python3 -m pip install --quiet --disable-pip-version-check \
+                --only-binary=numpy,matplotlib $PY_PINS; then
+            echo "  fallback  pip install $PY_PINS (the versions of the published figures) failed;"
+            echo "            installing $PY_FLOORS; figures drawn with other versions can differ in detail"
+            .venv/bin/python3 -m pip install --quiet --disable-pip-version-check $PY_FLOORS || {
+                echo "  failed    pip install $PY_FLOORS"; return 1; }
+        fi
+    else
+        echo "  installing $PY_FLOORS: the published versions ($PY_PINS) need Python $PY_PINS_PYTHON or newer,"
+        echo "            this .venv has Python $bver; figures drawn with other versions can differ in detail"
         .venv/bin/python3 -m pip install --quiet --disable-pip-version-check $PY_FLOORS || {
             echo "  failed    pip install $PY_FLOORS"; return 1; }
+        echo "  note      for the published versions install Python $PY_PINS_PYTHON or newer (make requirements names the package), then make externals again"
     fi
     echo "  verified  .venv: $(.venv/bin/python3 tools/py_stack.py)"
     if python_user_set; then
         echo "  note      PYTHON=${PYTHON:-} is set (${PYTHON_ORIGIN:-}), so the Makefile uses it, not .venv/bin/python3;"
         echo "            without PYTHON it searches PYTHON_CANDIDATES (make python-info shows the result)"
     else
-        # the search of the Makefile for PYTHON
-        local p sel=""
-        for p in ${PYTHON_CANDIDATES:-python3 /usr/bin/python3 python $PWD/.venv/bin/python3}; do
-            command -v "$p" >/dev/null 2>&1 && "$p" tools/py_stack.py >/dev/null 2>&1 && { sel=$p; break; }
+        # the search of the Makefile for PYTHON: the published versions first, then the minimum
+        local p m sel=""
+        for m in --exact ""; do
+            for p in ${PYTHON_CANDIDATES:-python3 /usr/bin/python3 python $PWD/.venv/bin/python3}; do
+                command -v "$p" >/dev/null 2>&1 && "$p" tools/py_stack.py $m >/dev/null 2>&1 && { sel=$p; break 2; }
+            done
         done
-        echo "  selected  ${sel:-none}: the Makefile now takes the first of PYTHON_CANDIDATES with both at"
-        echo "            or above the tested minimum (make python-info shows it)"
+        echo "  selected  ${sel:-none}: the Makefile now takes the first of PYTHON_CANDIDATES with the published"
+        echo "            versions, else the first at or above the tested minimum (make python-info shows it)"
     fi
 }
 item "NumPy, Matplotlib" python_packages

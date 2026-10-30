@@ -330,7 +330,7 @@ suppliers() {
 
 generators() {
     section "figure and table generators (make figures, tables, tables-check)"
-    local chosen=${PYTHON:-} p sel=""
+    local chosen=${PYTHON:-} p sel="" sel_exact=""
     for p in $PYTHON_CANDIDATES; do
         local why
         if ! command -v "$p" >/dev/null 2>&1; then
@@ -342,19 +342,21 @@ generators() {
             why="$(command -v "$p") $("$p" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null)"
             case $rc in 0|1) why="$why $st" ;; *) why="$why: ${st:-no numpy}" ;; esac
             [ $rc -ne 0 ] || [ -n "$sel" ] || sel=$p
+            [ -n "$sel_exact" ] || ! "$p" tools/py_stack.py --exact >/dev/null 2>&1 || sel_exact=$p
         fi
         printf "  %-8s %-26s %s\n" "" "candidate $p" "$why"
     done
     # The interpreter the Makefile uses: PYTHON as the user set it, else the first candidate
-    # above with both at or above the tested minimum, else python3 (the Makefile's search and
-    # its fallback).
+    # above with the published versions, else the first with both at or above the tested
+    # minimum, else python3 (the Makefile's search and its fallback).
+    [ -z "$sel_exact" ] || sel=$sel_exact
     local first user=no
     if is_user_set "${PYTHON_ORIGIN:-}"; then
         user=yes; first=${chosen%% *}; [ -n "$first" ] || first=python3
         printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$chosen   (set on the ${PYTHON_ORIGIN}; the candidates are not searched)"
     else
         first=${sel:-python3}
-        printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$first -B   ($([ -n "$sel" ] && echo "the first candidate with both at or above the tested minimum" || echo "no candidate has both at or above the tested minimum"); override: make PYTHON=<interpreter>)"
+        printf "  %-8s %-26s %s\n" "" "PYTHON (Makefile)" "$first -B   ($([ -n "$sel_exact" ] && echo "the first candidate with the published versions" || { [ -n "$sel" ] && echo "the first candidate with both at or above the tested minimum"; } || echo "no candidate has both at or above the tested minimum"); override: make PYTHON=<interpreter>)"
     fi
     PY_USED=$first   # published() compares it
     local stack stack_rc
@@ -368,6 +370,8 @@ generators() {
         fi
     elif [ $stack_rc -eq 0 ]; then
         row found "NumPy, Matplotlib" "$stack ($first)" "figures and tables"
+        "$first" tools/py_stack.py --exact >/dev/null 2>&1 ||
+            printf "  %-8s %-26s %s\n" "" "" "  not the published versions: $("$first" tools/py_stack.py --advice 2>/dev/null)"
     else
         # pip only where the interpreter accepts it (PEP 668); below the minimum the
         # distribution's packages are what the interpreter already has
@@ -382,12 +386,12 @@ generators() {
         if [ $user = yes ]; then
             row MISSING "NumPy, Matplotlib" "$what (PYTHON, set on the ${PYTHON_ORIGIN})" \
                 "figures and tables; without them make figures and make tables stop" \
-                "unset PYTHON, then make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
+                "unset PYTHON, then $("$first" tools/py_stack.py --advice 2>/dev/null)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
         else
             row MISSING "NumPy, Matplotlib" "$what$([ -z "$sel" ] && echo " (no candidate has both at or above the tested minimum)")" \
                 "figures and tables; without them make figures and make tables stop" \
-                "make externals   (installs NumPy and Matplotlib into .venv/, which the Makefile then selects)${pip:+   or: $pip}" \
+                "$("$first" tools/py_stack.py --advice 2>/dev/null)${pip:+   or: $pip}" \
                 python "NumPy, Matplotlib ($first)"
             mods=""; [ $stack_rc -eq 1 ] || mods=$(hint pymods "$first")
             if [ -n "$mods" ] && [ "$mods" != "$pip" ]; then

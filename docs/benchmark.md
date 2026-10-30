@@ -16,6 +16,7 @@ make benchmark           # a CPU run with the drivers built, then the figures an
 make figures             # the paper's figures and captions.tex -> benchmark/plots/paper-final/
 make tables              # the paper's tables -> benchmark/tables/paper/
 make tables-check        # compiles every generated table with pdflatex
+make clean-results       # removes benchmark/plots/paper-final/ and benchmark/tables/paper/ (not the runs)
 ```
 
 Terms used below:
@@ -67,8 +68,9 @@ optional; its absence removes only what it enables:
 `make requirements` reports each component, its version, what it enables and the command or
 package that adds it; `MISSING` marks an absence that stops a target, `absent` one that only
 removes rows. It changes nothing and exits 0. The generators use the first of
-`PYTHON_CANDIDATES` with NumPy and Matplotlib at or above the tested minimum, NumPy 2.0.2
-and Matplotlib 3.9.4 (`make python-info`); `PYTHON` overrides it.
+`PYTHON_CANDIDATES` with the published NumPy 2.2.5 and Matplotlib 3.11.0, else the first with
+both at or above the tested minimum, NumPy 2.0.2 and Matplotlib 3.9.4 (`make python-info`,
+which also names the next step where they are missing); `PYTHON` overrides it.
 
 ## Running the benchmark
 
@@ -83,8 +85,9 @@ in this order:
    downloaded; it lists what a yes downloads: Boost 1.75.0 and GSL 2.6 when neither
    `references/` nor the system has that version, Boost 1.87.0 (with a GPU part) when neither
    `references/` nor the system has a Boost with GPU support and `BOOST_ROOT` is not `none`
-   ([Boost versions](#boost-versions)), NumPy and Matplotlib when no Python has them at or
-   above the tested minimum. A GSL of another version found by pkg-config counts as present, so it does not by
+   ([Boost versions](#boost-versions)), NumPy and Matplotlib when no Python has the published
+   versions and a Python 3.11 or newer can take them, or when no Python has them at or above
+   the tested minimum. A GSL of another version found by pkg-config counts as present, so it does not by
    itself lead to this question, and the gsl row uses it (row `gsl-<version>`,
    `build_cpu_supplier_gsl_*` in `PROVENANCE.txt`) unless GSL 2.6 is built: by a yes to this
    question asked for another external, by `EXTERNALS=yes` or by `make reproduce`;
@@ -228,8 +231,9 @@ the first question does; the other switches act as for `make pipeline`.
 | `CORPUS_URL` | `make corpus` | a mirror URL or a local directory in place of the Zenodo record |
 | `BOOST_CPU_ROOT`, `BOOST_ROOT` | the supplier builds | the Boost of the CPU row and of the GPU rows; `none` disables the row ([Boost versions](#boost-versions)) |
 | `BOOST_VERSIONS` | `make boost-headers` | the versions fetched, of `1.75.0` and `1.87.0` (default both) |
-| `PYTHON` | the generators, `make check` | the interpreter (default: the first of `PYTHON_CANDIDATES` with NumPy and Matplotlib at or above the tested minimum, `tools/py_stack.py`, else `python3`) |
+| `PYTHON` | the generators, `make check` | the interpreter (default: the first of `PYTHON_CANDIDATES` with the published NumPy and Matplotlib, else the first with both at or above the tested minimum, `tools/py_stack.py`, else `python3`) |
 | `PYTHON_CANDIDATES` | the generators, `make check`, `make requirements` | the interpreters searched (default `python3 /usr/bin/python3 python .venv/bin/python3`) |
+| `PYTHON_BASE` | `make externals` | the interpreter `.venv/` is built from (default: the newest of `python3.14 … python3.11 python3` with the venv module; 3.11 or newer for the published versions) |
 
 **Figures and tables**: `ARGS` passes options to the generators: `--list` (the runs a
 generator would use; writes nothing), `--strict` (refuses a run not marked complete; without
@@ -299,10 +303,14 @@ available and not yet present: the Bessels.jl upstream sources at the pinned com
 (`references/bessels_jl/upstream/`, to verify the ports), the Boost headers 1.75.0 and
 1.87.0 (`references/boost/<version>/`), GSL 2.6 as a static library
 (`references/gsl/<version>/`, preferred to a system GSL), and NumPy and Matplotlib into
-`.venv/` (pip; the versions of the published figures, NumPy 2.2.5 and Matplotlib 3.11.0,
-else versions at or above NumPy 2.0.2 and Matplotlib 3.9.4) when no Python has them at or
-above that tested minimum; an older NumPy or Matplotlib is not used (`tools/py_stack.py`
-decides, for the Makefile's search of `PYTHON` as well). It checks every other
+`.venv/` (pip) when neither `PYTHON` nor `.venv/` has the versions of the published figures,
+NumPy 2.2.5 and Matplotlib 3.11.0. `.venv/` is built from the newest installed Python 3.11 or
+newer with the venv module (`PYTHON_BASE` names another), since these versions need Python
+3.11; from a Python 3.9 or 3.10 it receives versions at or above NumPy 2.0.2 and Matplotlib
+3.9.4, and the output says that these are not the published ones. A `.venv/` below Python
+3.11 is replaced once a Python 3.11 or newer is installed. Without a Python 3.9 or newer the
+step fails and names the Python to install. An older NumPy or Matplotlib is not used
+(`tools/py_stack.py` decides, for the Makefile's search of `PYTHON` as well). It checks every other
 archive against a pinned SHA-256 digest and ends with `make requirements`.
 
 ```sh
@@ -505,7 +513,11 @@ make reproduce CPU=no KAUST=yes   # NVIDIA A100 80GB PCIe in an Intel Xeon Plati
 
 Every run records the commit it ran from (`source_commit`, `git_dirty` in `PROVENANCE.txt`),
 and the figures and tables name it beside the generators' own (`HARDWARE.md` and the tables'
-`README.md`, "Version of record"). One command runs the full benchmark on one machine:
+`README.md`, "Version of record"). Where the two differ, they also name what differs: in a git
+checkout that holds the run's commit, every file of `git diff --name-only` (uncommitted
+changes included); otherwise the sources of the run's `MANIFEST.txt` (the library, the
+benchmark drivers, the supplier sources and the Makefile) that differ in the generators' tree.
+One command runs the full benchmark on one machine:
 
 ```sh
 make reproduce
@@ -548,7 +560,10 @@ directories (`benchmark/runs/<run id>/`, not `latest`) into `benchmark/runs/` of
 and write the figures and tables again there with `make figures` and `make tables`. The generators read every run in
 `benchmark/runs/` and take each kind of result from the newest run of the machine that has
 it, so an earlier run there can supply a stage; the CPU results come from a machine without
-GPU data, here the AMD one (`ARGS=--cpu-machine NAME` selects another).
+GPU data, here the AMD one (`ARGS=--cpu-machine NAME` selects another). The run directories
+of the published results are the release asset `libmatern-0.9.5-runs.tar.gz` of the GitHub
+release `v0.9.5`; `tar -xzf libmatern-0.9.5-runs.tar.gz` in the repository root puts them into
+`benchmark/runs/`.
 
 `make reproduce` installs no system software; `make requirements` reports what is present.
 Besides the [requirements](#requirements) it needs pdflatex with geometry, amsmath, amssymb,
@@ -568,24 +583,24 @@ Without a terminal, `make reproduce DRY=yes` exits with status 2 where the run w
 to start, as without `KAUST=yes` or `KAUST=no` while the port is absent.
 
 <!-- BEGIN durations: written by `make durations` from benchmark/durations.tsv -->
-The full run takes about 18 hours on one machine with an A100 GPU, most of it the CPU
+The full run takes about 8 hours on one machine with an A100 GPU, most of it the CPU
 ladders. The ladders time every rung up to 2^21 points on its own and the rungs from 2^22 up
 in one cumulative pass per repetition (`LADDER_PASS_FROM`, default 2^22);
 `LADDER_PASS_FROM=off` times every rung on its own and about doubles the ladder time.
-Durations of the published run, as the wall time of each batch job, build included (these
-runs record no times); those marked log are from the time stamps of the run's log; `make
-durations` writes them from the run records into `benchmark/durations.tsv`. AMD: AMD EPYC
-9454; Intel: Intel Xeon Platinum 8358; A100: NVIDIA A100 80GB PCIe.
+Durations of the published run, as each run records them (`TIMES.txt`: the wall time of its
+runner, build excluded); `make durations` writes them from the run records into
+`benchmark/durations.tsv`. AMD: AMD EPYC 9454; Intel: Intel Xeon Platinum 8358; A100: NVIDIA
+A100 80GB PCIe.
 
 | part | time |
 |---|---|
-| ladders (up to 2^25 points) | 12.1 h (AMD), 14.3 h (Intel) |
-| accuracy and suppliers | 2.0 h (AMD), 2.3 h (Intel) |
-| of it the KAUST rows | 1.7 h (AMD, log), 1.9 h (Intel, log) |
-| Levin A/B | 10 min (AMD), 13 min (Intel) |
-| thread scaling | 14 min (AMD), 15 min (Intel) |
-| prefactor fold | 5 min (AMD), 6 min (Intel) |
-| GPU (core, Levin, threads) | 46 min (A100) |
+| ladders (up to 2^25 points) | 5.1 h (AMD), 6.0 h (Intel) |
+| accuracy and suppliers | 50 min (AMD), 58 min (Intel) |
+| of it the KAUST rows | 43 min (AMD), 46 min (Intel) |
+| Levin A/B | 4 min (AMD), 5 min (Intel) |
+| thread scaling | 5 min (AMD), 6 min (Intel) |
+| prefactor fold | 2 min (AMD), 2 min (Intel) |
+| GPU (core, Levin, threads) | 29 min (A100) |
 <!-- END durations -->
 
 The published rows come from this toolchain (the `build_*` keys of each run's
@@ -598,7 +613,7 @@ depend on it:
 | `std::cyl_bessel_k` and the Boost CPU row | g++ 14.2.0 (libstdc++ 14), C++17; Boost 1.75.0, evaluated in `long double` |
 | GSL | GSL 2.6, the Red Hat Enterprise Linux 9.6 package (a shared library, found by pkg-config) |
 | the device code and the GPU drivers | nvcc 12.8.61 with host compiler GCC 14.2.0; CUDA runtime 12.8; the Boost GPU rows use Boost 1.87.0, evaluated in `double` |
-| the figures and tables | Python 3.12.9 with NumPy 2.2.5 and Matplotlib 3.11.0 (the two versions `make externals` installs into `.venv/`); pdfTeX of TeX Live 2020 for the tables |
+| the figures and tables | Python 3.12.9 with NumPy 2.2.5 and Matplotlib 3.11.0 (the two versions `make externals` installs into `.venv/` from a Python 3.11 or newer); pdfTeX of TeX Live 2020 for the tables |
 
 `tools/published_env.sh` holds these versions. `make requirements` ends with a `published
 environment` section that compares them with the tools found here, and `make pipeline` and

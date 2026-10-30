@@ -271,6 +271,7 @@ class Table:
             size=size, colsep=colsep, env=env,
             # A `sidewaystable` takes no optional placement argument.
             placement=None if env != "table" else "t")
+        _display_file(path)
 
     def shrink(self, path):
         """One step down the size ladder.  False when there is no step left."""
@@ -309,16 +310,26 @@ class Table:
         mdn = _md or self.note
         if mdn:
             lines += ["", _demath(mdn)]
-        open(md, "w").write("\n".join(lines) + "\n")
+        open(md, "w").write(style.display_names("\n".join(lines) + "\n"))
         cs = os.path.join(outdir, self.stem + ".csv")
         with open(cs, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(self.md_header)
             for r in self.rows:
-                w.writerow([c.csv for c in r])
+                w.writerow([style.display_names(str(c.csv)) for c in r])
         WRITTEN.extend([tex, md, cs])
         MOVED.append((os.path.abspath(tex), self.runs, list(self.facts)))
         return 1
+
+
+def _display_file(path):
+    """The supplier names of a written file in their display form (style.display_names)."""
+    with open(path) as fh:
+        s = fh.read()
+    d = style.display_names(s)
+    if d != s:
+        with open(path, "w") as fh:
+            fh.write(d)
 
 
 _TEX_CMD = re.compile(r"\\(?:texttt|textit|textbf|emph|textsuperscript|textsc"
@@ -441,13 +452,13 @@ def _impl_series(acc, sup, family, backend):
 
 # Comparison rows of the accuracy and cost tables
 _VERSION = re.compile(r"-\d+\.[\w.]*(?=-|$)")
-_SHORT = {"kaust-adaptive": "kaust-ad.", "std-cyl_bessel_k": "std"}
-_SHORT_SUFFIX = (("-adapted", "-ad."),)
+_SHORT = {"kaust-adaptive": "kaust-mod.", "std-cyl_bessel_k": "std"}
+_SHORT_SUFFIX = (("-adapted", "-mod."),)
 
 
 def short_impl(name):
     """A supplier name that shares a cell with a number: dotted versions dropped,
-    `-adapted` -> `-ad.`, configuration suffixes (`kaust-128`) kept."""
+    `-adapted` -> `-mod.`, configuration suffixes (`kaust-128`) kept."""
     if name in _SHORT:
         return _SHORT[name]
     s = _VERSION.sub("", name)

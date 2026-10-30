@@ -133,12 +133,61 @@ def display_caps(text):
     return text
 
 
+# Supplier names as displayed in figures, captions and tables; the records and every lookup
+# (colours, footnotes, rankings) keep the recorded names.  The adjusted configurations
+# (`kaust-adaptive`, `boost-...-adapted`) display as `-modified`, and no name carries a
+# version: the environment table states the versions.
+# One pass, so `kaust-adaptive/boost-1.75.0` (two names in one cell) maps both.  Versioned
+# names never occur inside paths in the outputs (module paths read `boost/1.87.0`).
+_VER = r"-\d+(?:\.\d+)+"
+_DISPLAY_NAME = _re.compile(
+    r"(?<![A-Za-z0-9_.])(?:"
+    r"(?P<kaust>kaust-adaptive)(?![A-Za-z0-9_])"
+    r"|(?P<kaust_short>kaust-ad\.)"
+    r"|(?P<boost_mod>boost(?:-gpu)?)(?:" + _VER + r")?-adapted(?![A-Za-z0-9_])"
+    r"|(?P<boost_short>boost(?:-gpu)?)(?:" + _VER + r")?-ad\."
+    r"|(?P<versioned>boost(?:-gpu)?|gsl)" + _VER + r"(?!\.?[0-9]))")
+
+
+def _display_name(m):
+    if m.group("kaust"):
+        return "kaust-modified"
+    if m.group("kaust_short"):
+        return "kaust-mod."
+    if m.group("boost_mod"):
+        return m.group("boost_mod") + "-modified"
+    if m.group("boost_short"):
+        return m.group("boost_short") + "-mod."
+    return m.group("versioned")
+
+
+def display_names(text):
+    """Supplier names as displayed: the adjusted configurations as `-modified` (`-mod.`),
+    no version in any name (the environment table states the versions)."""
+    return _DISPLAY_NAME.sub(_display_name, text)
+
+
+def display_text(text):
+    """Every display form: AVX2 / AVX-512 and the supplier names."""
+    return display_names(display_caps(text))
+
+
+def tick_labels(labels):
+    """Tick labels in their display form (display_text); set_[xy]ticklabels takes these,
+    since a tick label is drawn from its formatter, not from a Text object kept until save."""
+    return [display_text(str(s)) for s in labels]
+
+
 def apply_display_caps(fig):
     from matplotlib.text import Text
+    # Tick labels are drawn anew from their formatter at save time, so labels given to
+    # set_[xy]ticklabels pass through tick_labels() where they are set.
     for t in fig.findobj(Text):
         s = t.get_text()
-        if s and ("avx" in s):
-            t.set_text(display_caps(s))
+        if s:
+            d = display_text(s)
+            if d != s:
+                t.set_text(d)
 
 
 def save(fig, outdir, stem):
@@ -548,7 +597,7 @@ def _tex_escape_outside_math(t):
 def _plain(text):
     # " | " becomes "; ": a bare `|` in LaTeX text mode does not set as a bar.
     text = text.replace("   |   ", "; ").replace(" | ", "; ")
-    return display_caps(text)            # AVX2 / AVX-512, as on the canvas
+    return display_text(text)            # AVX2 / AVX-512 and supplier names, as on the canvas
 
 
 def caption_flush(outdir, stem):

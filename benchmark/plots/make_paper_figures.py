@@ -348,7 +348,7 @@ def write_hardware(runs, outdir, prov=None):
              "## Generators", "", "| program | version |", "|---|---|"]
     lines += [f"| {name} | {ver} |" for name, ver in mp.generator_versions()]
     lines.append("")
-    vor, verdict = mp.version_of_record([(r["label"], pv) for r, pv in rows])
+    vor, verdict = mp.version_of_record([(r["label"], pv, r["dir"]) for r, pv in rows])
     lines += vor
     print(f"version of record: {verdict}")
     if not rows:
@@ -387,7 +387,7 @@ def write_hardware(runs, outdir, prov=None):
                 lines += [f"- {t}" for t in facts]
                 lines.append("")
     path = os.path.join(outdir, "HARDWARE.md")
-    open(path, "w").write("\n".join(lines) + "\n")
+    open(path, "w").write(style.display_names("\n".join(lines) + "\n"))
     return path
 
 

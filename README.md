@@ -80,7 +80,7 @@ make reproduce
 
 runs the full benchmark behind the accompanying paper on this machine: it downloads the
 evaluation corpus and the external implementations it needs, builds the benchmark, runs every
-stage and writes the figures and tables of the paper. It takes <!-- durations:hours -->about 18 hours<!-- /durations:hours --> on a machine
+stage and writes the figures and tables of the paper. It takes <!-- durations:hours -->about 8 hours<!-- /durations:hours --> on a machine
 with an NVIDIA A100 GPU, downloads not included. The GPU part runs where `nvcc` and an NVIDIA
 GPU are found; `make reproduce GPU=no` runs the CPU part only, `CPU=no` the GPU part only.
 On a terminal it asks at most one question: whether to download KAUST CuBesselK, after
@@ -92,10 +92,15 @@ needs a second run on a CPU of the other vendor (Intel, AMD). The system softwar
 and the details are in
 [`docs/benchmark.md`, "Replicating the published results"](docs/benchmark.md#replicating-the-published-results).
 
+The run records behind the paper are attached to the GitHub release `v0.9.5` as
+`libmatern-0.9.5-runs.tar.gz`; unpacked in the repository root, they fill `benchmark/runs/`, and
+`make figures && make tables` draw the paper's figures and tables from them without a new run.
+
 The figures and tables written here may differ from those printed in the paper in their sizing
 and captions: page width, legend layout, font size, and the wording of captions and notes.
 The values they show are read from the run records, so the same runs give the same numbers.
-`make figures` and `make tables` write them again from the recorded runs.
+`make figures` and `make tables` write them again from the recorded runs; they overwrite their
+files but keep those of an earlier run set, which `make clean-results` removes first.
 
 ## Building
 

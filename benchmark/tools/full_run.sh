@@ -108,21 +108,20 @@ EOF
 # benchmark/durations.tsv (make durations); do not edit by hand.
 text_durations() {
     cat <<'EOF'
-  The full run takes about 18 hours on one machine with an A100 GPU, most of it the CPU
+  The full run takes about 8 hours on one machine with an A100 GPU, most of it the CPU
   ladders. The ladders time every rung up to 2^21 points on its own and the rungs from
   2^22 up in one cumulative pass per repetition (LADDER_PASS_FROM, default 2^22);
   LADDER_PASS_FROM=off times every rung on its own and about doubles the ladder time.
-  Durations of the published run (benchmark/durations.tsv), as the wall time of each batch
-  job, build included (these runs record no times); those marked log are from the time
-  stamps of the run's log.  AMD: AMD EPYC 9454; Intel: Intel Xeon Platinum 8358; A100:
-  NVIDIA A100 80GB PCIe.
-      ladders (up to 2^25 points)   12.1 h (AMD), 14.3 h (Intel)
-      accuracy and suppliers        2.0 h (AMD), 2.3 h (Intel)
-        of it the KAUST rows        1.7 h (AMD, log), 1.9 h (Intel, log)
-      Levin A/B                     10 min (AMD), 13 min (Intel)
-      thread scaling                14 min (AMD), 15 min (Intel)
-      prefactor fold                5 min (AMD), 6 min (Intel)
-      GPU (core, Levin, threads)    46 min (A100)
+  Durations of the published run (benchmark/durations.tsv), as each run records them
+  (TIMES.txt: the wall time of its runner, build excluded).  AMD: AMD EPYC 9454; Intel:
+  Intel Xeon Platinum 8358; A100: NVIDIA A100 80GB PCIe.
+      ladders (up to 2^25 points)   5.1 h (AMD), 6.0 h (Intel)
+      accuracy and suppliers        50 min (AMD), 58 min (Intel)
+        of it the KAUST rows        43 min (AMD), 46 min (Intel)
+      Levin A/B                     4 min (AMD), 5 min (Intel)
+      thread scaling                5 min (AMD), 6 min (Intel)
+      prefactor fold                2 min (AMD), 2 min (Intel)
+      GPU (core, Levin, threads)    29 min (A100)
 EOF
 }
 # END durations

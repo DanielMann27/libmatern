@@ -437,7 +437,7 @@ def write_index(out, bymach, runs_, pdflatex):
               "Each run is named by its stamp and stage, with its machine.", ""]
     for r in runs_:
         lines.append(f"- `{r['label']}` ({mpf.machine_of(r)})")
-    vor, verdict = mp.version_of_record([(r["label"], mpf.read_provenance(r["dir"]))
+    vor, verdict = mp.version_of_record([(r["label"], mpf.read_provenance(r["dir"]), r["dir"])
                                          for r in runs_])
     lines += [""] + vor
     print(f"version of record: {verdict}")
@@ -464,7 +464,7 @@ def write_index(out, bymach, runs_, pdflatex):
     lines.append(f"| pdflatex | {pdflatex} |")
     lines += ["", "Regenerate with `make tables`; `make tables "
               "ARGS=--list` prints what it would use and writes nothing."]
-    open(os.path.join(out, "README.md"), "w").write("\n".join(lines) + "\n")
+    open(os.path.join(out, "README.md"), "w").write(style.display_names("\n".join(lines) + "\n"))
 
 
 if __name__ == "__main__":

@@ -808,6 +808,15 @@ run "manifest checksums the .cu sources" bash -c '
     grep -q "benchmark/benchmark_gpu.cu"  "'"$LAST"'/MANIFEST.txt" &&
     grep -q "src/backends/cuda.cu"        "'"$LAST"'/MANIFEST.txt"'
 
+# make clean-results removes the two generated sets and nothing else (the runs stay).
+run "clean-results: only the two sets" bash -c '
+    [ "$(MAKEFLAGS= make -n --no-print-directory clean-results)" = \
+      "rm -rf benchmark/plots/paper-final benchmark/tables/paper" ]'
+
+# Version of record: a run at another commit is compared with the generators' tree (git diff
+# in a checkout, else the run's MANIFEST.txt), with an edited and a removed source as controls.
+run "version of record: what differs" "$PY" benchmark/tests/test_version_of_record.py
+
 echo "== stage 5: the two A/B stages =="
 
 # The stage selector rejects an unknown STAGES value.
@@ -1529,6 +1538,45 @@ run "PYTHON search skips an old stack"  bash -c '
 run "tables refuses an old stack" bash -c '
     o=$(MAKEFLAGS= make -s --no-print-directory tables PYTHON="'"$TMP"'/py_old/python3" 2>&1)
     [ $? -ne 0 ] && echo "$o" | grep -q "below the tested minimum"'
+# --exact: only the published versions; the search takes them before a stack at the minimum.
+fakepy pins 2.2.5 "" 3.11.0
+run "py_stack --exact: published is 0" "$TMP/py_pins/python3" tools/py_stack.py --exact
+run "py_stack --exact: minimum is 1"   bash -c '
+    ! "'"$TMP"'/py_floor/python3" tools/py_stack.py --exact >/dev/null'
+run "PYTHON search prefers published"   bash -c '
+    o=$(env -u PYTHON MAKEFLAGS= make -s --no-print-directory python-info \
+        PYTHON_CANDIDATES="'"$TMP"'/py_floor/python3 '"$TMP"'/py_pins/python3")
+    echo "$o" | grep -q "^PYTHON = '"$TMP"'/py_pins/python3 -B"'
+# --base: the interpreter make externals builds .venv/ from.  Stand-ins print a version for
+# the probe; the one that exits 1 has no venv module.
+fakebase(){ printf '#!/bin/sh\necho %s\nexit %s\n' "$2" "${3:-0}" > "$TMP/base_$1"; chmod +x "$TMP/base_$1"; }
+fakebase 38 3.8.10; fakebase 39 3.9.21; fakebase 310 3.10.4; fakebase 312 3.12.9; fakebase nov 3.13.1 1
+export TMP
+run "--base: 3.12 before 3.9"          bash -c '
+    o=$(env -u PYTHON_BASE python3 tools/py_stack.py --base "$TMP/base_39" "$TMP/base_312")
+    [ $? -eq 0 ] && [ "$o" = "pins $TMP/base_312 3.12.9" ]'
+run "--base: 3.10 gives the floors" bash -c '
+    o=$(env -u PYTHON_BASE python3 tools/py_stack.py --base "$TMP/base_310")
+    [ $? -eq 1 ] && [ "$o" = "floors $TMP/base_310 3.10.4" ]'
+run "--base: 3.8 gives none"           bash -c '
+    o=$(env -u PYTHON_BASE python3 tools/py_stack.py --base "$TMP/base_38")
+    [ $? -eq 2 ] && echo "$o" | grep -q "^none .*base_38 is Python 3.8.10"'
+run "--base: no venv module gives none" bash -c '
+    o=$(env -u PYTHON_BASE python3 tools/py_stack.py --base "$TMP/base_nov")
+    [ $? -eq 2 ] && echo "$o" | grep -q "has no venv module"'
+run "--base: PYTHON_BASE decides"      bash -c '
+    o=$(PYTHON_BASE="$TMP/base_38" python3 tools/py_stack.py --base "$TMP/base_312"); [ $? -eq 2 ]'
+# The refusal names the step that helps: a Python to install where make externals cannot help
+# (no usable base), make externals where it can (the control).
+run "tables: no base -> install Python" bash -c '
+    o=$(PYTHON_BASE="$TMP/base_38" MAKEFLAGS= make -s --no-print-directory tables \
+        PYTHON="$TMP/py_old/python3" 2>&1)
+    [ $? -ne 0 ] && echo "$o" | grep -q -- "-- install Python 3.11 or newer" &&
+    ! echo "$o" | grep -q -- "-- make externals"'
+run "tables: 3.12 base -> make externals" bash -c '
+    o=$(PYTHON_BASE="$TMP/base_312" MAKEFLAGS= make -s --no-print-directory tables \
+        PYTHON="$TMP/py_old/python3" 2>&1)
+    [ $? -ne 0 ] && echo "$o" | grep -q -- "-- make externals (installs the published versions"'
 
 echo
 echo "  $pass passed, $fail failed"

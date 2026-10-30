@@ -1,7 +1,7 @@
 """runs.py -- run-directory readers shared by the figure and table generators: STATUS,
 schema-checked CSV rows, machine names from PROVENANCE.txt and the accuracy-detail
 histograms."""
-import csv, os, platform, re, subprocess
+import csv, hashlib, os, platform, re, subprocess
 
 # style imports this module only inside a function, so there is no import cycle.
 import style as _style
@@ -73,10 +73,139 @@ def run_commit(pv):
             gd[0] if gd else "not recorded")
 
 
+# The figure and table generators: the files that draw from the run records.
+GENERATOR_DIRS = ("benchmark/plots/", "benchmark/tables/")
+# The test suites: the benchmark's (run_tests.sh) and the library's (make check).
+TEST_DIRS = ("benchmark/tests/", "test/")
+# MANIFEST.txt paths a run made or downloaded rather than read from the tree: the build
+# outputs and the KAUST files (run_benchmark.sh, the MANIFEST.txt block).
+MANIFEST_MADE = ("build/", "references/build/", "references/kaust_logbesselk/upstream/")
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def manifest_sources(run_dir):
+    """{path: sha256} of the tree files a run's MANIFEST.txt records.  Absolute paths and the
+    corpus files under data/<family>/ are left out: the run checked the corpus against
+    data/MANIFEST.md, whose own digest is kept."""
+    out = {}
+    try:
+        lines = open(os.path.join(run_dir, "MANIFEST.txt"), errors="replace").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        f = line.split(None, 1)
+        if len(f) != 2 or not re.fullmatch(r"[0-9a-f]{64}", f[0]):
+            continue
+        path = f[1].strip()
+        if path.startswith("/") or (path.startswith("data/") and path.count("/") > 1):
+            continue
+        out[path] = f[0]
+    return out
+
+
+def _kinds(paths):
+    """`paths` in words, grouped as the generators, the tests (benchmark/tests/, test/), the
+    documentation (*.md, docs/) and the rest by name."""
+    gen = [p for p in paths if p.startswith(GENERATOR_DIRS)]
+    tst = [p for p in paths if p not in gen and p.startswith(TEST_DIRS)]
+    doc = [p for p in paths if p not in gen and p not in tst
+           and (p.endswith(".md") or p.startswith("docs/"))]
+    rest = [p for p in paths if p not in gen and p not in tst and p not in doc]
+    parts = []
+    for group, name in ((gen, "the figure and table generators"), (tst, "the tests"),
+                        (doc, "the documentation")):
+        if group:
+            parts.append(f"{name} ({len(group)} file{'s' * (len(group) > 1)})")
+    if len(rest) > 8:
+        tops = {}
+        for p in rest:
+            top = p.split("/")[0] + "/" if "/" in p else p
+            tops[top] = tops.get(top, 0) + 1
+        parts.append(", ".join(f"`{t}` ({n})" for t, n in sorted(tops.items())))
+    else:
+        parts += [f"`{p}`" for p in rest]
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def source_difference(commit, run_dirs):
+    """(detail, summary) for the runs at `commit` against the tree the generators run from.
+
+    In a git checkout that holds `commit`, `git diff --name-only <commit> HEAD` and the
+    uncommitted changes name every differing file.  Otherwise (an archive, or a commit the
+    checkout lacks) the sources the runs' MANIFEST.txt records are hashed in this tree; that
+    list holds the library, the benchmark drivers, the supplier sources and the Makefile, not
+    the generators, the shell runners or the documentation."""
+    top = _git("rev-parse", "--show-toplevel")
+    if (top and os.path.realpath(top) == _TREE and re.fullmatch(r"[0-9a-f]{7,40}", commit)
+            and _git("cat-file", "-e", commit + "^{commit}") is not None):
+        changed = set((_git("diff", "--name-only", commit, "HEAD") or "").splitlines())
+        # tracked files changed against HEAD, staged or not (untracked files do not count, as in
+        # generator_commit)
+        changed |= set((_git("diff", "--name-only", "HEAD") or "").splitlines())
+        paths = sorted(changed)
+        how = f"`git diff --name-only {commit[:12]}` against this checkout, uncommitted changes included"
+        if not paths:
+            return f"no file differs ({how})", "no file differs"
+        words = _kinds(paths)
+        detail = (f"{len(paths)} file{'s' * (len(paths) > 1)} differ{'s' * (len(paths) == 1)} "
+                  f"({how}): {words}")
+        if len(paths) <= 12:
+            detail += "; " + ", ".join(f"`{p}`" for p in paths)
+        return detail, "the files that differ are " + words
+    recorded = {}
+    for d in run_dirs:
+        for path, digest in manifest_sources(d).items():
+            recorded.setdefault(path, set()).add(digest)
+    if not recorded:
+        return ("no run at this commit records a MANIFEST.txt with sources, so nothing is "
+                "compared", "nothing is compared (no MANIFEST.txt)")
+    src, made = {"same": [], "differ": [], "absent": []}, {"same": [], "differ": [], "absent": []}
+    for path, digests in sorted(recorded.items()):
+        group = made if path.startswith(MANIFEST_MADE) else src
+        full = os.path.join(_TREE, path)
+        if not os.path.isfile(full):
+            group["absent"].append(path)
+        elif _sha256(full) in digests and len(digests) == 1:
+            group["same"].append(path)
+        else:
+            group["differ"].append(path)
+    n = sum(len(v) for v in src.values())
+    detail = (f"of the {n} sources the runs' MANIFEST.txt records, {len(src['same'])} are "
+              f"identical in this tree")
+    if src["differ"]:
+        detail += f", {len(src['differ'])} differ: " + _kinds(src["differ"])
+    if src["absent"]:
+        detail += f", {len(src['absent'])} are not in it: " + _kinds(src["absent"])
+    m = sum(len(v) for v in made.values())
+    if m:
+        x = len(made["absent"])
+        detail += (f"; of the {m} file{'s' * (m > 1)} the runs built or downloaded, "
+                   f"{len(made['same'])} identical here, {len(made['differ'])} differing and "
+                   f"{x} {'is' if x == 1 else 'are'} not here")
+    detail += ("; the generators, the shell runners and the documentation are not recorded "
+               "in MANIFEST.txt")
+    if src["differ"] or src["absent"]:
+        k, a = len(src["differ"]), len(src["absent"])
+        summary = (f"{k} of the {n} recorded sources differ{'s' * (k == 1)} and "
+                   f"{a} {'is' if a == 1 else 'are'} missing (MANIFEST.txt)")
+    else:
+        summary = f"all {n} sources the runs record are identical (MANIFEST.txt)"
+    return detail, summary
+
+
 def version_of_record(runs):
     """(markdown lines, verdict): the release and commit of the generators and of each run
-    ([(label, PROVENANCE dict)]), and whether all are one version of record -- one commit,
-    with no uncommitted changes recorded."""
+    ([(label, PROVENANCE dict)] or [(label, PROVENANCE dict, run directory)]), and whether all
+    are one version of record -- one commit, with no uncommitted changes recorded.  When they
+    are not, each run commit other than the generators' is compared with the generators'
+    tree (source_difference): the runs' directories, when given, supply their MANIFEST.txt."""
     gr, gc, gd = generator_commit()
     lines = ["## Version of record", "",
              "The release and commit of the generators that wrote this file and of each run",
@@ -84,19 +213,32 @@ def version_of_record(runs):
              "`PROVENANCE.txt`).", "",
              "| | release | commit | uncommitted changes |", "|---|---|---|---|",
              f"| generators | {gr} | `{gc}` | {gd} |"]
-    commits, dirty = {gc}, [gd]
-    for label, pv in runs:
+    commits, dirty, at = {gc}, [gd], {}
+    for run in runs:
+        label, pv = run[0], run[1]
         r, c, d = run_commit(pv)
         lines.append(f"| run `{label}` | {r} | `{c}` | {d} |")
         commits.add(c)
         dirty.append(d)
+        at.setdefault(c, []).append((label, run[2] if len(run) > 2 else None))
     if len(commits) == 1 and gc != "not recorded":
         verdict = (f"the generators and every run are at commit {gc[:12]}"
                    + ("" if all(d == "no" for d in dirty) else
                       "; uncommitted changes are not ruled out for every one of them"))
-    else:
-        verdict = ("the generators and the runs are NOT at one commit: "
-                   + ", ".join(sorted(c[:12] for c in commits)))
+        return lines + ["", verdict[0].upper() + verdict[1:] + ".", ""], verdict
+    verdict = ("the generators and the runs are NOT at one commit: "
+               + ", ".join(sorted(c[:12] for c in commits)))
+    diff_lines, summaries = [], []
+    for c in sorted(at):
+        if c == gc or c == "not recorded":
+            continue
+        detail, summary = source_difference(c, [d for _, d in at[c] if d])
+        names = ", ".join(f"`{label}`" for label, _ in at[c])
+        diff_lines.append(f"- runs at `{c[:12]}` ({names}): {detail}.")
+        summaries.append(f"against the runs at {c[:12]}, {summary}")
+    if diff_lines:
+        lines += ["", "What the generators' tree changes against each run commit:", ""] + diff_lines
+        verdict += "; " + "; ".join(summaries)
     return lines + ["", verdict[0].upper() + verdict[1:] + ".", ""], verdict
 
 

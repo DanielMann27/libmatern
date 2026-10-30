@@ -94,7 +94,7 @@ probe() {
             esac
         fi
         CHANGES="the rendering of the figures (layout, text placement); no value in a figure or table (the generators compute in plain Python)"
-        MATCH="PYTHON=<python3 with $PY_PINS>" ;;
+        MATCH="PYTHON=<python3 with $PY_PINS>, or make externals, which installs them into .venv/ from a Python 3.11 or newer (make python-info names the next step)" ;;
     tex)
         NAME="pdflatex"; PUB=$PUB_TEX; WHERE="pdflatex on PATH"
         local l

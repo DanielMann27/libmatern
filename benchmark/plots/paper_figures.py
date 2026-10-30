@@ -683,7 +683,7 @@ def fig_assembly(plt, sup, acc, outdir, stamp, family="z_nu", arch="",
         _band(ax, 0.5)
         ax.set_yscale("log")
         ax.set_xticks(range(len(sups)))
-        ax.set_xticklabels(sups, rotation=40, ha="right")
+        ax.set_xticklabels(style.tick_labels(sups), rotation=40, ha="right")
         # the counts and the direction of the spread go to HARDWARE.md
         if _clamped:
             clip[law] = (len(_clamped), _worst_off)
@@ -1094,7 +1094,7 @@ def _box_modes_at(ax, rows, modes, n, raw):
     ax.set_xlim(-0.6, len(modes) - 0.4)
     ax.set_ylim(max(0.0, lo - pad), top)
     ax.set_xticks(range(len(modes)))
-    ax.set_xticklabels(modes)
+    ax.set_xticklabels(style.tick_labels(modes))
     ax.set_ylabel("Cost  [ns / element]")
     ax.grid(True, axis="y", alpha=0.25, lw=0.5)
     # box-plot key on the canvas (the notes go to HARDWARE.md)
@@ -1518,7 +1518,7 @@ def fig_gpu_boost_shortcut(plt, rows, outdir, stamp, arch=""):
     _what = []
     for dev, adapted, sel in panels:
         prec = sel[0].get("precision", "double").replace("-", " ")
-        _what.append("the adapted GPU implementation using the recurrence rule"
+        _what.append("the modified GPU implementation using the recurrence rule"
                      if adapted else
                      "the %s implementation in %s precision"
                      % ("host CPU" if dev == "cpu" else "GPU", prec))
@@ -1747,7 +1747,7 @@ def fig_levin(plt, lev, outdir, stamp, device="cpu", backend="avx512", arch="",
                             xytext=(4, 0), textcoords="offset points",
                             fontsize=style.FS_ANNOT, va="center", color=cc)
         ax.set_yticks(ypos)
-        ax.set_yticklabels(ylab)
+        ax.set_yticklabels(style.tick_labels(ylab))
         ax.set_ylim(len(laws) - 0.4, -0.6)
         v = [x for x in span if x > 0]
         if v and max(v) / min(v) >= 10.0:
@@ -1856,7 +1856,7 @@ def fig_fold(plt, fold, outdir, stamp, arch="", family="z_nu"):
                 if _ok(v) and v > 0:
                     pts.append((y, a, v, r))
         ax.set_yticks(range(len(laws)))
-        ax.set_yticklabels([LAW_LABEL.get(l, l) for l in laws])
+        ax.set_yticklabels(style.tick_labels([LAW_LABEL.get(l, l) for l in laws]))
         ax.set_ylim(len(laws) - 0.4, -0.6)
         ax.set_xlabel(lab)
         ax.grid(True, axis="x", alpha=0.25, lw=0.5)
@@ -2285,7 +2285,7 @@ def _dist_axes(plt, names, laws, height=None, sharex=True):
 def _dist_yaxis(ax, names):
     ax.set_ylim(-0.7, len(names) - 0.3)
     ax.set_yticks(range(len(names)))
-    ax.set_yticklabels([names[len(names) - 1 - k] for k in range(len(names))])
+    ax.set_yticklabels(style.tick_labels([names[len(names) - 1 - k] for k in range(len(names))]))
 
 
 def _widest_band_gap(ends):

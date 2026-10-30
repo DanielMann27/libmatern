@@ -133,9 +133,14 @@ def ignored(path, patterns):
 
 
 def files_on_disk():
-    """The files of this tree that .gitignore does not exclude."""
-    patterns = [l.strip() for l in open('.gitignore', encoding='utf-8')
-                if l.strip() and not l.startswith('#')]
+    """The files of this tree that .gitignore does not exclude; None without a .gitignore,
+    since the downloads and build outputs it names cannot then be told from the tree's own
+    files."""
+    try:
+        patterns = [l.strip() for l in open('.gitignore', encoding='utf-8')
+                    if l.strip() and not l.startswith('#')]
+    except OSError:
+        return None
     out = []
     for d, dirs, files in os.walk('.'):
         dirs[:] = [x for x in dirs if x != '.git']
@@ -197,9 +202,14 @@ KAUST_MARKERS = re.compile(r'1\.14516408366268311786898152867|1\.882645524949671
                            r"|Takekawa's implementation")
 KAUST_EXEMPT = ('references/kaust_logbesselk/derive_port.py',
                 'references/kaust_logbesselk/PROVENANCE.md', 'tools/audit.py')
-# Without a git index: the files on disk that .gitignore does not exclude.
+# Without a git index: the files on disk that .gitignore does not exclude.  Without either
+# the check cannot say which files are the tree's, so it fails and says why.
 bad = []
-for t in (TRACKED if TRACKED is not None else files_on_disk()):
+FILES = TRACKED if TRACKED is not None else files_on_disk()
+if FILES is None:
+    bad = ["neither a git index nor .gitignore: the files of this tree cannot be told from "
+           "downloads and build outputs"]
+for t in FILES or []:
     if t in KAUST_EXEMPT or t.startswith('data/') or not os.path.isfile(t):
         continue
     try:
@@ -210,7 +220,10 @@ for t in (TRACKED if TRACKED is not None else files_on_disk()):
             if KAUST_MARKERS.search(l)]
 check("no KAUST CuBesselK text is tracked" if TRACKED is not None else
       "no KAUST CuBesselK text in the files of this tree (not a git checkout)", bad,
-      "the KAUST kernels are ported on the user's machine by make kaust DOWNLOAD=yes")
+      "the KAUST kernels are ported on the user's machine by make kaust DOWNLOAD=yes"
+      if FILES is not None else
+      "the .gitignore of the release belongs to the tree (git archive and the release's source "
+      "archive include it)")
 
 # 11. One release in include/matern.h (STRING and MAJOR.MINOR.PATCH), CITATION.cff
 # (the top-level `version:` only) and README.md ("libmatern X.Y.Z").

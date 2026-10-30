@@ -4,16 +4,16 @@
 # time of the runner, build excluded); slurm-wall = wall time of the batch job, build
 # included; log = time stamps of the run's log.
 part	cpu	device	seconds	run	source
-ladders	AMD EPYC 9454		43560	2026-10-24T23-35Z_uc3n095_cpu-ladder	slurm-wall
-ladders	Intel Xeon Platinum 8358		51480	2026-10-25T09-03Z_uc2n621_cpu-ladder	slurm-wall
-rest	AMD EPYC 9454		7200	2026-10-24T23-27Z_uc3n096_cpu-rest	slurm-wall
-rest	Intel Xeon Platinum 8358		8280	2026-10-25T00-16Z_uc2n752_cpu-rest	slurm-wall
-kaust	AMD EPYC 9454		6120	2026-10-24T23-27Z_uc3n096_cpu-rest	log
-kaust	Intel Xeon Platinum 8358		6758	2026-10-25T00-16Z_uc2n752_cpu-rest	log
-levin	AMD EPYC 9454		600	2026-10-24T23-36Z_uc3n067_cpu-levin	slurm-wall
-levin	Intel Xeon Platinum 8358		780	2026-10-24T21-24Z_uc2n751_cpu-levin	slurm-wall
-threads	AMD EPYC 9454		840	2026-10-24T21-36Z_uc3n070_cpu-threads	slurm-wall
-threads	Intel Xeon Platinum 8358		900	2026-10-24T21-21Z_uc2n601_cpu-threads	slurm-wall
-fold	AMD EPYC 9454		300	2026-10-24T23-43Z_uc3n046_cpu-fold	slurm-wall
-fold	Intel Xeon Platinum 8358		360	2026-10-24T21-37Z_uc2n751_cpu-fold	slurm-wall
-gpu	Intel Xeon Platinum 8358	NVIDIA A100 80GB PCIe	2760	2026-10-26T01-46Z_uc2n912_gpu	slurm-wall
+ladders	AMD EPYC 9454		18453	2026-10-30T03-23Z_uc3n068_cpu	record
+ladders	Intel Xeon Platinum 8358		21721	2026-10-28T00-24Z_uc2n809_cpu	record
+rest	AMD EPYC 9454		2986	2026-10-30T03-23Z_uc3n068_cpu	record
+rest	Intel Xeon Platinum 8358		3452	2026-10-28T00-24Z_uc2n809_cpu	record
+kaust	AMD EPYC 9454		2586	2026-10-30T03-23Z_uc3n068_cpu	record
+kaust	Intel Xeon Platinum 8358		2787	2026-10-28T00-24Z_uc2n809_cpu	record
+levin	AMD EPYC 9454		241	2026-10-30T09-20Z_uc3n068_cpu-levin	record
+levin	Intel Xeon Platinum 8358		319	2026-10-28T07-24Z_uc2n809_cpu-levin	record
+threads	AMD EPYC 9454		318	2026-10-30T09-26Z_uc3n068_cpu-threads	record
+threads	Intel Xeon Platinum 8358		337	2026-10-28T07-31Z_uc2n809_cpu-threads	record
+fold	AMD EPYC 9454		116	2026-10-30T09-24Z_uc3n068_cpu-fold	record
+fold	Intel Xeon Platinum 8358		117	2026-10-28T07-29Z_uc2n809_cpu-fold	record
+gpu	Intel Xeon Platinum 8358	NVIDIA A100 80GB PCIe	1712	2026-10-28T01-41Z_uc2n910_gpu	record
